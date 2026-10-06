@@ -15,8 +15,8 @@ import unicodedata
 import zipfile
 from pathlib import PurePosixPath
 
-from . import db, storage
-from .taxonomy import CATEGORIES, KIND_LABELS, SPACE_LABELS, category_label
+from . import db, locales, storage
+from .config import get_settings
 
 log = logging.getLogger(__name__)
 
@@ -32,19 +32,24 @@ def _yaml(value) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-def _folder(it: dict) -> str:
+def _folder(it: dict, lang: str = "fr") -> str:
+    tx = locales.text(lang)
     if it.get("space") == "perso":
-        cat = it.get("category")
-        return f"KB/Perso/{CATEGORIES[cat][1]}" if cat in CATEGORIES else "KB/Perso/Divers"
-    return "KB/Veille"
+        plural = locales.category_plurals(lang).get(it.get("category") or "")
+        return f"KB/{tx['perso_folder']}/{plural or tx['other']}"
+    return f"KB/{tx['feed_folder']}"
 
 
-def _markdown(it: dict, names: dict[str, str], related: list[tuple[str, str]], file_ref: str | None) -> str:
+def _markdown(it: dict, names: dict[str, str], related: list[tuple[str, str]], file_ref: str | None,
+              lang: str = "fr") -> str:
+    """`it` already localized (see export_zip_file): only headings and labels depend on `lang` here."""
+    tx = locales.text(lang)
+    colon = " :" if lang == "fr" else ":"
     iid = str(it["id"])
     fm = {
         "title": it["title"],
-        "space": SPACE_LABELS.get(it.get("space") or "main"),
-        "category": category_label(it.get("category")),
+        "space": locales.space_labels(lang).get(it.get("space") or "main"),
+        "category": locales.category_labels(lang).get(it.get("category") or ""),
         "type": it["kind"],
         "source": it["source_url"],
         "author": it["author"],
@@ -57,37 +62,39 @@ def _markdown(it: dict, names: dict[str, str], related: list[tuple[str, str]], f
     body = (it.get("content") or it.get("input_text") or "").strip()
     if it["kind"] == "note":
         # une note : le texte de l'utilisateur d'abord, en entier
-        lines += [body or "(vide)"]
+        lines += [body or tx["empty"]]
         if it["user_note"]:
-            lines += ["", f"> **Pourquoi je l'ai gardé :** {it['user_note']}"]
+            lines += ["", f"> **{tx['why']}{colon}** {it['user_note']}"]
     else:
-        lines.append(f"*{KIND_LABELS.get(it['kind'], it['kind'] or 'élément')}*"
+        lines.append(f"*{locales.kind_labels(lang).get(it['kind'], it['kind'] or tx['item'])}*"
                      + (f" — [source]({it['source_url']})" if it["source_url"] else ""))
         if it["user_note"]:
-            lines += ["", f"> **Pourquoi je l'ai gardé :** {it['user_note']}"]
+            lines += ["", f"> **{tx['why']}{colon}** {it['user_note']}"]
     if file_ref:
-        lines += ["", f"Fichier d'origine : [{it.get('file_name') or 'fichier'}]({file_ref})"]
+        lines += ["", f"{tx['original_file']}{colon} [{it.get('file_name') or tx['file']}]({file_ref})"]
     if it["summary"]:
-        lines += ["", "## Résumé", it["summary"]]
+        lines += ["", f"## {tx['summary']}", it["summary"]]
     if it["key_points"]:
-        lines += ["", "## Points clés"] + [f"- {p}" for p in it["key_points"]]
+        lines += ["", f"## {tx['key_points']}"] + [f"- {p}" for p in it["key_points"]]
     if it["use_cases"]:
-        lines += ["", "## Utile pour"] + [f"- {u}" for u in it["use_cases"]]
+        lines += ["", f"## {tx['use_cases']}"] + [f"- {u}" for u in it["use_cases"]]
     if it["entities"]:
-        lines += ["", "## Entités", ", ".join(f"[[{e['name']}]]" for e in it["entities"])]
+        lines += ["", f"## {tx['entities']}", ", ".join(f"[[{e['name']}]]" for e in it["entities"])]
     if related:
-        lines += ["", "## Liés"] + [f"- [[{names[t]}]] — {r}" for t, r in related if t in names]
+        lines += ["", f"## {tx['related']}"] + [f"- [[{names[t]}]] — {r}" for t, r in related if t in names]
     if it["kind"] != "note" and body:
-        lines += ["", "## Contenu", body]
+        lines += ["", f"## {tx['content']}", body]
     return "\n".join(lines)
 
 
-def export_zip_file(include_files: bool = False) -> str:
-    """Écrit l'export dans un fichier temporaire (les fichiers d'origine peuvent peser lourd) et renvoie son chemin."""
-    items = db.fetchall(
+def export_zip_file(include_files: bool = False, lang: str | None = None) -> str:
+    """Écrit l'export dans un fichier temporaire (les fichiers d'origine peuvent peser lourd) et renvoie son chemin.
+    `lang` : langue des résumés, titres et intitulés (défaut : KB_LANGUAGE)."""
+    lang = locales.normalize(lang or get_settings().kb_language)
+    items = [locales.localized(it, lang) for it in db.fetchall(
         """select * from items
            where status = 'ready' or (kind = 'note' and input_text is not null)
-           order by created_at""")
+           order by created_at""")]
     links = db.fetchall("select source_id::text, target_id::text, reason from item_links")
     names: dict[str, str] = {}
     used: set[str] = set()
@@ -108,7 +115,7 @@ def export_zip_file(include_files: bool = False) -> str:
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
             for it in items:
                 iid = str(it["id"])
-                folder = _folder(it)
+                folder = _folder(it, lang)
                 file_ref = None
                 if include_files and it.get("file_path"):
                     stored = f"KB/Fichiers/{iid[:8]}-{PurePosixPath(it['file_path']).name}"
@@ -118,15 +125,15 @@ def export_zip_file(include_files: bool = False) -> str:
                         file_ref = "../" * depth + stored[3:].replace(" ", "%20")
                     except Exception:
                         log.warning("Fichier non exporté : %s", it["file_path"], exc_info=True)
-                z.writestr(f"{folder}/{names[iid]}.md", _markdown(it, names, related.get(iid, []), file_ref))
+                z.writestr(f"{folder}/{names[iid]}.md", _markdown(it, names, related.get(iid, []), file_ref, lang))
     except BaseException:
         os.unlink(path)
         raise
     return path
 
 
-def export_zip(include_files: bool = False) -> bytes:
-    path = export_zip_file(include_files)
+def export_zip(include_files: bool = False, lang: str | None = None) -> bytes:
+    path = export_zip_file(include_files, lang)
     try:
         with open(path, "rb") as f:
             return f.read()

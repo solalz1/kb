@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type TodoAction } from "../api";
+import { t } from "../i18n";
 
 const GROUPS: Record<string, string> = {
-  try: "À tester", read: "À lire", watch: "À regarder", follow: "À suivre", buy: "À acheter", do: "À faire",
+  try: t("À tester"), read: t("À lire"), watch: t("À regarder"), follow: t("À suivre"), buy: t("À acheter"), do: t("À faire"),
 };
 
 export default function Todo() {
@@ -26,21 +27,21 @@ export default function Todo() {
 
   return (
     <div className="page">
-      <h1 className="title">À faire</h1>
+      <h1 className="title">{t("À faire")}</h1>
       <p className="muted" style={{ maxWidth: "60ch" }}>
-        Ce que tes sauvegardes suggèrent de faire : outils à tester, papiers à lire, comptes à suivre.
+        {t("Ce que tes sauvegardes suggèrent de faire : outils à tester, papiers à lire, comptes à suivre.")}
       </p>
       <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-        <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Afficher aussi ce qui est fait
+        <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> {t("Afficher aussi ce qui est fait")}
       </label>
 
       {loaded && actions.length === 0 && (
-        <div className="empty"><p>Rien en attente. Les actions apparaissent ici quand un élément sauvegardé en suggère.</p></div>
+        <div className="empty"><p>{t("Rien en attente. Les actions apparaissent ici quand un élément sauvegardé en suggère.")}</p></div>
       )}
 
       {groups.map(([kind, list]) => (
         <div key={kind} className="todo-group">
-          <h2>{GROUPS[kind] ?? "Autres"}</h2>
+          <h2>{GROUPS[kind] ?? t("Autres")}</h2>
           {list.map((a) => (
             <div key={a.id} className={`todo-item${a.done ? " done" : ""}`}>
               <input type="checkbox" checked={a.done} onChange={() => toggle(a)} aria-label={a.text} />
@@ -48,7 +49,7 @@ export default function Todo() {
                 <div className="txt">{a.text}</div>
                 <div className="from">
                   <span className="dot" data-kind={a.item_kind ?? undefined} />
-                  <Link to={`/item/${a.item_id}`}>{a.item_title || "Source"}</Link>
+                  <Link to={`/item/${a.item_id}`}>{a.item_title || t("Source")}</Link>
                 </div>
               </div>
             </div>

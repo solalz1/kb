@@ -2,6 +2,7 @@ import { ArrowLeft, Loader2, Lock } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, type ItemDetail, type Space } from "../api";
+import { t } from "../i18n";
 import { CATEGORIES, categoryOf, isEditableNote, spaceHome } from "../perso";
 
 const DRAFT_KEY = "kb_note_draft";
@@ -39,7 +40,7 @@ export default function NoteEditor() {
   useEffect(() => {
     if (!id) return;
     api.item(id).then((it) => {
-      if (!isEditableNote(it)) { setError("Seules les notes écrites se modifient ici. Pour un lien ou un fichier, change le titre, la note ou les tags depuis sa fiche."); return; }
+      if (!isEditableNote(it)) { setError(t("Seules les notes écrites se modifient ici. Pour un lien ou un fichier, change le titre, la note ou les tags depuis sa fiche.")); return; }
       setOriginal(it);
       setForm({ title: it.title ?? "", content: it.content ?? it.input_text ?? "", space: it.space,
                 category: it.category ?? "", tags: "" });
@@ -60,7 +61,7 @@ export default function NoteEditor() {
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.content.trim()) { setError("Écris quelque chose avant d'enregistrer."); return; }
+    if (!form.content.trim()) { setError(t("Écris quelque chose avant d'enregistrer.")); return; }
     setBusy(true);
     try {
       if (editing && original) {
@@ -87,74 +88,74 @@ export default function NoteEditor() {
   const leave = () => { if (history.length > 1) nav(-1); else nav(spaceHome(form.space)); };
   // « Retour » garde le brouillon sur l'appareil ; « Abandonner » l'efface (après confirmation)
   const discard = () => {
-    if (!editing && form.content.trim() && !window.confirm("Effacer ce brouillon ?")) return;
+    if (!editing && form.content.trim() && !window.confirm(t("Effacer ce brouillon ?"))) return;
     if (!editing) writeDraft(null);
     leave();
   };
 
   if (editing && !original && !error) {
-    return <div className="page"><div className="status-line"><Loader2 size={16} className="spin" /> Chargement…</div></div>;
+    return <div className="page"><div className="status-line"><Loader2 size={16} className="spin" /> {t("Chargement…")}</div></div>;
   }
 
   return (
     <div className="page">
-      <button className="back" onClick={editing ? discard : leave}><ArrowLeft size={16} /> {editing ? "Annuler" : "Retour"}</button>
-      <h1 className="title">{editing ? "Modifier la note" : cat ? `Nouvelle note · ${cat.label}` : "Nouvelle note"}</h1>
+      <button className="back" onClick={editing ? discard : leave}><ArrowLeft size={16} /> {editing ? t("Annuler") : t("Retour")}</button>
+      <h1 className="title">{editing ? t("Modifier la note") : cat ? t("Nouvelle note · {category}", { category: cat.label }) : t("Nouvelle note")}</h1>
 
       {error && <div className="error-box">{error}</div>}
       {restored && (
         <div className="warn" style={{ marginBottom: 14 }}>
-          Brouillon restauré.{" "}
-          <button type="button" className="linkish" onClick={() => { setForm(fresh()); setRestored(false); }}>Repartir d'une page blanche</button>
+          {t("Brouillon restauré.")}{" "}
+          <button type="button" className="linkish" onClick={() => { setForm(fresh()); setRestored(false); }}>{t("Repartir d'une page blanche")}</button>
         </div>
       )}
       {(!editing || original) && (
         <form onSubmit={save} className="fiche sheet note-editor" data-kind="note" data-space={perso ? "perso" : undefined}>
           <div className="fiche-head">
-            <div className="modes small" role="group" aria-label="Espace">
-              <button type="button" aria-pressed={perso} onClick={() => set("space", "perso")}>Perso</button>
-              <button type="button" aria-pressed={!perso} onClick={() => set("space", "main")}>Veille</button>
+            <div className="modes small" role="group" aria-label={t("Espace")}>
+              <button type="button" aria-pressed={perso} onClick={() => set("space", "perso")}>{t("Perso")}</button>
+              <button type="button" aria-pressed={!perso} onClick={() => set("space", "main")}>{t("Veille")}</button>
             </div>
-            <span className="when"><Lock size={13} /> privée</span>
+            <span className="when"><Lock size={13} /> {t("privée")}</span>
           </div>
 
           {perso && (
-            <div className="chips wrap" role="group" aria-label="Catégorie">
+            <div className="chips wrap" role="group" aria-label={t("Catégorie")}>
               {CATEGORIES.map((c) => (
                 <button type="button" key={c.id} className="chip" aria-pressed={form.category === c.id}
                         onClick={() => set("category", form.category === c.id ? "" : c.id)}>{c.label}</button>
               ))}
             </div>
           )}
-          {perso && !form.category && <div className="hint" style={{ marginTop: 0 }}>Sans catégorie, Claude en choisit une à l'enregistrement.</div>}
+          {perso && !form.category && <div className="hint" style={{ marginTop: 0 }}>{t("Sans catégorie, Claude en choisit une à l'enregistrement.")}</div>}
 
-          <label className="sr-only" htmlFor="note-title">Titre</label>
+          <label className="sr-only" htmlFor="note-title">{t("Titre")}</label>
           <input id="note-title" className="title-input" value={form.title} onChange={(e) => set("title", e.target.value)}
-                 placeholder={editing ? "Titre" : "Titre (facultatif, sinon Claude en propose un)"} maxLength={300} />
+                 placeholder={editing ? t("Titre") : t("Titre (facultatif, sinon Claude en propose un)")} maxLength={300} />
 
-          <label className="sr-only" htmlFor="note-body">Texte</label>
+          <label className="sr-only" htmlFor="note-body">{t("Texte")}</label>
           <textarea id="note-body" ref={box} className="note-body" value={form.content} onChange={(e) => set("content", e.target.value)}
-                    placeholder={perso ? (cat?.placeholder ?? "Écris librement : une idée, une leçon, un objectif, une réflexion…")
-                                       : "Une idée, un compte rendu, une citation…"} autoFocus={!editing} />
+                    placeholder={perso ? (cat?.placeholder ?? t("Écris librement : une idée, une leçon, un objectif, une réflexion…"))
+                                       : t("Une idée, un compte rendu, une citation…")} autoFocus={!editing} />
 
           {cat?.charter && (
-            <p className="hint">Tes {cat.plural.toLowerCase()} font partie de ta charte : le mode Conseil les relit en entier à chaque question. Écris-les comme tu te les dirais.</p>
+            <p className="hint">{t("Tes {category} font partie de ta charte : le mode Conseil les relit en entier à chaque question. Écris-les comme tu te les dirais.", { category: cat.plural.toLowerCase() })}</p>
           )}
 
           {!editing && (
             <>
-              <label className="lbl" htmlFor="note-tags">Tags <span className="muted">(facultatif, séparés par des virgules)</span></label>
-              <input id="note-tags" className="field" value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="famille, travail, santé" />
+              <label className="lbl" htmlFor="note-tags">{t("Tags")} <span className="muted">{t("(facultatif, séparés par des virgules)")}</span></label>
+              <input id="note-tags" className="field" value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder={t("famille, travail, santé")} />
             </>
           )}
 
           <div className="editor-actions">
             <button className="btn primary" type="submit" disabled={busy || !form.content.trim()}>
-              {busy ? <Loader2 size={16} className="spin" /> : null} Enregistrer
+              {busy ? <Loader2 size={16} className="spin" /> : null} {t("Enregistrer")}
             </button>
-            <button className="btn ghost" type="button" onClick={discard}>{editing ? "Annuler" : "Abandonner"}</button>
+            <button className="btn ghost" type="button" onClick={discard}>{editing ? t("Annuler") : t("Abandonner")}</button>
             <span className="hint" style={{ margin: 0 }}>
-              {editing ? "Résumé, tags et liens sont refaits après l'enregistrement." : "Ton texte est gardé tel quel ; Claude ajoute résumé, tags et liens."}
+              {editing ? t("Résumé, tags et liens sont refaits après l'enregistrement.") : t("Ton texte est gardé tel quel ; Claude ajoute résumé, tags et liens.")}
             </span>
           </div>
         </form>

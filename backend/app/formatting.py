@@ -62,6 +62,8 @@ def source_card(n: int, it: dict) -> dict:
         "summary": (it.get("summary") or "")[:400],
         "space": it.get("space") or "main",
         "category": it.get("category"),
+        "translations": {code: {k: (v[:400] if k == "summary" else v) for k, v in tr.items() if k in ("title", "summary")}
+                         for code, tr in (it.get("translations") or {}).items()},
     }
 
 

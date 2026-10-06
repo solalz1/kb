@@ -239,6 +239,12 @@ def build_card(item: dict) -> str:
         lines.append("Points clés :\n" + "\n".join(f"- {p}" for p in item["key_points"]))
     if item.get("use_cases"):
         lines.append("Utile pour :\n" + "\n".join(f"- {u}" for u in item["use_cases"]))
+    for code, tr in (db.loads(item.get("translations")) or {}).items():
+        # the card in the second language too, so a question asked in that language finds it by its words
+        if tr.get("title") and tr["title"] != item.get("title"):
+            lines.append(f"Title ({code}): {tr['title']}")
+        if tr.get("summary"):
+            lines.append(f"Summary ({code}): {tr['summary']}")
     if item.get("tags"):
         lines.append("Tags : " + ", ".join(item["tags"]))
     if item.get("entities"):
@@ -310,6 +316,7 @@ def process(item: dict) -> None:
         "user_note": item.get("user_note"),
         "space": space,
         "category": category,
+        "translations": _translations(enr, title),
     }
 
     card = build_card(fields)
@@ -341,11 +348,12 @@ def process(item: dict) -> None:
         if current["space"] != "perso":
             fields["category"] = None
         fields["metadata"] = {**fields["metadata"], **{k: meta_now[k] for k in ("manual_title", "user_tags") if k in meta_now}}
+        fields["translations"] = _translations(enr, fields["title"])
         stale = card_built_with != [fields.get(k) for k in keys]
         c.execute(
             """update items set kind=%s, title=%s, source_url=%s, author=%s, author_url=%s, site_name=%s,
                       published_at=%s, language=%s, thumbnail_url=%s, content=%s, summary=%s, key_points=%s,
-                      tags=%s, entities=%s, use_cases=%s, genre=%s, metadata=%s, category=%s,
+                      tags=%s, entities=%s, use_cases=%s, genre=%s, metadata=%s, category=%s, translations=%s,
                       status='ready', error=null, locked_at=null, next_attempt_at=null
                where id=%s""",
             (
@@ -353,7 +361,7 @@ def process(item: dict) -> None:
                 fields["site_name"], fields["published_at"], fields["language"], fields["thumbnail_url"],
                 fields["content"], fields["summary"], db.jsonb(fields["key_points"]), fields["tags"],
                 db.jsonb(fields["entities"]), db.jsonb(fields["use_cases"]), fields["genre"],
-                db.jsonb(fields["metadata"]), fields["category"], item_id,
+                db.jsonb(fields["metadata"]), fields["category"], db.jsonb(fields["translations"]), item_id,
             ),
         )
         c.execute("delete from chunks where item_id = %s", (item_id,))
@@ -379,6 +387,19 @@ def process(item: dict) -> None:
     except Exception:
         log.warning("Calcul des liens impossible pour %s", item_id, exc_info=True)
     notion.wake()
+
+
+def _translations(enr: dict, title: str | None) -> dict:
+    """Second-language card from the enrichment. Its title only when ours is Claude's: a source title (article,
+    video, paper) or one the user wrote stays the same in every language."""
+    out = {}
+    for code, tr in (enr.get("translations") or {}).items():
+        tr = dict(tr)
+        if title != enr.get("title"):
+            tr.pop("title", None)
+        if tr:
+            out[code] = tr
+    return out
 
 
 def link_item(item_id: str, fields: dict) -> None:

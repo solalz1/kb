@@ -15,9 +15,8 @@ from datetime import datetime, timezone
 
 import httpx
 
-from . import db
+from . import db, locales
 from .config import get_settings
-from .taxonomy import CATEGORIES, KIND_LABELS, SPACE_LABELS, category_label
 
 log = logging.getLogger(__name__)
 
@@ -157,31 +156,51 @@ def _forget_pages() -> None:
 # Base et pages
 # ---------------------------------------------------------------------------
 
-def _schema() -> dict:
+def language() -> str:
+    """Language of the copy, chosen in the app's Settings (default: KB_LANGUAGE)."""
+    return locales.normalize(get_state().get("language"))
+
+
+def set_language(lang: str) -> dict:
+    """A new language means a new database, with its columns in that language: everything is copied again there
+    (the old database stays in Notion, untouched)."""
+    if lang not in locales.available():
+        raise ValueError(f"Langue non disponible : {lang} (au choix : {', '.join(locales.available())})")
+    _save_state(language=lang)
+    if lang != (get_state().get("db_language") or "fr"):
+        db.execute("update items set notion_synced_at = null where notion_synced_at is not null")
+    wake_event.set()
+    return status()
+
+
+def _schema(lang: str = "fr") -> dict:
     def select(names) -> dict:
         return {"type": "select", "select": {"options": [{"name": n} for n in names]}}
 
+    p = locales.notion_props(lang)
     return {
-        "Nom": {"type": "title", "title": {}},
-        "Espace": select(SPACE_LABELS.values()),
-        "Catégorie": select(label for label, _, _ in CATEGORIES.values()),
-        "Type": select(KIND_LABELS.values()),
-        "Tags": {"type": "multi_select", "multi_select": {"options": []}},
-        "Résumé": {"type": "rich_text", "rich_text": {}},
-        "Source": {"type": "url", "url": {}},
-        "Auteur": {"type": "rich_text", "rich_text": {}},
-        "Publié": {"type": "date", "date": {}},
-        "Ajouté": {"type": "date", "date": {}},
-        "Archivé": {"type": "checkbox", "checkbox": {}},
-        "Fiche KB": {"type": "url", "url": {}},
-        "ID KB": {"type": "rich_text", "rich_text": {}},
+        p["name"]: {"type": "title", "title": {}},
+        p["space"]: select(locales.space_labels(lang).values()),
+        p["category"]: select(locales.category_labels(lang).values()),
+        p["kind"]: select(locales.kind_labels(lang).values()),
+        p["tags"]: {"type": "multi_select", "multi_select": {"options": []}},
+        p["summary"]: {"type": "rich_text", "rich_text": {}},
+        p["source"]: {"type": "url", "url": {}},
+        p["author"]: {"type": "rich_text", "rich_text": {}},
+        p["published"]: {"type": "date", "date": {}},
+        p["added"]: {"type": "date", "date": {}},
+        p["archived"]: {"type": "checkbox", "checkbox": {}},
+        p["kb_url"]: {"type": "url", "url": {}},
+        p["kb_id"]: {"type": "rich_text", "rich_text": {}},
     }
 
 
-def ensure_database() -> dict:
+def ensure_database(lang: str | None = None) -> dict:
     state = get_state()
     parent = parent_page_id()
-    if state.get("data_source_id") and state.get("parent_page_id") == parent:
+    lang = lang or language()
+    db_lang = state.get("db_language") or "fr"        # databases made before the language choice are in French
+    if state.get("data_source_id") and state.get("parent_page_id") == parent and db_lang == lang:
         return state
     if state.get("data_source_id") or state.get("parent_page_id"):
         _forget_pages()
@@ -190,7 +209,7 @@ def ensure_database() -> dict:
             "parent": {"type": "page_id", "page_id": parent},
             "title": [{"type": "text", "text": {"content": "Knowledge base"}}],
             "icon": {"type": "emoji", "emoji": "🗂️"},
-            "initial_data_source": {"properties": _schema()},
+            "initial_data_source": {"properties": _schema(lang)},
         })
     except NotionError as exc:
         if exc.status in (403, 404):
@@ -202,7 +221,7 @@ def ensure_database() -> dict:
         raise NotionError(500, "no_data_source", "Notion n'a pas renvoyé de source de données pour la base créée")
     log.info("Base Notion créée : %s", created.get("url"))
     return _save_state(parent_page_id=parent, database_id=created["id"], data_source_id=sources[0]["id"],
-                       url=created.get("url"), created_at=_now())
+                       url=created.get("url"), created_at=_now(), db_language=lang)
 
 
 def _text(value, limit: int = 2000) -> list[dict]:
@@ -214,24 +233,26 @@ def _url(value: str | None) -> str | None:
     return value if value and len(value) <= 2000 and value.startswith(("http://", "https://")) else None
 
 
-def page_properties(it: dict) -> dict:
-    cat = category_label(it.get("category"))
+def page_properties(it: dict, lang: str = "fr") -> dict:
+    """`it` already localized (see upsert_page): only the labels depend on `lang` here."""
+    p, kinds, spaces = locales.notion_props(lang), locales.kind_labels(lang), locales.space_labels(lang)
+    cat = locales.category_labels(lang).get(it.get("category") or "")
     created = it.get("created_at")
     return {
-        "Nom": {"title": _text(it.get("title") or "(sans titre)")},
-        "Espace": {"select": {"name": SPACE_LABELS.get(it.get("space") or "main", "Veille")}},
-        "Catégorie": {"select": {"name": cat} if cat else None},
-        "Type": {"select": {"name": KIND_LABELS[it["kind"]]} if it.get("kind") in KIND_LABELS else None},
-        "Tags": {"multi_select": [{"name": str(t).replace(",", " ")[:100]} for t in (it.get("tags") or [])[:30]]},
-        "Résumé": {"rich_text": _text(it.get("summary"))},
-        "Source": {"url": _url(it.get("source_url"))},
-        "Auteur": {"rich_text": _text(it.get("author"), 500)},
-        "Publié": {"date": {"start": str(it["published_at"])[:10]} if it.get("published_at") else None},
-        "Ajouté": {"date": {"start": created.isoformat() if isinstance(created, datetime) else str(created)}
-                   if created else None},
-        "Archivé": {"checkbox": bool(it.get("archived"))},
-        "Fiche KB": {"url": _url(get_settings().item_url(str(it["id"])))},
-        "ID KB": {"rich_text": _text(it["id"])},
+        p["name"]: {"title": _text(it.get("title") or f"({locales.text(lang)['untitled']})")},
+        p["space"]: {"select": {"name": spaces[it.get("space") or "main"]}},
+        p["category"]: {"select": {"name": cat} if cat else None},
+        p["kind"]: {"select": {"name": kinds[it["kind"]]} if it.get("kind") in kinds else None},
+        p["tags"]: {"multi_select": [{"name": str(t).replace(",", " ")[:100]} for t in (it.get("tags") or [])[:30]]},
+        p["summary"]: {"rich_text": _text(it.get("summary"))},
+        p["source"]: {"url": _url(it.get("source_url"))},
+        p["author"]: {"rich_text": _text(it.get("author"), 500)},
+        p["published"]: {"date": {"start": str(it["published_at"])[:10]} if it.get("published_at") else None},
+        p["added"]: {"date": {"start": created.isoformat() if isinstance(created, datetime) else str(created)}
+                     if created else None},
+        p["archived"]: {"checkbox": bool(it.get("archived"))},
+        p["kb_url"]: {"url": _url(get_settings().item_url(str(it["id"])))},
+        p["kb_id"]: {"rich_text": _text(it["id"])},
     }
 
 
@@ -243,20 +264,22 @@ def _md(text: str | None) -> str:
     return _TAG_LIKE.sub(r"\\<", (text or "").strip())
 
 
-def page_markdown(it: dict, max_body: int = MAX_BODY) -> str:
+def page_markdown(it: dict, max_body: int = MAX_BODY, lang: str = "fr") -> str:
+    tx = locales.text(lang)
+    colon = " :" if lang == "fr" else ":"
     is_note = it.get("kind") == "note"
     body = (it.get("content") or it.get("input_text") or "").strip()
     fiche: list[str] = []
     if it.get("user_note"):
-        fiche.append("> **Pourquoi je l'ai gardé :** " + _md(it["user_note"]).replace("\n", "\n> "))
+        fiche.append(f"> **{tx['why']}{colon}** " + _md(it["user_note"]).replace("\n", "\n> "))
     if it.get("summary"):
-        fiche += ["## Résumé", _md(it["summary"])]
+        fiche += [f"## {tx['summary']}", _md(it["summary"])]
     if it.get("key_points"):
-        fiche += ["## Points clés", "\n".join(f"- {_md(p)}" for p in it["key_points"])]
+        fiche += [f"## {tx['key_points']}", "\n".join(f"- {_md(p)}" for p in it["key_points"])]
     if it.get("use_cases"):
-        fiche += ["## Utile pour", "\n".join(f"- {_md(u)}" for u in it["use_cases"])]
+        fiche += [f"## {tx['use_cases']}", "\n".join(f"- {_md(u)}" for u in it["use_cases"])]
     if it.get("entities"):
-        fiche += ["## Personnes, outils, concepts", _md(", ".join(e["name"] for e in it["entities"] if e.get("name")))]
+        fiche += [f"## {tx['people']}", _md(", ".join(e["name"] for e in it["entities"] if e.get("name")))]
     if is_note:
         # la note de l'utilisateur d'abord, en entier ; la fiche générée ensuite
         parts = [_md(body)] + (["---"] + fiche if fiche else [])
@@ -264,30 +287,30 @@ def page_markdown(it: dict, max_body: int = MAX_BODY) -> str:
         parts = fiche
         if body:
             cut = body[:max_body]
-            parts += ["## Contenu", _md(cut)]
+            parts += [f"## {tx['content']}", _md(cut)]
             if len(body) > max_body:
-                parts.append(f"*[… contenu tronqué : {len(body) - max_body} caractères de plus dans la fiche KB]*")
+                parts.append("*[" + tx["truncated"].format(n=len(body) - max_body) + "]*")
     if it.get("status") == "error":
-        parts.append("*(Fiche pas encore générée : traitement en erreur dans l'app.)*")
+        parts.append(f"*{tx['not_ready']}*")
     return "\n\n".join(p for p in parts if p) or "*(vide)*"
 
 
-def _markdown_variants(it: dict) -> list[str]:
+def _markdown_variants(it: dict, lang: str = "fr") -> list[str]:
     """Contenu complet, puis une version courte si Notion refuse la première (trop longue ou trop complexe)."""
-    full = page_markdown(it)
+    full = page_markdown(it, lang=lang)
     if it.get("kind") == "note":
         note = (it.get("content") or it.get("input_text") or "").strip()
-        short = (_md(note[:SHORT_BODY]) + "\n\n*[… note tronquée dans Notion : version complète dans l'app "
-                 "et dans l'export]*") if len(note) > SHORT_BODY else page_markdown({**it, "key_points": [], "entities": []})
+        short = (_md(note[:SHORT_BODY]) + f"\n\n*[{locales.text(lang)['note_truncated']}]*") if len(note) > SHORT_BODY \
+            else page_markdown({**it, "key_points": [], "entities": []}, lang=lang)
     else:
-        short = page_markdown(it, max_body=SHORT_BODY)
+        short = page_markdown(it, max_body=SHORT_BODY, lang=lang)
     return [full] if short == full else [full, short]
 
 
-def _create_page(state: dict, it: dict) -> str:
+def _create_page(state: dict, it: dict, lang: str = "fr") -> str:
     base = {"parent": {"type": "data_source_id", "data_source_id": state["data_source_id"]},
-            "properties": page_properties(it)}
-    attempts = _markdown_variants(it) + [""]
+            "properties": page_properties(it, lang)}
+    attempts = _markdown_variants(it, lang) + [""]
     for i, md in enumerate(attempts):
         try:
             page = _request("POST", "/pages", {**base, "markdown": md} if md else base)
@@ -301,8 +324,8 @@ def _create_page(state: dict, it: dict) -> str:
     raise AssertionError("inaccessible")
 
 
-def _write_markdown(page_id: str, it: dict) -> None:
-    attempts = _markdown_variants(it)
+def _write_markdown(page_id: str, it: dict, lang: str = "fr") -> None:
+    attempts = _markdown_variants(it, lang)
     for i, md in enumerate(attempts):
         try:
             _request("PATCH", f"/pages/{page_id}/markdown",
@@ -313,19 +336,20 @@ def _write_markdown(page_id: str, it: dict) -> None:
                 raise
 
 
-def upsert_page(state: dict, it: dict) -> str:
+def upsert_page(state: dict, it: dict, lang: str = "fr") -> str:
+    it = locales.localized(it, lang)
     page_id = it.get("notion_page_id")
     if page_id:
         try:
-            _request("PATCH", f"/pages/{page_id}", {"properties": page_properties(it), "in_trash": False})
+            _request("PATCH", f"/pages/{page_id}", {"properties": page_properties(it, lang), "in_trash": False})
         except NotionError as exc:
             if exc.status != 404:
                 raise
             log.info("Page Notion %s supprimée : recréée", page_id)
         else:
-            _write_markdown(page_id, it)
+            _write_markdown(page_id, it, lang)
             return page_id
-    return _create_page(state, it)
+    return _create_page(state, it, lang)
 
 
 def _trash(page_id: str | None) -> None:
@@ -347,7 +371,8 @@ def sync_pending(limit: int = BATCH) -> dict:
     if not enabled():
         return {"enabled": False, "synced": 0, "trashed": 0, "failed": 0, "remaining": 0}
     with _pass_lock:
-        state = ensure_database()
+        lang = language()
+        state = ensure_database(lang)
         spaces = get_settings().notion_space_list
 
         trashed, last_error = 0, None
@@ -371,7 +396,7 @@ def sync_pending(limit: int = BATCH) -> dict:
         for it in rows:
             try:
                 if it["space"] in spaces:
-                    page_id = upsert_page(state, it)
+                    page_id = upsert_page(state, it, lang)
                 else:                       # espace exclu de la copie (NOTION_SPACES) : la page part à la corbeille
                     _trash(it["notion_page_id"])
                     page_id = None
@@ -409,7 +434,8 @@ def sync_pending(limit: int = BATCH) -> dict:
 
 def status() -> dict:
     s = get_settings()
-    out: dict = {"configured": enabled(), "spaces": s.notion_space_list}
+    out: dict = {"configured": enabled(), "spaces": s.notion_space_list, "languages": locales.available(),
+                 "language": language()}
     if not out["configured"]:
         out["missing"] = [name for name, ok in (("NOTION_TOKEN", s.notion_token),
                                                 ("NOTION_PARENT_PAGE_ID", parent_page_id())) if not ok]

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ItemDetail } from "../api";
+import { localized, t } from "../i18n";
 
 declare global {
   interface Window {
@@ -40,16 +41,17 @@ function TweetEmbed({ id }: { id: string }) {
 
 export function Embed({ item }: { item: ItemDetail }) {
   const m = item.metadata || {};
+  const { title } = localized(item);
   if (item.kind === "tweet" && m.tweet_id) return <div className="embed"><TweetEmbed id={m.tweet_id} /></div>;
   if (item.kind === "youtube" && m.video_id) {
     return (
       <div className="embed">
-        <iframe src={`https://www.youtube-nocookie.com/embed/${m.video_id}`} title={item.title ?? "Vidéo YouTube"}
+        <iframe src={`https://www.youtube-nocookie.com/embed/${m.video_id}`} title={title ?? t("Vidéo YouTube")}
                 allow="accelerometer; encrypted-media; picture-in-picture" allowFullScreen loading="lazy" />
       </div>
     );
   }
-  if (item.file_url && item.kind === "image") return <div className="embed"><img src={item.file_url} alt={item.title ?? ""} /></div>;
+  if (item.file_url && item.kind === "image") return <div className="embed"><img src={item.file_url} alt={title ?? ""} /></div>;
   if (item.file_url && item.kind === "video") return <div className="embed"><video src={item.file_url} controls preload="metadata" /></div>;
   if (item.file_url && item.kind === "audio") return <div className="embed"><audio src={item.file_url} controls preload="metadata" /></div>;
   return null;

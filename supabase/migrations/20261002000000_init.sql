@@ -106,6 +106,8 @@ alter table public.items add column if not exists space text not null default 'm
 alter table public.items add column if not exists category text;
 alter table public.items add column if not exists notion_page_id text;
 alter table public.items add column if not exists notion_synced_at timestamptz;
+-- the card (title, summary, key points, use cases) in the second language: {"en": {...}}
+alter table public.items add column if not exists translations jsonb not null default '{}'::jsonb;
 
 create index if not exists items_created_idx  on public.items (created_at desc);
 create index if not exists items_space_idx    on public.items (space, category, created_at desc);

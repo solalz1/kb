@@ -1,0 +1,62 @@
+// English for the Settings page.
+export default {
+  "Langue": "Language",
+  "L'interface, les résumés et les réponses de Claude passent dans cette langue. Tes notes restent telles que tu les as écrites.":
+    "The interface, the summaries and Claude's answers switch to this language. Your notes stay as you wrote them.",
+  "éléments": "items",
+  "en Perso": "in Personal",
+  "cette semaine": "this week",
+  "actions en attente": "open actions",
+  "en traitement": "processing",
+  "en erreur": "failed",
+  "Raccourcis iPhone et Mac": "iPhone and Mac Shortcuts",
+  "Les Raccourcis envoient ce que tu partages à cette adresse, avec ton jeton :":
+    "The Shortcuts send what you share to this address, with your token:",
+  "Copié": "Copied",
+  "Copier l'adresse": "Copy the address",
+  "Copier le jeton": "Copy the token",
+  "Le pas-à-pas complet est dans SHORTCUT.md, à la racine du dépôt.":
+    "The full walkthrough is in SHORTCUT.md, at the root of the repository.",
+  "Connecteur Claude": "Claude connector",
+  "Dans Claude (Réglages, Connecteurs, « Ajouter un connecteur personnalisé »), colle cette URL en remplaçant la fin par ton secret":
+    "In Claude (Settings, Connectors, \"Add custom connector\"), paste this URL, replacing the end with your secret",
+  "TON_SECRET_MCP": "YOUR_MCP_SECRET",
+  " :": ":",
+  "Tu pourras alors interroger ta KB depuis Claude sur iPhone, Mac et le web, et depuis Claude Code.":
+    "You can then query your KB from Claude on iPhone, Mac and the web, and from Claude Code.",
+  "Ouvrir « Demander dans Claude » dans l'app Claude pour Mac plutôt que dans le navigateur":
+    "Open \"Ask in Claude\" in the Claude app for Mac rather than in the browser",
+  "Réglage propre à cet appareil. À laisser décoché sur iPhone.": "Applies to this device only. Leave it unchecked on iPhone.",
+  "Copie dans Notion": "Copy in Notion",
+  "{n} éléments copiés": "{n} items copied",
+  "{n} élément copié": "{n} item copied",
+  ", {n} en attente": ", {n} pending",
+  ", tout est à jour": ", everything is up to date",
+  " (espace {space} seulement)": " ({space} space only)",
+  "Dernière synchro {when}": "Last sync {when}",
+  "Dernière erreur :": "Last error:",
+  "Ouvrir la base Notion": "Open the Notion database",
+  "Synchronisation…": "Syncing…",
+  "Synchroniser maintenant": "Sync now",
+  "Chaque élément a sa page dans une base Notion, mise à jour à chaque modification : une deuxième copie de ta KB, lisible partout. Modifie tes notes dans l'app : les retouches faites dans Notion sont écrasées.":
+    "Each item has its page in a Notion database, updated on every change: a second copy of your KB, readable anywhere. Edit your notes in the app: changes made in Notion are overwritten.",
+  "Pas encore activée. Ajoute": "Not enabled yet. Add",
+  " et ": " and ",
+  "dans les variables du serveur (voir SETUP.md, étape Notion) : chaque élément sera recopié dans une base Notion privée, en continu.":
+    "to the server's variables (see SETUP.md, Notion step): every item will be copied to a private Notion database, continuously.",
+  "Langue de la copie": "Copy language",
+  "Recopier ta KB dans une nouvelle base Notion en {language} ? L'ancienne base reste dans Notion, tu pourras la supprimer.":
+    "Copy your KB into a new Notion database in {language}? The old database stays in Notion; you can delete it.",
+  "Langue de l'export": "Export language",
+  "Tes données": "Your data",
+  "Export complet en Markdown : une note par élément (source, résumé, liens), rangée dans Veille ou Perso. Il s'ouvre dans Obsidian et s'importe dans Notion (Importer, puis Texte et Markdown).":
+    "Full export in Markdown: one note per item (source, summary, links), filed under Feed or Personal. It opens in Obsidian and imports into Notion (Import, then Text & Markdown).",
+  "Préparation…": "Preparing…",
+  "Télécharger l'export": "Download the export",
+  "Avec les fichiers d'origine": "With the original files",
+  "La version avec les fichiers (PDF, images, audio) peut être lourde. Garde-en une copie de temps en temps : c'est ta sauvegarde hors ligne.":
+    "The version with files (PDFs, images, audio) can be large. Keep a copy from time to time: it's your offline backup.",
+  "Cet appareil": "This device",
+  "Connecté à {origin}.": "Connected to {origin}.",
+  "Se déconnecter": "Sign out",
+} as Record<string, string>;

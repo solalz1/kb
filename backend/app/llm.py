@@ -127,6 +127,18 @@ ENRICH_SCHEMA = {
 }
 
 
+TRANSLATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "key_points": {"type": "array", "items": {"type": "string"}},
+        "use_cases": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["title", "summary", "key_points", "use_cases"],
+}
+
+
 def _enrich_system() -> str:
     lang = lang_name()
     return f"""Tu es l'archiviste de la knowledge base personnelle de l'utilisateur.
@@ -138,8 +150,9 @@ Règles :
 - Factuel et dense. Pas de remplissage ni de formules du type « Cet article explique… » : va droit au contenu.
 - summary : 2 à 5 phrases sur ce que l'élément affirme, montre ou propose, avec les chiffres, noms et conclusions qui comptent.
 - key_points : 3 à 7 points autonomes et précis, compréhensibles sans le reste.
-- tags : 3 à 8 tags en minuscules, au singulier, mots simples ou kebab-case. Réutilise d'abord les tags existants
-  quand ils conviennent ; n'en crée un nouveau que si aucun ne convient.
+- tags : 3 à 8 tags EN ANGLAIS, quelle que soit la langue du contenu (ils servent à la recherche) : minuscules,
+  singulier, mots simples ou kebab-case (« llm-evaluation », « benchmark », « fine-tuning »). Réutilise d'abord les
+  tags existants qui sont en anglais quand ils conviennent ; n'en crée un nouveau que si aucun ne convient.
 - entities : personnes, organisations, produits/outils, concepts, œuvres importants et explicitement mentionnés
   (12 max), avec leur nom canonique (« Andrej Karpathy », pas « Karpathy »).
 - use_cases : 2 à 4 situations concrètes où l'élément serait utile, formulées « Utile pour… » ou « Utile si… ».
@@ -147,6 +160,13 @@ Règles :
   compte à suivre…). Liste vide sinon.
 - Si l'utilisateur a dit pourquoi il garde l'élément, oriente le résumé et les use_cases vers cette intention.
 - Si le contenu est vide, tronqué ou inaccessible, dis-le dans le summary au lieu d'inventer."""
+
+
+def _translation_rule(second: str) -> str:
+    return f"""
+- translation : la même fiche en {LANG_NAMES.get(second, second)} pour les lecteurs de cette langue : title, summary,
+  key_points et use_cases fidèles à la version principale (mêmes faits, mêmes chiffres, même longueur), écrits
+  naturellement. Un titre propre à la source (titre d'article, de vidéo, de papier) se garde tel quel."""
 
 
 def _perso_rules() -> str:
@@ -198,23 +218,37 @@ def enrich(
         "Tags existants (à réutiliser si pertinents) : " + (", ".join(existing_tags) if existing_tags else "(aucun)"),
     ]
     prompt = "\n".join(header) + "\n\n<contenu>\n" + _truncate_middle(content or "(vide)") + "\n</contenu>"
-    schema = ENRICH_SCHEMA
+    properties, required = dict(ENRICH_SCHEMA["properties"]), list(ENRICH_SCHEMA["required"])
     if perso:
-        schema = {
-            **ENRICH_SCHEMA,
-            "properties": {**ENRICH_SCHEMA["properties"],
-                           "category": {"type": "string", "enum": list(CATEGORIES)}},
-            "required": ENRICH_SCHEMA["required"] + ["category"],
-        }
+        properties["category"] = {"type": "string", "enum": list(CATEGORIES)}
+        required.append("category")
+    second = get_settings().second_language
+    if second:
+        properties["translation"] = TRANSLATION_SCHEMA
+        required.append("translation")
     out = call_tool(
-        system=_enrich_system() + (_perso_rules() if perso else ""),
+        system=_enrich_system() + (_translation_rule(second) if second else "") + (_perso_rules() if perso else ""),
         content=prompt,
         tool_name="save_card",
         tool_description="Enregistre la fiche de l'élément dans la knowledge base.",
-        schema=schema,
-        max_tokens=2500,
+        schema={**ENRICH_SCHEMA, "properties": properties, "required": required},
+        max_tokens=5000 if second else 2500,
     )
     out["tags"] = _normalize_tags(out.get("tags", []))
+    out["translations"] = {second: _clean_translation(out.pop("translation", None))} if second else {}
+    if second and not out["translations"][second]:
+        out["translations"] = {}
+    return out
+
+
+def _clean_translation(raw) -> dict:
+    """The API doesn't enforce the schema: keep well-formed fields only."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {k: str(raw[k]).strip() for k in ("title", "summary") if isinstance(raw.get(k), str) and raw[k].strip()}
+    for k in ("key_points", "use_cases"):
+        if isinstance(raw.get(k), list):
+            out[k] = [str(x).strip() for x in raw[k] if str(x).strip()]
     return out
 
 

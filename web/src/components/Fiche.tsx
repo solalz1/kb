@@ -1,6 +1,7 @@
 import { AlertTriangle, Loader2, Pin } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { ItemSummary } from "../api";
+import { localized, t } from "../i18n";
 import { ago, hostOf } from "../kinds";
 import { headLabel } from "../perso";
 
@@ -9,7 +10,8 @@ export function Fiche({ item, compact = false }: { item: ItemSummary; compact?: 
   const failed = item.status === "error";
   const perso = item.space === "perso";
   const who = item.author || item.site_name || hostOf(item.source_url);
-  const title = item.title || (pending ? item.source_url || "Nouvel élément" : "Sans titre");
+  const shown = localized(item);
+  const title = shown.title || (pending ? item.source_url || t("Nouvel élément") : t("Sans titre"));
 
   return (
     <Link to={`/item/${item.id}`} className={`fiche${pending ? " pending" : ""}`} data-kind={item.kind ?? undefined}
@@ -17,7 +19,7 @@ export function Fiche({ item, compact = false }: { item: ItemSummary; compact?: 
       <div className="fiche-head">
         <span className="kind">{headLabel(item)}</span>
         {who && <span className="who">{who}</span>}
-        {item.pinned && <Pin size={14} className="pin" aria-label="Épinglé" />}
+        {item.pinned && <Pin size={14} className="pin" aria-label={t("Épinglé")} />}
         <span className="when">{ago(item.created_at)}</span>
       </div>
       <div className="fiche-body">
@@ -25,12 +27,12 @@ export function Fiche({ item, compact = false }: { item: ItemSummary; compact?: 
           <h3>{title}</h3>
           {pending && (
             <span className="status"><Loader2 size={15} className="spin" />
-              {item.kind === "note" ? " Rangement et résumé en cours…" : " Lecture et résumé en cours…"}</span>
+              {" "}{item.kind === "note" ? t("Rangement et résumé en cours…") : t("Lecture et résumé en cours…")}</span>
           )}
           {failed && (
-            <span className="status err"><AlertTriangle size={15} /> Échec du traitement : ouvre la fiche pour réessayer</span>
+            <span className="status err"><AlertTriangle size={15} /> {t("Échec du traitement : ouvre la fiche pour réessayer")}</span>
           )}
-          {!pending && !failed && item.summary && <p className="ruled">{item.summary}</p>}
+          {!pending && !failed && shown.summary && <p className="ruled">{shown.summary}</p>}
           {!compact && item.excerpt && <p className="excerpt">{item.excerpt.slice(0, 220)}…</p>}
           {!compact && item.user_note && <p className="note-ink">{item.user_note}</p>}
           {!compact && item.tags?.length > 0 && (

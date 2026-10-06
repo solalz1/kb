@@ -38,7 +38,7 @@ Sécurité : les tables ont le RLS activé et aucun accès pour les rôles publi
 
 1. [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → choisis `kb`. Le `Dockerfile` est détecté via `railway.json`.
 2. Onglet **Variables → Raw Editor** : colle le contenu de `.env.example` rempli avec tes valeurs.
-3. **Settings → Networking → Generate Domain**. Ouvre `https://<…>.up.railway.app/api/health` : la réponse attendue est `{"ok": true, …}`.
+3. **Settings → Networking → Generate Domain**. Ouvre `https://<…>.up.railway.app/api/health` : la réponse attendue est `{"ok": true, …, "storage": "ok"}`. Toute autre valeur de `storage` (la réponse de Supabase) veut dire que les fichiers partagés échoueront : vérifie `SUPABASE_URL` (`https://<ref>.supabase.co`), `SUPABASE_SERVICE_KEY` (la clé **secrète** `sb_secret_…`, pas la clé publishable) et le bucket `kb-files`.
 4. Domaine perso : **Custom Domain** → `kb.example.com`. Ajoute le **CNAME** `kb` → la cible indiquée par Railway, et le TXT de vérification demandé, **là où ton DNS est géré** : chez ton registrar (ex. Namecheap → Advanced DNS) ou, si les serveurs de noms de ton domaine pointent vers un autre hébergeur comme Netlify, dans les réglages DNS de cet hébergeur (Netlify → Domains → ton domaine → DNS settings → Add new record). Un enregistrement ajouté chez le registrar est ignoré quand les serveurs de noms pointent ailleurs.
 5. Mets `PUBLIC_BASE_URL=https://kb.example.com` dans les variables. Railway redéploie tout seul.
 
@@ -91,6 +91,8 @@ Chaque élément a sa page dans une base Notion, réécrite à chaque modificati
 5. Enregistre les variables : Railway redéploie. En moins d'une minute, une base **Knowledge base** apparaît dans la page, puis se remplit (environ 3 éléments par seconde). Dans l'app, **Réglages → Copie dans Notion** montre l'avancement, la dernière erreur s'il y en a une, et un bouton **Synchroniser maintenant**.
 
 À savoir : la copie va dans un seul sens, de l'app vers Notion. Modifie dans l'app ; une retouche faite dans Notion est écrasée à la modification suivante de l'élément. Supprimer un élément dans l'app met sa page à la corbeille Notion. Si tu supprimes la base, elle est recréée et re-remplie. Dans Notion, ajoute des vues : par exemple un filtre `Espace` = `Perso`, groupé par `Catégorie`.
+
+Langue : **Réglages → Copie dans Notion → Langue de la copie** (français ou anglais). En changer crée une nouvelle base avec ses colonnes, ses fiches et ses intitulés dans cette langue et y recopie tout ; l'ancienne base reste dans Notion jusqu'à ce que tu la supprimes. L'export Markdown a le même choix (**Langue de l'export**).
 
 ## 8. Le digest tech (agent de veille)
 

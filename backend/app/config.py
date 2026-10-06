@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,7 +32,9 @@ class Settings(BaseSettings):
     enrich_model: str = "claude-haiku-4-5"
     chat_model: str = "claude-sonnet-5-5"   # modèle par défaut du chat de l'app
     chat_models: str = ""           # choix proposés dans l'app : "id:Libellé,id:Libellé" (vide = liste par défaut)
-    kb_language: str = "fr"         # langue des résumés, tags et réponses
+    kb_language: str = "fr"         # langue principale des résumés et des réponses (les tags sont en anglais)
+    kb_second_language: str = ""    # résumés écrits aussi dans cette langue ; vide = en (ou fr si la principale est en),
+                                    # "none" pour désactiver
 
     # --- Embeddings ---
     embeddings_provider: str = "voyage"   # "voyage" ou "fake" (tests)
@@ -55,6 +58,24 @@ class Settings(BaseSettings):
     storage_bucket: str = "kb-files"
     local_storage_dir: str = "./data/files"
     max_upload_mb: int = 50
+
+    @field_validator("supabase_url")
+    @classmethod
+    def _project_url(cls, v: str) -> str:
+        """Only the project URL: a pasted ".../rest/v1/" would send files to PostgREST (404 PGRST125)."""
+        v = (v or "").strip().rstrip("/")
+        for suffix in ("/rest/v1", "/storage/v1"):
+            if v.endswith(suffix):
+                v = v[: -len(suffix)]
+        return v
+
+    @property
+    def second_language(self) -> str | None:
+        v = self.kb_second_language.strip().lower()
+        if v == "none":
+            return None
+        v = v or ("fr" if self.kb_language == "en" else "en")
+        return None if v == self.kb_language else v
 
     # --- Réseau ---
     youtube_proxy_url: str = ""   # proxy résidentiel si YouTube bloque l'IP du serveur

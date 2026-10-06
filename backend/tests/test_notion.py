@@ -208,8 +208,8 @@ def test_sync_fallbacks(client, fake_notion, monkeypatch):
     # modification pendant la copie : l'élément reste à recopier
     real_upsert = notion.upsert_page
 
-    def upsert_then_edit(state, it):
-        page = real_upsert(state, it)
+    def upsert_then_edit(state, it, lang="fr"):
+        page = real_upsert(state, it, lang)
         db.execute("update items set title = 'Édité pendant la copie' where id = %s", (it["id"],))
         return page
 
@@ -278,8 +278,8 @@ def test_delete_during_sync_and_stuck_trash(client, fake_notion, monkeypatch):
     # l'élément est supprimé dans l'app pendant que sa page est créée : la page part quand même à la corbeille
     real_upsert = notion.upsert_page
 
-    def upsert_then_delete(state, it):
-        page = real_upsert(state, it)
+    def upsert_then_delete(state, it, lang="fr"):
+        page = real_upsert(state, it, lang)
         if it["id"] == article:
             client.delete(f"/api/items/{article}", headers=AUTH)
         return page
@@ -307,3 +307,52 @@ def test_delete_during_sync_and_stuck_trash(client, fake_notion, monkeypatch):
     assert res["synced"] == 1 and res["trashed"] == 0
     assert "page-verrouillee" in notion.status()["last_error"]
     assert db.fetchone("select count(*) n from notion_trash")["n"] == 1          # réessayée plus tard
+
+
+def test_copy_language(client, fake_notion):
+    """English copy: a new database with English columns, cards and headings; the French one is left as it was."""
+    note, article = _setup(client)
+    notion.sync_pending()
+    assert fake_notion.databases == 1
+    fr_pages = dict(fake_notion.pages)
+    first = fake_notion.made("POST", "/databases")[0]["initial_data_source"]["properties"]
+    assert "Résumé" in first and "Summary" not in first
+    st = client.get("/api/notion", headers=AUTH).json()
+    assert st["language"] == "fr" and st["languages"] == ["fr", "en"]
+
+    assert client.put("/api/notion/language", json={"language": "de"}, headers=AUTH).status_code == 400
+    st = client.put("/api/notion/language", json={"language": "en"}, headers=AUTH).json()
+    assert st["language"] == "en" and st["pending"] == 2          # everything to copy again
+
+    notion.sync_pending()
+    assert fake_notion.databases == 2
+    schema = fake_notion.made("POST", "/databases")[1]["initial_data_source"]["properties"]
+    assert {"Name", "Space", "Category", "Summary", "KB card"} <= set(schema)
+    assert {o["name"] for o in schema["Category"]["select"]["options"]} >= {"Value", "Principle"}
+    new_pages = {k: v for k, v in fake_notion.pages.items() if k not in fr_pages}
+    assert len(new_pages) == 2 and all(p["parent"]["data_source_id"] == "ds2" for p in new_pages.values())
+    by_id = {p["properties"]["KB ID"]["rich_text"][0]["text"]["content"]: p for p in new_pages.values()}
+    art = by_id[article]
+    assert art["properties"]["Space"]["select"]["name"] == "Feed"
+    assert art["properties"]["Summary"]["rich_text"][0]["text"]["content"].startswith("Summary of the article")
+    assert "## Summary" in art["markdown"] and "## Key points" in art["markdown"] and "Why I kept it:" in art["markdown"]
+    assert "Point A (en)" in art["markdown"]
+    val = by_id[note]
+    assert val["properties"]["Category"]["select"]["name"] == "Value"
+    assert val["properties"]["Name"]["title"][0]["text"]["content"] == "Honnêteté"    # a title he wrote stays his
+    assert val["markdown"].startswith("Je dis la vérité, même quand elle coûte.")    # and so does the note
+    assert client.get("/api/notion", headers=AUTH).json()["pending"] == 0
+
+
+def test_export_language(client):
+    import io
+    import zipfile
+
+    _setup(client)
+    z = zipfile.ZipFile(io.BytesIO(client.get("/api/export?lang=en", headers=AUTH).content))
+    names = z.namelist()
+    assert any(n.startswith("KB/Feed/") for n in names) and any(n.startswith("KB/Personal/Values/") for n in names)
+    article = z.read(next(n for n in names if n.startswith("KB/Feed/"))).decode()
+    assert "## Summary\nSummary of the article" in article and "> **Why I kept it:** à relire" in article
+    fr = zipfile.ZipFile(io.BytesIO(client.get("/api/export", headers=AUTH).content))
+    assert any(n.startswith("KB/Perso/Valeurs/") for n in fr.namelist())

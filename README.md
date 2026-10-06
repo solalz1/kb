@@ -15,7 +15,7 @@ Share anything from your iPhone or Mac (a tweet or thread, an article, a YouTube
 - **Claude connector (MCP)**: your KB is available inside Claude (web, desktop, mobile) and Claude Code. Claude searches it, browses it by type, tag or person, and reads full items before answering. An "Ask in Claude" button in the app opens the question there, so it runs on your Claude plan instead of API credits.
 - **Also**: automatic links between items (with the reason), duplicate detection, "rediscover" picks, extracted to-dos (tools to try, papers to read), people/tool/concept pages, Obsidian-compatible Markdown export.
 
-> The app's interface is in French. Summaries, tags and chat answers follow `KB_LANGUAGE` (`fr`, `en`, …).
+> The app is in French and English (Settings → Language). Every card is summarized in both languages, chat answers follow the app's language, and tags are always in English for better search. `KB_LANGUAGE` sets the main language (used by the Claude connector, the digest and Notion), `KB_SECOND_LANGUAGE` the other one.
 
 ## Architecture
 
