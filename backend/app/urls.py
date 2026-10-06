@@ -56,10 +56,32 @@ class UrlInfo:
     ids: dict
 
 
+TRAILING_PUNCT = ".,;:!?»"
+CLOSING = {")": "(", "]": "[", "}": "{"}
+
+
+def _trim_url(url: str) -> str:
+    """Retire la ponctuation collée à la fin d'une URL dans un texte.
+
+    Une parenthèse (ou un crochet) fermante n'est retirée que si elle n'est pas
+    ouverte dans l'URL : « (voir https://a.com/x) » perd sa « ) », mais
+    https://en.wikipedia.org/wiki/Rust_(langage) la garde.
+    """
+    while url:
+        last = url[-1]
+        if last in TRAILING_PUNCT:
+            url = url[:-1]
+        elif last in CLOSING and url.count(last) > url.count(CLOSING[last]):
+            url = url[:-1]
+        else:
+            break
+    return url
+
+
 def find_urls(text: str | None) -> list[str]:
     if not text:
         return []
-    return [u.rstrip(".,;:!?)]}»") for u in URL_RE.findall(text)]
+    return [_trim_url(u) for u in URL_RE.findall(text)]
 
 
 def only_url(text: str | None) -> str | None:

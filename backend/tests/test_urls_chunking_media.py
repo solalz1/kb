@@ -36,6 +36,24 @@ def test_only_and_primary_url():
     assert _primary_url("Une longue note " * 30 + " https://example.com") is None
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("https://en.wikipedia.org/wiki/Rust_(programming_language)", "https://en.wikipedia.org/wiki/Rust_(programming_language)"),
+    ("lu ici (https://en.wikipedia.org/wiki/Rust_(programming_language)).", "https://en.wikipedia.org/wiki/Rust_(programming_language)"),
+    ("(voir https://example.com/post)", "https://example.com/post"),
+    ("[lien](https://example.com/a), puis la suite", "https://example.com/a"),
+    ("https://example.com/a?x=[1]", "https://example.com/a?x=[1]"),
+    ("Regarde https://example.com/page!!", "https://example.com/page"),
+    ("«https://example.com/fr»", "https://example.com/fr"),
+])
+def test_find_urls_trailing_punctuation(text, expected):
+    assert urls.find_urls(text) == [expected]
+
+
+def test_only_url_keeps_balanced_parentheses():
+    url = "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+    assert urls.only_url(url) == url
+
+
 def test_chunking_sizes_and_overlap():
     text = "\n\n".join(f"Paragraphe {i}. " + "Phrase de test assez longue pour remplir. " * 12 for i in range(30))
     chunks = chunking.chunk_text(text)
