@@ -1,0 +1,90 @@
+# The Share button (iPhone and Mac)
+
+**English** · [Français](SHORTCUT.fr.md)
+
+You build two Shortcuts (plus an optional third one for voice notes). iOS only shows, in the share sheet, the one that matches what you're sharing, so you always see **a single** KB option:
+
+- **Add to my KB**: links and text (X, YouTube, Safari, TikTok, selected text…).
+- **File to my KB**: PDFs, screenshots, photos, voice memos, videos, documents.
+
+You need the address `https://kb.example.com/api/ingest` and your `KB_API_TOKEN`. Both can be copied from **Réglages** (Settings) in the app.
+
+Both Shortcuts sync through iCloud: build them once on your iPhone and they also show up in the Mac's Share menu.
+
+---
+
+## Shortcut 1: "Add to my KB" (links and text)
+
+**Shortcuts** app → **+** → name it `Add to my KB`.
+
+1. Tap **ⓘ (Details)** → turn on **Show in Share Sheet**. In the first line of the shortcut ("Receive … input from"), keep only **URLs**, **Safari web pages**, **Text** and **Rich text**. For "If there's no input", pick **Get Clipboard**.
+2. Add **Get URLs from Input** (input: *Shortcut Input*).
+3. Add **Get Item from List** → *First Item* of *URLs*.
+4. Add **Get Text from Input** (input: *Shortcut Input*).
+5. Optional but useful: **Ask for Input** → type *Text*, prompt `Why are you keeping this?`. You can confirm without typing anything.
+6. Add **Get Contents of URL**:
+   - URL: `https://kb.example.com/api/ingest`
+   - Tap **Show More**:
+     - Method: **POST**
+     - Headers: `Authorization` = `Bearer YOUR_KB_API_TOKEN`
+     - Request Body: **JSON**, with three *Text* fields:
+       - `url` = *Item from List* (step 3)
+       - `text` = *Text* (step 4)
+       - `note` = *Provided Input* (step 5), or leave empty
+7. Add **Get Dictionary Value** → key `message` in *Contents of URL*.
+8. Add **Show Notification** → *Dictionary Value*.
+
+Test: in the X app, tap Share on a tweet → **Add to my KB** → a confirmation appears (the server's messages are in French: « Ajouté à ta KB ✓ »).
+
+## Shortcut 2: "File to my KB" (PDFs, images, audio, video)
+
+1. **ⓘ** → **Show in Share Sheet**. Input types: **Images**, **PDFs**, **Files** and **Media** only.
+2. Optional: **Ask for Input** → `Why are you keeping this?`.
+3. Add **Repeat with Each** item in *Shortcut Input*, and inside the loop:
+   - **Get Contents of URL** → `https://kb.example.com/api/ingest`, method **POST**, same `Authorization` header.
+     Request Body: **Form**, with:
+     - `file` → type **File** = *Repeat Item*
+     - `note` → type **Text** = *Provided Input*
+4. After the loop: **Show Notification** → `Added to my KB ✓`.
+
+Test: in Photos, share a screenshot → **File to my KB**.
+
+iPhone HEIC photos are converted automatically. A video over 50 MB is rejected (free storage limit): for a long video, share its link instead.
+
+## Shortcut 3 (optional): "Personal note" (by voice)
+
+To jot down a lesson, a principle or a thought in a few seconds, with Siri or from the Home Screen. The note goes straight to the Perso space, word for word.
+
+1. New Shortcut `Personal note` (no need to show it in the share sheet).
+2. Add **Dictate Text** (or **Ask for Input** of type *Text* if you'd rather type).
+3. Optional: **Choose from Menu** with the options `Principe`, `Valeur`, `Leçon`, `Objectif`, `Habitude`, `Réflexion`, `Journal`, `Citation` (English names work too: `principle`, `value`, `lesson`, `goal`, `habit`, `quote`). Skip it and Claude picks the category.
+4. Add **Get Contents of URL**:
+   - URL: `https://kb.example.com/api/notes`
+   - Method **POST**, same `Authorization` = `Bearer YOUR_KB_API_TOKEN` header
+   - Request Body: **JSON**, *Text* fields:
+     - `content` = *Dictated Text*
+     - `space` = `perso`
+     - `category` = *Chosen Item* (step 3), or remove this field
+5. **Get Dictionary Value** → key `message`, then **Show Notification**.
+
+Test: "Hey Siri, Personal note", dictate "I don't answer emails after 8pm", pick **Habitude**.
+
+## On the Mac
+
+- Both Shortcuts appear under **Share** (Safari, Finder, Preview…).
+- To get them on right-click in Finder: open the Shortcut in the Mac's Shortcuts app → **ⓘ** → **Use as Quick Action** → check **Finder**.
+- In any browser, you can also create a bookmark with this address:
+
+  ```
+  javascript:location.href='https://kb.example.com/add?url='+encodeURIComponent(location.href)
+  ```
+
+  It opens the app's **Ajouter** (Add) page with the link already filled in.
+
+## Tips
+
+- **X threads**: share the **last** tweet of a thread; everything before it is fetched. For a thread less than 7 days old, the first tweet works too.
+- **Selected text** in Safari: select the passage, then Share → **Add to my KB**. The excerpt is kept with the page.
+- **Quick idea**: run **Add to my KB** without sharing anything (from the Home Screen or Siri): it takes the clipboard. You can also dictate a note in the app.
+- To go faster, drop the "Why are you keeping this?" step. You can add the note later on the card.
+- **File it in Perso**: type `#perso` in the "Why are you keeping this?" note (e.g. `#perso #ressource to reread before my 2027 goals`). The item goes to the Perso space, and a category hashtag (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`, or the English `#principle`, `#value`, `#lesson`, `#goal`, `#habit`, `#quote`) files it directly. These hashtags are removed from the note.

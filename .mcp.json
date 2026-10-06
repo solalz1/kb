@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "kb": {
+      "type": "http",
+      "url": "${KB_URL}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${KB_MCP_SECRET}"
+      }
+    }
+  }
+}

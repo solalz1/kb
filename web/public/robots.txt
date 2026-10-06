@@ -1,0 +1,3 @@
+# Application privée : rien à indexer.
+User-agent: *
+Disallow: /
