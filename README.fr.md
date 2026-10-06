@@ -15,6 +15,8 @@ Tu partages n'importe quoi depuis ton iPhone ou ton Mac (tweet, thread, article,
 - **Connecteur Claude (MCP)** : ta KB est disponible dans Claude (web, desktop, mobile) et dans Claude Code. Claude y cherche, la parcourt par type, tag ou personne, et lit les éléments en entier avant de répondre. Un bouton « Demander dans Claude » dans l'app y ouvre la question : elle passe alors par ton abonnement Claude, pas par les crédits API.
 - **En plus** : liens automatiques entre éléments (avec la raison du lien), détection de doublons, « à redécouvrir », actions extraites (outils à tester, papiers à lire), pages par personne/outil/concept, export Markdown compatible Obsidian.
 
+> L'app est en français et en anglais (Réglages → Langue). Chaque fiche est résumée dans les deux langues, Claude répond dans la langue de l'app, et les tags sont toujours en anglais pour une meilleure recherche. `KB_LANGUAGE` fixe la langue principale (celle du connecteur Claude, du digest et de Notion), `KB_SECOND_LANGUAGE` l'autre.
+
 ## Architecture
 
 ```

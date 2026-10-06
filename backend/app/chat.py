@@ -16,12 +16,18 @@ CONTEXT_BUDGET = 70_000  # caractères de sources envoyés au modèle
 CHARTER_BUDGET = 30_000  # caractères de principes et valeurs (texte intégral) en mode Conseil
 
 
-def _system_common() -> str:
+def _lang(lang: str | None) -> str:
+    """The language Claude answers in: the app's (sent with each question), else the KB's."""
+    return llm.LANG_NAMES.get(lang, llm.lang_name()) if lang else llm.lang_name()
+
+
+def _system_common(lang: str | None = None) -> str:
     return f"""Tu es l'assistant de la knowledge base personnelle de l'utilisateur. Date du jour : {date.today().isoformat()}.
 Les sources fournies sont des éléments que l'utilisateur a lui-même sauvegardés (tweets, articles, vidéos, PDF, notes…).
 
 Règles :
-- Réponds en {llm.lang_name()}, de façon directe et structurée (Markdown léger, pas de titre inutile).
+- Réponds en {_lang(lang)}, de façon directe et structurée (Markdown léger, pas de titre inutile). Les titres de
+  section imposés plus bas s'écrivent aussi dans cette langue.
 - Après chaque affirmation tirée d'une source, mets sa référence entre crochets : [1] ou [2][5]. N'utilise que les numéros fournis.
 - N'invente jamais de source, d'URL, de chiffre ou de citation.
 - Si les sources ne suffisent pas, dis-le. Tu peux compléter avec tes connaissances générales, mais signale-le
@@ -111,7 +117,7 @@ def _clean_history(messages: list[dict]) -> list[dict]:
 
 
 def ask(messages: list[dict], kinds: list[str] | None = None, tags: list[str] | None = None,
-        model: str | None = None) -> Iterator[dict]:
+        model: str | None = None, lang: str | None = None) -> Iterator[dict]:
     history = _clean_history(messages[:-1])
     question = str(messages[-1]["content"]).strip()
     query = llm.rewrite_query(history, question) if history else question
@@ -126,7 +132,7 @@ def ask(messages: list[dict], kinds: list[str] | None = None, tags: list[str] | 
     msgs = history + [{"role": "user", "content": user_turn}]
     if len(msgs) > 1 and msgs[-2]["role"] == "user":
         msgs[-2:] = [{"role": "user", "content": msgs[-2]["content"] + "\n\n" + user_turn}]
-    for text in llm.stream_text(system=_system_common(), messages=msgs, model=model):
+    for text in llm.stream_text(system=_system_common(lang), messages=msgs, model=model):
         yield {"type": "delta", "text": text}
     yield {"type": "done"}
 
@@ -163,7 +169,7 @@ def gather_for_advice(situation: str, query: str | None = None) -> tuple[list[di
     return charter, related
 
 
-def advise(messages: list[dict], model: str | None = None) -> Iterator[dict]:
+def advise(messages: list[dict], model: str | None = None, lang: str | None = None) -> Iterator[dict]:
     history = _clean_history(messages[:-1])
     question = str(messages[-1]["content"]).strip()
     query = llm.rewrite_query(history, question) if history else question
@@ -178,7 +184,7 @@ def advise(messages: list[dict], model: str | None = None) -> Iterator[dict]:
     msgs = history + [{"role": "user", "content": user_turn}]
     if len(msgs) > 1 and msgs[-2]["role"] == "user":
         msgs[-2:] = [{"role": "user", "content": msgs[-2]["content"] + "\n\n" + user_turn}]
-    for text in llm.stream_text(system=_system_common() + SYSTEM_ADVICE_EXTRA, messages=msgs, model=model,
+    for text in llm.stream_text(system=_system_common(lang) + SYSTEM_ADVICE_EXTRA, messages=msgs, model=model,
                                 max_tokens=5000):
         yield {"type": "delta", "text": text}
     yield {"type": "done"}
@@ -193,7 +199,8 @@ def gather_for_project(description: str, limit: int = 14, kinds: list[str] | Non
     return plan, search.merge_rankings(rankings, limit=limit)
 
 
-def project(description: str, kinds: list[str] | None = None, model: str | None = None) -> Iterator[dict]:
+def project(description: str, kinds: list[str] | None = None, model: str | None = None,
+            lang: str | None = None) -> Iterator[dict]:
     yield {"type": "status", "text": "Je prépare les recherches…"}
     plan, items = gather_for_project(description, kinds=kinds)
     yield {"type": "plan", "summary": plan.get("project_summary"), "queries": plan.get("queries", [])}
@@ -203,7 +210,7 @@ def project(description: str, kinds: list[str] | None = None, model: str | None 
         f"<sources>\n{context or '(aucune source pertinente trouvée)'}\n</sources>\n\n"
         f"Projet : {description}\n\nRésumé du projet : {plan.get('project_summary', '')}"
     )
-    for text in llm.stream_text(system=_system_common() + SYSTEM_PROJECT_EXTRA,
+    for text in llm.stream_text(system=_system_common(lang) + SYSTEM_PROJECT_EXTRA,
                                 messages=[{"role": "user", "content": prompt}], model=model, max_tokens=6000):
         yield {"type": "delta", "text": text}
     yield {"type": "done"}

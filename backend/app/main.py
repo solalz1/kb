@@ -24,7 +24,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, db, export, notion, pipeline, search, storage
+from . import chat, db, export, llm, notion, pipeline, search, storage
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import profile as digest_profile
@@ -127,13 +127,15 @@ auth = [Depends(require_token)]
 # ---------------------------------------------------------------------------
 
 @api.get("/api/health")
-def health():
+async def health():
     try:
-        db.fetchone("select 1 as ok")
+        await run_in_threadpool(db.fetchone, "select 1 as ok")
         db_ok = True
     except Exception:
         db_ok = False
-    return {"ok": db_ok, "db": db_ok, "auth_configured": bool(settings.kb_api_token)}
+    # "ok" only depends on the database (Railway's health check); "storage" tells why file shares would fail
+    return {"ok": db_ok, "db": db_ok, "auth_configured": bool(settings.kb_api_token),
+            "storage": await run_in_threadpool(storage.check)}
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +224,7 @@ def taxonomy():
 LIST_FIELDS = """id::text, kind, status, error, coalesce(title, left(input_text, 90)) as title, source_url, author,
                  site_name, published_at, created_at, left(coalesce(summary, input_text), 320) as summary, tags,
                  thumbnail_url, user_note, pinned, archived, file_path, file_mime,
-                 metadata->>'thumb_path' as thumb_path, genre, space, category"""
+                 metadata->>'thumb_path' as thumb_path, genre, space, category, translations"""
 
 
 def _with_thumbs(rows: list[dict]) -> list[dict]:
@@ -378,6 +380,9 @@ def patch_item(item_id: str, patch: ItemPatch):
         title = (changes["title"] or "").strip()[:300] or None
         sets.append("title = %s")
         params.append(title)
+        # a title written by hand is the same in every language: drop the translated one
+        sets.append("""translations = coalesce((select jsonb_object_agg(key, value - 'title')
+                                                from jsonb_each(translations)), '{}'::jsonb)""")
         meta["manual_title"] = bool(title)
     if "user_note" in changes:
         sets.append("user_note = %s")
@@ -549,6 +554,7 @@ class ChatRequest(BaseModel):
     kinds: list[str] | None = None
     tags: list[str] | None = None
     model: str | None = None     # un des modèles de /api/models ; défaut : CHAT_MODEL
+    lang: str | None = None      # langue de l'app (fr, en) : celle de la réponse ; défaut : KB_LANGUAGE
 
 
 @api.get("/api/models", dependencies=auth)
@@ -566,15 +572,16 @@ def chat_endpoint(req: ChatRequest):
     model = req.model or settings.chat_model
     if req.mode not in ("ask", "project", "advice"):
         raise HTTPException(400, f"Mode inconnu : {req.mode}")
+    lang = req.lang if req.lang in llm.LANG_NAMES else None
 
     def events():
         try:
             if req.mode == "project":
-                gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model)
+                gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model, lang=lang)
             elif req.mode == "advice":
-                gen = chat.advise(req.messages, model=model)
+                gen = chat.advise(req.messages, model=model, lang=lang)
             else:
-                gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model)
+                gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model, lang=lang)
             for event in gen:
                 yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         except Exception as exc:
@@ -784,9 +791,10 @@ def delete_watch(watch_id: int):
 # ---------------------------------------------------------------------------
 
 @api.get("/api/export", dependencies=auth)
-def export_markdown(files: bool = False):
-    """Markdown (Obsidian, ou Notion : Importer > Markdown) ; files=true ajoute les fichiers d'origine."""
-    path = export.export_zip_file(include_files=files)
+def export_markdown(files: bool = False, lang: str | None = None):
+    """Markdown (Obsidian, ou Notion : Importer > Markdown) ; files=true ajoute les fichiers d'origine ;
+    lang = langue des fiches (fr, en ; défaut : KB_LANGUAGE)."""
+    path = export.export_zip_file(include_files=files, lang=lang)
     return FileResponse(path, media_type="application/zip", filename="kb-export.zip",
                         background=BackgroundTask(os.unlink, path))
 
@@ -794,6 +802,19 @@ def export_markdown(files: bool = False):
 @api.get("/api/notion", dependencies=auth)
 def notion_status():
     return notion.status()
+
+
+class NotionLanguage(BaseModel):
+    language: str
+
+
+@api.put("/api/notion/language", dependencies=auth)
+def notion_language(body: NotionLanguage):
+    """Langue de la copie Notion. En changer recrée la base dans cette langue et y recopie tout."""
+    try:
+        return notion.set_language(body.language)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @api.post("/api/notion/sync", dependencies=auth)

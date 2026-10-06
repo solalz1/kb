@@ -38,7 +38,7 @@ Note: on the free plan, Supabase pauses projects that stay inactive for a week. 
 
 1. [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → pick `kb`. The `Dockerfile` is picked up through `railway.json`.
 2. **Variables → Raw Editor**: paste `.env.example` filled in with your values.
-3. **Settings → Networking → Generate Domain**. Open `https://<…>.up.railway.app/api/health`: you should get `{"ok": true, …}`.
+3. **Settings → Networking → Generate Domain**. Open `https://<…>.up.railway.app/api/health`: you should get `{"ok": true, …, "storage": "ok"}`. Any other `storage` value (Supabase's answer) means file shares will fail: check `SUPABASE_URL` (`https://<ref>.supabase.co`), `SUPABASE_SERVICE_KEY` (the **secret** `sb_secret_…` key, not the publishable one) and the `kb-files` bucket.
 4. Custom domain: **Custom Domain** → `kb.example.com`. Add the **CNAME** `kb` → the target Railway shows, plus the verification TXT record Railway asks for, **where your DNS is managed**: at your registrar (e.g. Namecheap → Advanced DNS), or, if your domain's nameservers point to another host such as Netlify, in that host's DNS settings (Netlify → Domains → your domain → DNS settings → Add new record). Records added at the registrar are ignored when the nameservers point elsewhere.
 5. Set `PUBLIC_BASE_URL=https://kb.example.com` in the variables. Railway redeploys on its own.
 
@@ -91,6 +91,8 @@ Every item gets a page in a Notion database, rewritten whenever it changes: a se
 5. Save the variables: Railway redeploys. Within a minute, a **Knowledge base** database appears in the page, then fills up (about 3 items per second). In the app, **Réglages → Copie dans Notion** shows the progress, the last error if any, and a **Synchroniser maintenant** button.
 
 Good to know: the copy goes one way, from the app to Notion. Edit in the app; changes made in Notion are overwritten the next time the item changes. Deleting an item in the app moves its page to Notion's trash. If you delete the database, it's recreated and refilled. In Notion, add views: filter `Espace` = `Perso` and group by `Catégorie`, for example.
+
+Language: **Settings → Copy in Notion → Copy language** (French or English). Switching creates a new database with its columns, cards and headings in that language and copies everything into it; the old database stays in Notion until you delete it. The Markdown export has the same choice (**Export language**).
 
 ## 8. The tech digest (agent)
 

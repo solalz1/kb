@@ -75,6 +75,10 @@ def fake_llm(monkeypatch):
             "genre": "other",
             "language": "fr",
             **({"category": "lecon"} if kw.get("space") == "perso" else {}),
+            "translations": {"en": {"title": f"Generated title: {(kw['content'] or '')[:30]}",
+                                    "summary": f"Summary of the {kw['kind']}: {(kw['content'] or '')[:200]}",
+                                    "key_points": ["Point A (en)", "Point B (en)"],
+                                    "use_cases": ["Useful to test the KB"]}},
         }
 
     def describe_image(data, media_type=None, context=""):

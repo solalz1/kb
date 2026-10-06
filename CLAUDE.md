@@ -2,8 +2,9 @@
 
 A personal knowledge base: the user shares anything (tweet, article, video, PDF, image, note) from iPhone/Mac, the
 backend extracts it, has Claude summarize it, indexes it (pgvector + full text), and it can be queried through the
-PWA, the API or the MCP server (Claude connector). **The UI and LLM prompts are in French**; keep user-facing strings
-in French unless asked otherwise. Write new code comments and commit messages in English (older modules still have
+PWA, the API or the MCP server (Claude connector). **The UI is bilingual**: French strings in the code are the keys of `t()` (`web/src/i18n.ts`), their English lives
+in `web/src/i18n/en/*.ts`, and `npm run build` fails on a missing translation. LLM prompts are in French. Items
+keep their card in a second language in `items.translations` (`localized()` in the front); tags are in English. Write new code comments and commit messages in English (older modules still have
 French comments). Public docs are in English with `*.fr.md` French copies:
 update both.
 

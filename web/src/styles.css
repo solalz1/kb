@@ -263,7 +263,8 @@ label.lbl { display: block; font-weight: 500; margin: 18px 0 6px; }
   font-family: var(--serif); font-size: 15.5px; line-height: 24px; color: var(--ink-2); margin: 0;
   background-image: repeating-linear-gradient(to bottom, transparent 0 23px, var(--rule-blue) 23px 24px);
 }
-.fiche .ruled { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* three lines on the feed's cards only: the item page (.sheet) and projects show the whole summary */
+.fiche:not(.sheet):not(.project) .ruled { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .fiche .note-ink { font-family: var(--serif); font-style: italic; color: var(--waterman); font-size: 15px; margin: 8px 0 0; line-height: 1.45; }
 .fiche .excerpt { font-size: 14px; color: var(--ink-2); margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--line); border-radius: 0; }
 .fiche .thumb {
@@ -530,7 +531,6 @@ details summary { cursor: pointer; font-weight: 500; color: var(--ink-2); }
 .ref { margin-left: 6px; font-size: 14px; text-decoration: none; }
 .projects { display: grid; gap: 14px; }
 .project h3 { margin-top: 2px; }
-.project .ruled { -webkit-line-clamp: unset; display: block; }
 .p-details { margin: 12px 0 0; font-size: 15px; line-height: 1.5; }
 .p-details dt { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); margin-top: 10px; }
 .p-details dd { margin: 2px 0 0; }
@@ -558,3 +558,7 @@ details summary { cursor: pointer; font-weight: 500; color: var(--ink-2); }
 .with-icon { position: relative; flex: 1 1 200px; display: flex; }
 .with-icon svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
 .with-icon .field { padding-left: 32px; }
+
+/* upload progress under "Ajouter à la KB" */
+.upload-bar { height: 4px; margin-top: 10px; max-width: 320px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.upload-bar span { display: block; height: 100%; background: var(--waterman); transition: width 0.2s; }

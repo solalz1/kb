@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit -p . && vite build",
+    "build": "node scripts/check-i18n.mjs && tsc --noEmit -p . && vite build",
+    "i18n:check": "node scripts/check-i18n.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p ."
   },

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import mimetypes
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -34,6 +35,29 @@ def _object_url(path: str, prefix: str = "object") -> str:
     return f"{s.supabase_url.rstrip('/')}/storage/v1/{prefix}/{s.storage_bucket}/{quote(path)}"
 
 
+# A wrong SUPABASE_URL must fail in seconds, not hang a share for five minutes
+TIMEOUT = httpx.Timeout(300, connect=10)
+_check_cache: tuple[float, str] | None = None
+
+
+def check() -> str:
+    """"ok", "local" (no Supabase: files on the server's disk) or what Storage answered. Cached for a minute."""
+    global _check_cache
+    if not _supabase_enabled():
+        return "local"
+    if _check_cache and time.monotonic() - _check_cache[0] < 60:
+        return _check_cache[1]
+    s = get_settings()
+    try:
+        r = httpx.get(f"{s.supabase_url.rstrip('/')}/storage/v1/bucket/{s.storage_bucket}", headers=_headers(),
+                      timeout=httpx.Timeout(5))
+        state = "ok" if r.status_code == 200 else f"erreur {r.status_code} : {r.text[:200]}"
+    except httpx.HTTPError as exc:
+        state = f"injoignable : {type(exc).__name__}"
+    _check_cache = (time.monotonic(), state)
+    return state
+
+
 def upload(path: str, data: bytes, content_type: str | None = None) -> str:
     content_type = content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"
     if _supabase_enabled():
@@ -41,7 +65,7 @@ def upload(path: str, data: bytes, content_type: str | None = None) -> str:
             _object_url(path),
             content=data,
             headers=_headers({"Content-Type": content_type, "x-upsert": "true"}),
-            timeout=300,
+            timeout=TIMEOUT,
         )
         if r.status_code >= 400:
             raise RuntimeError(f"Upload Storage échoué ({r.status_code}) : {r.text[:300]}")
@@ -54,9 +78,9 @@ def upload(path: str, data: bytes, content_type: str | None = None) -> str:
 
 def download(path: str) -> bytes:
     if _supabase_enabled():
-        r = httpx.get(_object_url(path, "object/authenticated"), headers=_headers(), timeout=300)
+        r = httpx.get(_object_url(path, "object/authenticated"), headers=_headers(), timeout=TIMEOUT)
         if r.status_code >= 400:
-            r = httpx.get(_object_url(path), headers=_headers(), timeout=300)
+            r = httpx.get(_object_url(path), headers=_headers(), timeout=TIMEOUT)
         r.raise_for_status()
         return r.content
     return (Path(get_settings().local_storage_dir) / path).read_bytes()

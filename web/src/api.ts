@@ -1,4 +1,5 @@
 // Client de l'API KB. Le jeton est saisi une fois (Réglages) et gardé sur l'appareil.
+import { lang, t } from "./i18n";
 
 export type Kind =
   | "tweet" | "article" | "youtube" | "video" | "audio" | "pdf"
@@ -28,7 +29,11 @@ export interface ItemSummary {
   category: string | null;
   excerpt?: string | null;
   file_mime?: string | null;
+  /** Same card in another language, e.g. { en: { title, summary, key_points, use_cases } }: see i18n.localized */
+  translations?: Record<string, ItemTranslation>;
 }
+
+export interface ItemTranslation { title?: string | null; summary?: string | null; key_points?: string[]; use_cases?: string[] }
 
 export interface Entity { name: string; type: string }
 export interface Action { id: number; text: string; kind: string | null; done: boolean }
@@ -64,6 +69,7 @@ export interface SourceCard {
   summary: string;
   space?: Space;
   category?: string | null;
+  translations?: Record<string, ItemTranslation>;
 }
 
 export interface ModelOption {
@@ -83,6 +89,8 @@ export interface NotionStatus {
   last_sync_at?: string | null;
   last_error?: string | null;
   last_error_at?: string | null;
+  language?: string;           // language of the copy (cards, headings, columns)
+  languages?: string[];        // languages the cards exist in
 }
 
 export type ChatMode = "ask" | "project" | "advice";
@@ -210,9 +218,31 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let detail = res.statusText;
     try { detail = (await res.json()).detail ?? detail; } catch { /* corps non JSON */ }
     if (res.status === 401) window.dispatchEvent(new Event("kb:unauthorized"));
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, t(String(detail)));
   }
   return res.json() as Promise<T>;
+}
+
+export type IngestResult = { ok: boolean; message: string; id: string; items: { id: string; duplicate: boolean }[] };
+
+/** Files go through XMLHttpRequest, the only way to follow the upload: a 25 MB PDF can take a minute. */
+function upload(form: FormData, onProgress: (fraction: number) => void): Promise<IngestResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${auth.base}/api/ingest`);
+    xhr.setRequestHeader("Authorization", `Bearer ${auth.token}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body: { detail?: string } & Partial<IngestResult> = {};
+      try { body = JSON.parse(xhr.responseText); } catch { /* corps non JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as IngestResult);
+      if (xhr.status === 401) window.dispatchEvent(new Event("kb:unauthorized"));
+      reject(new ApiError(xhr.status, t(body.detail ?? (xhr.statusText || `Erreur ${xhr.status}`))));
+    };
+    xhr.onerror = () => reject(new ApiError(0, t("Envoi interrompu : vérifie ta connexion et garde l'app ouverte pendant l'envoi.")));
+    xhr.ontimeout = xhr.onerror;
+    xhr.send(form);
+  });
 }
 
 const qs = (params: Record<string, string | number | boolean | undefined | null>) => {
@@ -245,11 +275,9 @@ export const api = {
     request<{ ok: boolean; id: string }>("/api/notes", { method: "POST", body: JSON.stringify(body) }),
   remove: (id: string) => request<{ ok: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
   reprocess: (id: string) => request<{ ok: boolean }>(`/api/items/${id}/reprocess`, { method: "POST" }),
-  ingest: (body: { url?: string; text?: string; note?: string; space?: Space; category?: string } | FormData) =>
-    request<{ ok: boolean; message: string; id: string; items: { id: string; duplicate: boolean }[] }>("/api/ingest", {
-      method: "POST",
-      body: body instanceof FormData ? body : JSON.stringify(body),
-    }),
+  ingest: (body: { url?: string; text?: string; note?: string; space?: Space; category?: string }) =>
+    request<IngestResult>("/api/ingest", { method: "POST", body: JSON.stringify(body) }),
+  uploadFiles: upload,
   tags: (space?: Space) => request<{ tag: string; count: number }[]>(`/api/tags${qs({ space })}`),
   entities: (space?: Space) =>
     request<{ name: string; type: string; count: number }[]>(`/api/entities${qs({ limit: 60, space })}`),
@@ -280,10 +308,12 @@ export const api = {
     request<Watch>(`/api/watch/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   removeWatch: (id: number) => request<{ ok: boolean }>(`/api/watch/${id}`, { method: "DELETE" }),
   notionSync: () => request<{ ok: boolean }>("/api/notion/sync", { method: "POST" }),
-  exportZip: async (files = false) => {
-    const res = await fetch(`${auth.base}/api/export${qs({ files: files || undefined })}`,
+  notionLanguage: (language: string) =>
+    request<NotionStatus>("/api/notion/language", { method: "PUT", body: JSON.stringify({ language }) }),
+  exportZip: async (files = false, language: string = lang) => {
+    const res = await fetch(`${auth.base}/api/export${qs({ files: files || undefined, lang: language })}`,
                             { headers: { Authorization: `Bearer ${auth.token}` } });
-    if (!res.ok) throw new ApiError(res.status, "Export impossible");
+    if (!res.ok) throw new ApiError(res.status, t("Export impossible"));
     return res.blob();
   },
 };
@@ -304,10 +334,10 @@ export async function streamChat(
   const res = await fetch(`${auth.base}/api/chat`, {
     method: "POST",
     headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, lang }),   // Claude answers in the interface language
     signal,
   });
-  if (!res.ok || !res.body) throw new ApiError(res.status, "Le chat ne répond pas");
+  if (!res.ok || !res.body) throw new ApiError(res.status, t("Le chat ne répond pas"));
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

@@ -2,6 +2,7 @@ import { BookOpen, ListChecks, MessageSquare, Newspaper, Plus, Settings as Cog, 
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { ApiError, api, auth } from "./api";
+import { t } from "./i18n";
 import Add from "./pages/Add";
 import Ask from "./pages/Ask";
 import Digest from "./pages/Digest";
@@ -13,12 +14,12 @@ import Settings from "./pages/Settings";
 import Todo from "./pages/Todo";
 
 const NAV = [
-  { to: "/", label: "Veille", icon: BookOpen, end: true, tab: true },
-  { to: "/perso", label: "Perso", icon: Sprout, tab: true },
+  { to: "/", label: t("Veille"), icon: BookOpen, end: true, tab: true },
+  { to: "/perso", label: t("Perso"), icon: Sprout, tab: true },
   { to: "/digest", label: "Digest", icon: Newspaper, tab: true },
-  { to: "/ask", label: "Demander", icon: MessageSquare, tab: true },
-  { to: "/add", label: "Ajouter", icon: Plus, tab: false },   // on phones: the + in the top bar
-  { to: "/todo", label: "À faire", icon: ListChecks, tab: true },
+  { to: "/ask", label: t("Demander"), icon: MessageSquare, tab: true },
+  { to: "/add", label: t("Ajouter"), icon: Plus, tab: false },   // on phones: the + in the top bar
+  { to: "/todo", label: t("À faire"), icon: ListChecks, tab: true },
 ];
 
 function Login({ onDone }: { onDone: () => void }) {
@@ -39,8 +40,8 @@ function Login({ onDone }: { onDone: () => void }) {
     } catch (err) {
       auth.token = "";
       setError(err instanceof ApiError && err.status === 401
-        ? "Ce jeton ne correspond pas à KB_API_TOKEN sur le serveur."
-        : "Serveur injoignable. Vérifie l'adresse de l'API.");
+        ? t("Ce jeton ne correspond pas à KB_API_TOKEN sur le serveur.")
+        : t("Serveur injoignable. Vérifie l'adresse de l'API."));
     } finally {
       setBusy(false);
     }
@@ -49,23 +50,23 @@ function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="login">
       <form className="fiche" data-kind="article" onSubmit={submit}>
-        <div className="fiche-head"><span className="kind">KB</span><span className="when">connexion</span></div>
-        <h3 style={{ fontSize: 22, lineHeight: "28px" }}>Ta knowledge base</h3>
-        <p className="ruled">Colle le jeton défini dans la variable KB_API_TOKEN de ton serveur. Il reste sur cet appareil.</p>
-        <label className="lbl" htmlFor="token">Jeton d'accès</label>
+        <div className="fiche-head"><span className="kind">KB</span><span className="when">{t("connexion")}</span></div>
+        <h3 style={{ fontSize: 22, lineHeight: "28px" }}>{t("Ta knowledge base")}</h3>
+        <p className="ruled">{t("Colle le jeton défini dans la variable KB_API_TOKEN de ton serveur. Il reste sur cet appareil.")}</p>
+        <label className="lbl" htmlFor="token">{t("Jeton d'accès")}</label>
         <input id="token" className="field" type="password" autoComplete="current-password" value={token}
                onChange={(e) => setToken(e.target.value)} required />
         {advanced ? (
           <>
-            <label className="lbl" htmlFor="base">Adresse de l'API</label>
+            <label className="lbl" htmlFor="base">{t("Adresse de l'API")}</label>
             <input id="base" className="field" placeholder="https://kb.exemple.com" value={base} onChange={(e) => setBase(e.target.value)} />
-            <div className="hint">Seulement si l'app et l'API sont hébergées séparément.</div>
+            <div className="hint">{t("Seulement si l'app et l'API sont hébergées séparément.")}</div>
           </>
         ) : null}
         {error && <div className="error-box">{error}</div>}
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 18, flexWrap: "wrap" }}>
-          <button className="btn primary" disabled={busy || !token}>Se connecter</button>
-          {!advanced && <button type="button" className="linkish" onClick={() => setAdvanced(true)}>API hébergée ailleurs ?</button>}
+          <button className="btn primary" disabled={busy || !token}>{t("Se connecter")}</button>
+          {!advanced && <button type="button" className="linkish" onClick={() => setAdvanced(true)}>{t("API hébergée ailleurs ?")}</button>}
         </div>
       </form>
     </div>
@@ -95,7 +96,7 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Navigation">
-        <div className="brand">KB <small>second cerveau</small></div>
+        <div className="brand">KB <small>{t("second cerveau")}</small></div>
         {NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end}>
             <Icon size={18} /> {label}
@@ -103,15 +104,15 @@ export default function App() {
           </NavLink>
         ))}
         <div className="spacer" />
-        <NavLink to="/settings"><Cog size={18} /> Réglages</NavLink>
+        <NavLink to="/settings"><Cog size={18} /> {t("Réglages")}</NavLink>
       </nav>
 
       <main>
         <header className="topbar">
           <span className="brand">KB</span>
           <span className="topbar-actions">
-            <NavLink to="/add" aria-label="Ajouter"><Plus size={22} /></NavLink>
-            <NavLink to="/settings" aria-label="Réglages"><Cog size={20} /></NavLink>
+            <NavLink to="/add" aria-label={t("Ajouter")}><Plus size={22} /></NavLink>
+            <NavLink to="/settings" aria-label={t("Réglages")}><Cog size={20} /></NavLink>
           </span>
         </header>
         <Routes>
