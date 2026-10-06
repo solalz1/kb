@@ -12,7 +12,8 @@ from . import db, embeddings, llm, notion, storage, urls
 from .chunking import chunk_text
 from .config import get_settings
 from .extractors import ExtractionError, Extracted, extract_item
-from .taxonomy import KIND_LABELS, category_from_word, category_label, normalize_category, normalize_space
+from .taxonomy import (KIND_LABELS, category_from_word, category_label, normalize_category, normalize_space,
+                       space_from_word)
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +109,9 @@ def ingest(
     note = (note or "").strip() or None
     title = (title or "").strip()[:300] or None
     explicit = normalize_space(space)
+    if category and space_from_word(category):
+        # the Shortcuts' "Où le ranger ?" list mixes spaces (Veille, Perso) and Perso categories in one field
+        explicit, category = explicit or space_from_word(category), None
     category = normalize_category(category)
 
     # rangement par hashtags : dans la note du partage, ou dans le texte d'une note libre

@@ -302,3 +302,52 @@ def test_charter_includes_principles_being_reprocessed(client):
     client.patch(f"/api/items/{principle}", json={"content": "Je tiens mes promesses, même petites."}, headers=AUTH)
     charter = chat.charter_items()
     assert charter[0]["excerpts"] == ["Je tiens mes promesses, même petites."]
+
+
+def test_place_chosen_in_the_shortcut(client):
+    """The Shortcuts send their « Où le ranger ? » answer as `category`: a space or a Perso category."""
+    from app import db
+
+    def place(choice, **extra):
+        r = client.post("/api/ingest", json={"text": f"Idée {choice}", "category": choice, **extra}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        return db.fetchone("select space, category from items where id = %s", (r.json()["id"],))
+
+    assert place("Veille") == {"space": "main", "category": None}
+    assert place("Perso") == {"space": "perso", "category": None}
+    assert place("Leçon") == {"space": "perso", "category": "lecon"}
+    assert place("Ressource") == {"space": "perso", "category": "ressource"}
+    # the choice is explicit: it wins over hashtags left in the note
+    assert place("Veille", note="#perso #principe") == {"space": "main", "category": None}
+
+    # files go through the same path (multipart)
+    r = client.post("/api/ingest", data={"category": "Valeur", "note": "à garder"}, headers=AUTH,
+                    files={"file": ("valeurs.txt", b"Honnetete et constance.", "text/plain")})
+    assert r.status_code == 200, r.text
+    assert db.fetchone("select space, category from items where id = %s",
+                       (r.json()["id"],)) == {"space": "perso", "category": "valeur"}
+
+
+def test_errors_carry_a_message_for_the_shortcuts(client, monkeypatch):
+    from app import pipeline
+
+    r = client.post("/api/ingest", json={"url": "https://blog.ex.com/x"})
+    assert r.status_code == 401 and r.json()["message"] == "Erreur : Jeton invalide ou manquant"
+    assert r.json()["detail"] == "Jeton invalide ou manquant"          # the app reads `detail`
+    r = client.post("/api/ingest", json={}, headers=AUTH)
+    assert r.status_code == 400 and r.json()["message"] == "Erreur : Envoie une URL, un texte ou un fichier"
+    r = client.post("/api/notes", json={"space": "perso"}, headers=AUTH)
+    assert r.status_code == 422 and r.json()["message"] == "Erreur : requête invalide (content)"
+    r = client.post("/api/ingest", json={"text": "x", "category": "inconnue"}, headers=AUTH)
+    assert r.status_code == 400 and "Catégorie inconnue" in r.json()["message"]
+
+    def boom(**_):
+        raise RuntimeError("Upload Storage échoué (404) : Bucket not found")
+
+    monkeypatch.setattr(pipeline, "ingest", boom)
+    from app.main import app
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.post("/api/ingest", json={"text": "x"}, headers=AUTH)
+    assert r.status_code == 500
+    assert r.json()["message"] == "Erreur : erreur serveur (RuntimeError: Upload Storage échoué (404) : Bucket not found)"

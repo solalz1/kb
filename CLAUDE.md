@@ -38,6 +38,8 @@ update both.
     `agent.py` (Haiku picks → Sonnet writes the daily digest; Opus writes Monday's weekly digest and projects; the
     model only cites candidate ids, URLs always come from the sources; `Scheduler` thread in the worker, `run_due`),
     `render.py` (Markdown, e-mail HTML, SMTP). Tables: `watch`, `digests`, `digest_feedback`.
+- `shortcuts/build.py`: generates the three iOS/macOS Shortcuts (binary plists, stdlib only; the token is an import
+  question, never written). Signing needs macOS (`--sign`). `tests/test_shortcuts.py` checks them against the API.
 - `web/`: React 19 + Vite PWA, no CSS framework. "Index card" design: card color = content type (`--b-*` variables in
   `styles.css`), red rule under the card header. Keep this visual language.
 

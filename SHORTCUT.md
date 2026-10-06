@@ -11,6 +11,19 @@ You need the address `https://kb.example.com/api/ingest` and your `KB_API_TOKEN`
 
 Both Shortcuts sync through iCloud: build them once on your iPhone and they also show up in the Mac's Share menu.
 
+## Fastest: generate them (Mac, 2 minutes)
+
+`shortcuts/build.py` writes the three Shortcuts below as files, ready to import. iOS and macOS only import **signed**
+Shortcuts and only a Mac can sign them, so run it on your Mac, from the repository folder:
+
+```bash
+python3 shortcuts/build.py --url https://kb.example.com --sign
+```
+
+Then double-click each file in `shortcuts/dist/`: Shortcuts asks for your `KB_API_TOKEN` (it goes into the first
+action, "Text", never into the files) and adds the Shortcut. They reach your iPhone through iCloud. They are named
+`Add To KB`, `Fichier vers ma KB` and `Note perso`; rename them as you like. Without a Mac, build them by hand below.
+
 ---
 
 ## Shortcut 1: "Add to my KB" (links and text)
@@ -22,6 +35,7 @@ Both Shortcuts sync through iCloud: build them once on your iPhone and they also
 3. Add **Get Item from List** → *First Item* of *URLs*.
 4. Add **Get Text from Input** (input: *Shortcut Input*).
 5. Optional but useful: **Ask for Input** → type *Text*, prompt `Why are you keeping this?`. You can confirm without typing anything.
+   Then, to file it with one tap: **List** with `Veille`, `Perso`, `Principe`, `Valeur`, `Leçon`, `Objectif`, `Habitude`, `Réflexion`, `Journal`, `Citation`, `Ressource`, followed by **Choose from List** (prompt `Où le ranger ?`).
 6. Add **Get Contents of URL**:
    - URL: `https://kb.example.com/api/ingest`
    - Tap **Show More**:
@@ -31,6 +45,7 @@ Both Shortcuts sync through iCloud: build them once on your iPhone and they also
        - `url` = *Item from List* (step 3)
        - `text` = *Text* (step 4)
        - `note` = *Provided Input* (step 5), or leave empty
+       - `category` = *Chosen Item* (step 5), if you added the list: `Veille` and `Perso` pick the space, the others a Perso category
 7. Add **Get Dictionary Value** → key `message` in *Contents of URL*.
 8. Add **Show Notification** → *Dictionary Value*.
 
@@ -39,13 +54,15 @@ Test: in the X app, tap Share on a tweet → **Add to my KB** → a confirmation
 ## Shortcut 2: "File to my KB" (PDFs, images, audio, video)
 
 1. **ⓘ** → **Show in Share Sheet**. Input types: **Images**, **PDFs**, **Files** and **Media** only.
-2. Optional: **Ask for Input** → `Why are you keeping this?`.
+2. Optional: **Ask for Input** → `Why are you keeping this?`, then the same **List** + **Choose from List** as in Shortcut 1.
 3. Add **Repeat with Each** item in *Shortcut Input*, and inside the loop:
    - **Get Contents of URL** → `https://kb.example.com/api/ingest`, method **POST**, same `Authorization` header.
      Request Body: **Form**, with:
      - `file` → type **File** = *Repeat Item*
      - `note` → type **Text** = *Provided Input*
-4. After the loop: **Show Notification** → `Added to my KB ✓`.
+     - `category` → type **Text** = *Chosen Item*
+   - **Get Dictionary Value** → key `message` in *Contents of URL*.
+4. After the loop: **Show Notification** → *Repeat Results*: the server's answer for each file, including errors.
 
 Test: in Photos, share a screenshot → **File to my KB**.
 
@@ -87,4 +104,4 @@ Test: "Hey Siri, Personal note", dictate "I don't answer emails after 8pm", pick
 - **Selected text** in Safari: select the passage, then Share → **Add to my KB**. The excerpt is kept with the page.
 - **Quick idea**: run **Add to my KB** without sharing anything (from the Home Screen or Siri): it takes the clipboard. You can also dictate a note in the app.
 - To go faster, drop the "Why are you keeping this?" step. You can add the note later on the card.
-- **File it in Perso**: type `#perso` in the "Why are you keeping this?" note (e.g. `#perso #ressource to reread before my 2027 goals`). The item goes to the Perso space, and a category hashtag (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`, or the English `#principle`, `#value`, `#lesson`, `#goal`, `#habit`, `#quote`) files it directly. These hashtags are removed from the note.
+- **File it in Perso**: the generated Shortcuts ask "Où le ranger ?" (Veille, Perso or a Perso category). Without that list, type `#perso` in the "Why are you keeping this?" note (e.g. `#perso #ressource to reread before my 2027 goals`). The item goes to the Perso space, and a category hashtag (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`, or the English `#principle`, `#value`, `#lesson`, `#goal`, `#habit`, `#quote`) files it directly. These hashtags are removed from the note.

@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +22,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import chat, db, export, notion, pipeline, search, storage
 from .config import get_settings
@@ -75,6 +77,30 @@ if settings.cors_origin_list:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+# The Shortcuts show the response's "message" in a notification: errors carry one too, so a failed share says why
+# instead of an empty notification. "detail" stays for the app.
+def _error(status: int, detail: Any, headers: dict | None = None) -> JSONResponse:
+    text = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=False)
+    return JSONResponse({"detail": detail, "message": f"Erreur : {text}"[:500]}, status_code=status, headers=headers)
+
+
+@api.exception_handler(StarletteHTTPException)
+async def _http_error(_: Request, exc: StarletteHTTPException):
+    return _error(exc.status_code, exc.detail, getattr(exc, "headers", None))
+
+
+@api.exception_handler(RequestValidationError)
+async def _validation_error(_: Request, exc: RequestValidationError):
+    fields = ", ".join(".".join(str(p) for p in e.get("loc", ())[1:]) or "corps" for e in exc.errors())
+    return _error(422, f"requête invalide ({fields})")
+
+
+@api.exception_handler(Exception)
+async def _server_error(request: Request, exc: Exception):
+    log.exception("%s %s failed", request.method, request.url.path)
+    return _error(500, f"erreur serveur ({type(exc).__name__}: {exc})"[:300])
 
 
 # ---------------------------------------------------------------------------
