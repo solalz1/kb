@@ -33,7 +33,11 @@ jobs:
         run: pip install -r backend/requirements-dev.txt
       - name: Tests
         working-directory: backend
-        run: pytest -q
+        run: pytest -q --junitxml=results.xml
+      - name: Failures as annotations
+        if: failure()
+        working-directory: backend
+        run: python ../.github/report-failures.py results.xml
 
   web:
     runs-on: ubuntu-latest
@@ -87,5 +91,9 @@ jobs:
         run: pip install -r backend/requirements-site.txt && python -m playwright install --with-deps chromium
       - name: Browser tests
         working-directory: backend
-        run: pytest -q tests/test_site.py
+        run: pytest -q tests/test_site.py --junitxml=site-results.xml
+      - name: Failures as annotations
+        if: failure()
+        working-directory: backend
+        run: python ../.github/report-failures.py site-results.xml
 
