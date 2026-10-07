@@ -3,7 +3,8 @@
 A personal knowledge base: the user shares anything (tweet, article, video, PDF, image, note) from iPhone/Mac, the
 backend extracts it, has Claude summarize it, indexes it (pgvector + full text), and it can be queried through the
 PWA, the API or the MCP server (Claude connector). **The UI is bilingual**: French strings in the code are the keys of `t()` (`web/src/i18n.ts`), their English lives
-in `web/src/i18n/en/*.ts`, and `npm run build` fails on a missing translation. LLM prompts are in French. Items
+in `web/src/i18n/en/*.ts`, and `npm run build` fails on a missing translation (a key may carry a context after `|`,
+never shown in French: `t("Annuler|undo")`). LLM prompts are in French. Items
 keep their card in a second language in `items.translations` (`localized()` in the front); tags are in English. Write new code comments and commit messages in English (older modules still have
 French comments). Public docs are in English with `*.fr.md` French copies:
 update both.
@@ -40,6 +41,8 @@ update both.
   - `digest/`: the tech-digest agent. `sources.py` (HN Algolia, Hugging Face daily papers, GitHub search, RSS via
     feedparser, followed people on X via `/tweets/search/recent`), `profile.py` (interest profile learned from tags,
     entities, saved tweet authors, Perso goals and digest votes; auto-follows/suggests engineers in `watch`),
+    `following.py` (the user's X follows join `watch` as `x_follow`: small newest-first pages read before each daily
+    digest, stopping at a known id, since X bills every account returned; importing older follows is a separate button),
     `agent.py` (Haiku picks → Sonnet writes the daily digest; Opus writes Monday's weekly digest and projects; the
     model only cites candidate ids, URLs always come from the sources; `Scheduler` thread in the worker, `run_due`),
     `render.py` (Markdown, e-mail HTML, SMTP). Tables: `watch`, `digests`, `digest_feedback`.
@@ -49,6 +52,8 @@ update both.
   `styles.css`), red rule under the card header, blue ink (`--waterman`) for actions. Type and shapes follow the
   owner's site: Bricolage Grotesque titles, Geist text, Geist Mono uppercase labels, hairlines, 8px buttons (fonts
   self-hosted with `@fontsource-variable`). Keep this visual language and these colors.
+  Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
+  each with an undo toast; a deletion waits 5 s before it reaches the API.
 
 ## Commands
 

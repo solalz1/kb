@@ -5,6 +5,7 @@ Skipped when Playwright or the build is missing (the backend CI job); the `site`
 Any JavaScript error or failed request on a page fails the test.
 """
 
+import re
 import socket
 import threading
 import time
@@ -72,9 +73,11 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     contexts, problems = [], []
 
     def open_page(path: str = "/", viewport: dict = PHONE, lang: str = "fr", signed_in: bool = True,
-                  expected_status: int | None = None) -> Page:
-        """`expected_status`: an HTTP error the test causes on purpose (the browser logs it as a console error)."""
-        ctx = browser.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris")
+                  expected_status: int | None = None, touch: bool = False) -> Page:
+        """`expected_status`: an HTTP error the test causes on purpose (the browser logs it as a console error).
+        `touch`: a touch screen, as on an iPhone (see _swipe)."""
+        ctx = browser.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
+                                  has_touch=touch)
         # first visit only: switching the language in the app (which reloads it) must stick
         init = f"if (!localStorage.getItem('kb_lang')) localStorage.setItem('kb_lang', '{lang}');"
         if signed_in:
@@ -112,6 +115,19 @@ def _seed(client_page: Page) -> dict:
     journal = _api(client_page, "POST", "/api/notes", content="Bonne journée de travail.", category="journal")
     drain()
     return {"article": article["body"]["id"], "principle": principle["body"]["id"], "journal": journal["body"]["id"]}
+
+
+def _swipe(page: Page, target, dx: float, steps: int = 14):
+    """A finger dragged horizontally across `target` (real touch events, so the page sees pointerType "touch")."""
+    box = target.bounding_box()
+    x = box["x"] + (box["width"] - 24 if dx < 0 else 24)
+    y = box["y"] + min(50, box["height"] / 2)
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+    for i in range(1, steps + 1):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x + dx * i / steps, "y": y + i * 0.3}]})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    cdp.detach()
 
 
 def test_sign_in(site):
@@ -269,3 +285,167 @@ def test_app_shell_files(site):
     for path in ("/sw.js", "/manifest.webmanifest", "/robots.txt"):
         assert page.request.get(path).ok, path
     assert page.request.get("/api/health").json()["ok"] is True
+
+
+def _wait_for(condition, page: Page, seconds: float = 10):
+    """For effects the page triggers in the background (an undo, a deletion): poll instead of guessing a delay."""
+    for _ in range(int(seconds * 10)):
+        if condition():
+            return
+        page.wait_for_timeout(100)
+    assert condition()
+
+
+def _exists(item_id: str) -> bool:
+    from app import db
+
+    return db.fetchone("select 1 from items where id = %s", (item_id,)) is not None
+
+
+def test_swipe_to_pin_archive_and_delete(site):
+    page = site("/", touch=True)
+    ids = _seed(page)
+    second = _api(page, "POST", "/api/ingest", url="https://blog.ex.com/evals")["body"]["id"]
+    drain()
+    page.reload()
+    cards = page.locator(".swipe")
+    expect(cards).to_have_count(2)
+    card = cards.filter(has=page.locator(f"a[href='/item/{ids['article']}']"))
+    toast = page.get_by_role("status")
+
+    # a plain tap still opens the card
+    card.locator(".fiche").tap()
+    expect(page).to_have_url(f"{page.url.split('/item')[0]}/item/{ids['article']}")
+    page.go_back()
+    expect(cards).to_have_count(2)
+
+    # long swipe right: pinned, with an undo
+    _swipe(page, card, 280)
+    expect(toast).to_contain_text("Épinglé")
+    expect(card.locator(".fiche-head .pin")).to_be_visible()
+    assert _api(page, "GET", f"/api/items/{ids['article']}")["body"]["pinned"] is True
+    toast.get_by_role("button", name="Annuler").click()
+    expect(card.locator(".fiche-head .pin")).to_have_count(0)
+    _wait_for(lambda: _api(page, "GET", f"/api/items/{ids['article']}")["body"]["pinned"] is False, page)
+
+    # short swipe left: the actions stay open; tapping the card closes them instead of opening it
+    _swipe(page, card, -110)
+    expect(card.get_by_role("button", name="Archiver")).to_be_visible()
+    expect(card.get_by_role("button", name="Supprimer")).to_be_visible()
+    card.locator(".fiche h3").tap()
+    expect(card.get_by_role("button", name="Archiver")).to_be_hidden()
+    expect(page).not_to_have_url(re.compile(r"/item/"))
+
+    # long swipe left: archived, and found in the Archives
+    _swipe(page, card, -300)
+    expect(toast).to_contain_text("Archivé")
+    expect(cards).to_have_count(1)
+    assert _api(page, "GET", f"/api/items/{ids['article']}")["body"]["archived"] is True
+    page.get_by_role("button", name="Archives").click()
+    expect(page.get_by_role("heading", name="Archives")).to_be_visible()
+    expect(cards).to_have_count(1)
+    _swipe(page, cards.first, -110)
+    cards.first.get_by_role("button", name="Ressortir").tap()
+    expect(toast).to_contain_text("Sorti des archives")
+    expect(page.get_by_text("Rien dans les archives.")).to_be_visible()
+    page.get_by_role("button", name="Veille").click()
+    expect(cards).to_have_count(2)
+
+    # delete: undo puts it back and nothing is deleted
+    other = cards.filter(has=page.locator(f"a[href='/item/{second}']"))
+    _swipe(page, other, -110)
+    other.get_by_role("button", name="Supprimer").tap()
+    expect(toast).to_contain_text("Supprimé")
+    expect(cards).to_have_count(1)
+    toast.get_by_role("button", name="Annuler").click()
+    expect(cards).to_have_count(2)
+    page.wait_for_timeout(5500)
+    assert _exists(second)
+
+    # delete again and leave the page: the deletion happens right away
+    _swipe(page, other, -110)
+    other.get_by_role("button", name="Supprimer").tap()
+    expect(cards).to_have_count(1)
+    page.locator(".tabbar").get_by_role("link", name="Perso").click()
+    expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+    _wait_for(lambda: not _exists(second), page)
+
+
+def test_mouse_clicks_still_open_cards(site):
+    page = site("/", viewport=DESKTOP)
+    ids = _seed(page)
+    page.reload()
+    page.locator(f"a[href='/item/{ids['article']}']").click()
+    expect(page.get_by_role("button", name="Archiver")).to_be_visible()
+
+
+_OVERFLOW = """() => {
+  // elements reaching past the screen's right edge that no scrolling strip (chips, cards to rediscover) clips
+  const vw = document.documentElement.clientWidth, out = [];
+  const clipped = (el) => {
+    for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (getComputedStyle(p).overflowX !== "visible") return true;
+    }
+    return false;
+  };
+  for (const el of document.querySelectorAll("body *")) {
+    const r = el.getBoundingClientRect();
+    if (r.width && r.right > vw + 1 && !clipped(el) && getComputedStyle(el).position !== "fixed")
+      out.push(`${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}: ${(el.textContent || "").trim().slice(0, 40)}`);
+  }
+  return out;
+}"""
+
+
+def test_no_page_slides_sideways_on_a_phone(site):
+    """Long names, links and errors stay inside the screen, and fields are big enough that iPhone doesn't zoom."""
+    from app import db
+
+    page = site("/", touch=True)
+    _seed(page)
+    long_url = "https://a-very-long-blog-name.example.com/feeds/all-posts-and-comments.atom?format=full&lang=fr"
+    db.execute("""insert into watch (kind, name, feed_url, origin, last_error) values
+                  ('feed', %s, %s, 'manual', %s)""", (long_url, long_url, f"HTTPError 404 for {long_url}"))
+    db.execute("""insert into watch (kind, name, x_handle, origin, note) values
+                  ('person', 'Quelqu''un au nom vraiment très long pour un téléphone', 'averyveryverylonghandle', 'manual',
+                   'Écrit sur https://averyveryverylonghandle.substack.com/p/une-adresse-sans-espaces-qui-ne-finit-pas')""")
+    entry = {"key": "hn:1", "section": "essentiel", "title": "Un titre", "summary": "Un résumé.", "why": "", "kind": "article",
+             "url": long_url, "source": "Hacker News", "author": "averyveryverylongauthornamewithoutanyspaceatall_and_more",
+             "person": None, "published_at": None, "in_kb": False, "links": {}}
+    db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
+                  values ('daily', current_date, current_date, 'ready', 'Une journée.', %s)""",
+               (db.jsonb({"entries": [entry]}),))
+    for path in ["/", "/perso", "/journal", "/digest", "/digest/interets", "/ask", "/add", "/todo", "/settings"]:
+        page.goto(path)
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate(_OVERFLOW) == [], path
+    for path, field in [("/", "#q"), ("/digest/interets", ".add-row .field")]:
+        page.goto(path)
+        size = page.locator(field).first.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
+        assert size >= 16, (path, size)
+    assert page.evaluate("getComputedStyle(document.documentElement).overscrollBehaviorY") == "none"
+
+
+def test_link_x_account_and_its_follows(site, monkeypatch):
+    from app.digest import following
+
+    from .test_following import FakeX
+
+    fake = FakeX()
+    monkeypatch.setattr(following, "_get", fake)
+    page = site("/digest/interets")
+    page.get_by_label("Ton compte X").fill("solal_test")
+    page.get_by_role("button", name="Relier").click()
+    expect(page.get_by_text("Relié à @solal_test")).to_be_visible()
+    expect(page.locator(".watch-row")).to_have_count(0)
+
+    fake.follow("karpathy", "Andrej Karpathy")
+    page.get_by_role("button", name="Vérifier maintenant").click()
+    expect(page.locator(".watch-row", has_text="Andrej Karpathy")).to_contain_text("suivi sur X")
+    expect(page.get_by_text("Ajouté la dernière fois : Andrej Karpathy")).to_be_visible()
+
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name=re.compile("Importer ceux d'avant")).click()
+    expect(page.locator(".watch-row")).to_have_count(13)
+    page.get_by_role("button", name="Délier").click()
+    expect(page.get_by_label("Ton compte X")).to_be_visible()

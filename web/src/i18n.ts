@@ -4,6 +4,8 @@
 // strings live in src/i18n/en/*.ts (one module per area, merged below). A missing translation shows the French text,
 // never an empty label, and is reported once in the console during development.
 // Variables: t("{n} éléments", { n: 3 }). Changing the language reloads the app.
+// When one French word needs two English ones, the key carries a context after "|", never shown in French:
+// t("Annuler") is "Cancel", t("Annuler|undo") is "Undo".
 
 export type Lang = "fr" | "en";
 
@@ -31,7 +33,8 @@ export function setLang(next: Lang): void {
 const reported = new Set<string>();
 
 export function t(fr: string, vars?: Record<string, string | number>): string {
-  let out = fr;
+  const bar = fr.indexOf("|");
+  let out = bar >= 0 ? fr.slice(0, bar) : fr;
   if (lang === "en") {
     const en = EN[fr];
     if (en !== undefined) out = en;

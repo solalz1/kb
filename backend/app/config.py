@@ -83,8 +83,8 @@ class Settings(BaseSettings):
     jina_api_key: str = ""
 
     # --- Copie Notion (facultative) ---
-    notion_token: str = ""          # secret d'une intégration interne Notion (ntn_…)
-    notion_parent_page_id: str = "" # page (ou son URL) partagée avec l'intégration ; la base y est créée
+    notion_token: str = ""          # API token of a Notion connection (Developer tools > Connections, ntn_…)
+    notion_parent_page_id: str = "" # page (or its URL) the connection can access; the database is created there
     notion_spaces: str = "main,perso"  # espaces copiés : "perso" pour ne copier que l'espace Perso
 
     # --- Daily / weekly tech digest agent (optional) ---

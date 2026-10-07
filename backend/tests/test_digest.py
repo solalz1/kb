@@ -17,6 +17,9 @@ from app.extractors import twitter
 
 from .conftest import drain
 from .test_e2e import AUTH, _mcp
+from .test_llm import FakeClaude as FakeClaudeAPI, _bad_request, REFUSED
+
+REAL_CALL_TOOL = llm.call_tool          # the fixtures replace it; one test needs the real one
 
 NOW = datetime.now(timezone.utc)
 RSS = f"""<?xml version="1.0"?><rss version="2.0"><channel><title>Techmeme</title>
@@ -425,3 +428,54 @@ def test_markdown_to_html():
     assert '<a href="https://ex.com/a?b=1&amp;c=2">Lien</a>' in html and "&lt;b&gt;" in html
     assert "<ol>" in html and html.count("<li>") == 3 and "<p>Paragraphe.</p>" in html
     assert json.dumps(render.SECTION_IDS) == json.dumps(["essentiel", "industrie", "modeles", "voix", "recherche", "ingenierie"])
+
+
+def test_try_again_on_models_that_refuse_forced_tools(client, digest_env, monkeypatch):
+    """The production case: Sonnet 5.5 refused the forced tool call, the digest showed the raw 400. With the real
+    call_tool, « Réessayer » now writes it through structured outputs, and an API error reads like a sentence."""
+    from app import db
+
+    schemas = {"pick_items": agent.PICK_SCHEMA, "write_digest": agent.DAILY_SCHEMA, "write_weekly": agent.WEEKLY_SCHEMA,
+               "propose_projects": agent.PROJECTS_SCHEMA, "save_profile": profile.PROFILE_SCHEMA}
+    seen = []
+
+    class API(FakeClaudeAPI):
+        def _call(self, **kw):
+            forced = (kw.get("tool_choice") or {}).get("type") == "tool"
+            seen.append((kw["model"], "forced" if forced else "structured"))
+            if forced and kw["model"] != "claude-haiku-4-5":
+                raise _bad_request(REFUSED)
+            if forced:
+                name = kw["tools"][0]["name"]
+            else:
+                name = next(n for n, sch in schemas.items() if llm.strict_schema(sch) == kw["output_config"]["format"]["schema"])
+            self.answer = digest_env(system=kw["system"], content=kw["messages"][0]["content"], tool_name=name,
+                                     tool_description="", schema=None, model=kw["model"])
+            return super()._call(**kw)
+
+    monkeypatch.setattr(llm, "call_tool", REAL_CALL_TOOL)
+    monkeypatch.setattr(llm, "_NO_FORCED_TOOL", set())
+    monkeypatch.setattr(llm, "client", lambda: API(None))
+
+    # the digest as it was in production: in error after the refused call
+    row = db.fetchone("""insert into digests (kind, period_start, period_end, status, error)
+                         values ('daily', current_date, current_date, 'error', %s) returning id""",
+                      ("BadRequestError: Error code: 400 - {...}",))
+    assert client.post(f"/api/digests/{row['id']}/regenerate", headers=AUTH).json()["ok"] is True
+    d = client.get(f"/api/digests/{row['id']}", headers=AUTH).json()
+    assert d["status"] == "ready" and d["error"] is None
+    assert d["headline"].startswith("Un modèle ouvert géant")
+    assert len(d["data"]["entries"]) >= 3
+    assert ("claude-sonnet-5-5", "forced") in seen and ("claude-sonnet-5-5", "structured") in seen
+    assert ("claude-haiku-4-5", "forced") in seen and ("claude-haiku-4-5", "structured") not in seen
+
+    # an error from the API is stored as a readable sentence, not as the raw JSON of the answer
+    def down(**kw):
+        raise _bad_request("Your credit balance is too low to access the Anthropic API.")
+
+    monkeypatch.setattr(llm, "client", lambda: type("C", (), {"messages": type("M", (), {"create": staticmethod(down),
+                                                                                        "stream": staticmethod(down)})})())
+    assert client.post(f"/api/digests/{row['id']}/regenerate", headers=AUTH).json()["ok"] is True
+    d = client.get(f"/api/digests/{row['id']}", headers=AUTH).json()
+    assert d["status"] == "error"
+    assert d["error"] == "Claude a répondu 400 : Your credit balance is too low to access the Anthropic API."

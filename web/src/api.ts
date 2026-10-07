@@ -177,7 +177,7 @@ export interface Watch {
   x_handle: string | null;
   url: string | null;
   feed_url: string | null;
-  origin: "manual" | "auto" | "default" | "suggested";
+  origin: "manual" | "auto" | "default" | "suggested" | "x_follow";
   status: "active" | "suggested" | "muted";
   note: string | null;
   last_ok_at: string | null;
@@ -191,6 +191,21 @@ export interface Interests {
   people: Watch[];
   feeds: Watch[];
   schedule: { enabled: boolean; hour: number; timezone: string; email: boolean; x: boolean };
+  x_follow: XFollow;
+}
+
+/** The user's X account, whose follows join the digest's people (backend/app/digest/following.py). */
+export interface XFollow {
+  configured: boolean;
+  available: boolean;          // X_BEARER_TOKEN is set
+  username: string | null;
+  following_count: number | null;
+  import_cost: number;         // USD, to import every account followed so far
+  imported_at: string | null;
+  last_sync_at: string | null;
+  last_added: string[];
+  added_total: number;
+  last_error: string | null;
 }
 
 export interface TodoAction extends Action {
@@ -325,6 +340,9 @@ export const api = {
   patchWatch: (id: number, body: { status?: Watch["status"]; name?: string }) =>
     request<Watch>(`/api/watch/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   removeWatch: (id: number) => request<{ ok: boolean }>(`/api/watch/${id}`, { method: "DELETE" }),
+  linkX: (username: string) => request<XFollow>("/api/x-follow", { method: "PUT", body: JSON.stringify({ username }) }),
+  syncX: () => request<XFollow>("/api/x-follow/sync", { method: "POST" }),
+  importX: () => request<XFollow>("/api/x-follow/import", { method: "POST" }),
   notionSync: () => request<{ ok: boolean }>("/api/notion/sync", { method: "POST" }),
   notionLanguage: (language: string) =>
     request<NotionStatus>("/api/notion/language", { method: "PUT", body: JSON.stringify({ language }) }),

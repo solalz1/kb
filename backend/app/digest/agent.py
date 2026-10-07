@@ -16,9 +16,11 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import anthropic
+
 from .. import db, llm, pipeline
 from ..config import get_settings
-from . import profile, render, sources
+from . import following, profile, render, sources
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +197,7 @@ def _profile_text() -> str:
 
 def build_daily(day: date) -> dict:
     s = get_settings()
+    following.sync_due()          # people followed on X since yesterday are in today's digest
     prof = _profile_text()
     since = datetime.now(timezone.utc) - timedelta(hours=26)
     seen = sources.shown_recently(except_day=day)
@@ -409,7 +412,7 @@ def generate(digest_id: int) -> dict | None:
     except Exception as exc:
         log.exception("Digest %s en échec", digest_id)
         db.execute("update digests set status = 'error', error = %s, updated_at = now() where id = %s",
-                   (f"{type(exc).__name__}: {exc}"[:1000], digest_id))
+                   (describe_error(exc)[:1000], digest_id))
         return None
     finally:
         with _threads_lock:
@@ -422,6 +425,19 @@ def periods(kind: str, today: date) -> tuple[date, date]:
         monday = today - timedelta(days=today.weekday())
         return monday - timedelta(days=7), monday - timedelta(days=1)
     return today, today
+
+
+def describe_error(exc: Exception) -> str:
+    """What the digest page shows: Claude's own message rather than the raw JSON of its answer."""
+    if isinstance(exc, anthropic.APIStatusError):
+        body = exc.body if isinstance(exc.body, dict) else {}
+        error = body.get("error") if isinstance(body.get("error"), dict) else {}
+        message = error.get("message") or exc.message
+        request_id = getattr(exc, "request_id", None) or body.get("request_id")
+        return f"Claude a répondu {exc.status_code} : {message}" + (f" ({request_id})" if request_id else "")
+    if isinstance(exc, anthropic.APIConnectionError):
+        return f"Claude injoignable : {exc}"
+    return f"{type(exc).__name__}: {exc}"
 
 
 _TAKEOVER = """(status = 'error' and attempts < %(max)s and updated_at < now() - %(retry)s)
