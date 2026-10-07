@@ -660,6 +660,11 @@ details summary { cursor: pointer; font-weight: 500; color: var(--ink-2); }
 .w-note { flex-basis: 100%; font-size: 14px; color: var(--ink-2); }
 .w-err { flex-basis: 100%; font-size: 13px; color: var(--danger); }
 .w-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.x-follow { margin: 4px 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.x-follow-lead { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.x-follow .add-row { margin-top: 10px; }
+.x-follow .hint { margin: 8px 0 0; }
+.x-follow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
 .add-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
 .add-row .field { flex: 1 1 180px; padding: 8px 12px; font-size: 15px; }
 .with-icon { position: relative; flex: 1 1 200px; display: flex; }

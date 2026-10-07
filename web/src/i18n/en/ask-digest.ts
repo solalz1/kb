@@ -191,4 +191,23 @@ export default {
   "Toujours lus aussi : Hacker News, les papiers du jour de Hugging Face et les dépôts GitHub qui montent.":
     "Always read as well: Hacker News, Hugging Face's daily papers and trending GitHub repositories.",
   "Adresse d'un blog ou d'un flux RSS": "Address of a blog or RSS feed",
+  "suivi sur X": "followed on X",
+  "Pour ajouter tout seul les comptes que tu suis sur X, renseigne X_BEARER_TOKEN dans Railway.":
+    "To add the accounts you follow on X automatically, set X_BEARER_TOKEN in Railway.",
+  "Relie ton compte X : chaque personne que tu suis sur X arrive ici toute seule.":
+    "Link your X account: everyone you follow on X shows up here on their own.",
+  "Ton compte X": "Your X account",
+  "ton compte X": "your X account",
+  "Relier": "Link",
+  "Chaque matin, avant le digest, l'agent lit tes 5 derniers abonnements (0,05 $ de crédits X) et continue tant qu'il en trouve de nouveaux.":
+    "Every morning, before the digest, the agent reads your 5 latest follows ($0.05 of X credits) and goes on while it finds new ones.",
+  "Relié à {handle}": "Linked to {handle}",
+  "{n} abonnements": "{n} following",
+  "vérifié {when}": "checked {when}",
+  "Ajouté la dernière fois : {names}": "Added last time: {names}",
+  "Vérifier maintenant": "Check now",
+  "Importer les {n} comptes que tu suis déjà ? Ça coûte environ {cost} de crédits X, une seule fois.":
+    "Import the {n} accounts you already follow? It costs about {cost} of X credits, once.",
+  "Importer ceux d'avant (≈ {cost})": "Import earlier ones (≈ {cost})",
+  "Délier": "Unlink",
 } as Record<string, string>;

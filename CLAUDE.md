@@ -41,6 +41,8 @@ update both.
   - `digest/`: the tech-digest agent. `sources.py` (HN Algolia, Hugging Face daily papers, GitHub search, RSS via
     feedparser, followed people on X via `/tweets/search/recent`), `profile.py` (interest profile learned from tags,
     entities, saved tweet authors, Perso goals and digest votes; auto-follows/suggests engineers in `watch`),
+    `following.py` (the user's X follows join `watch` as `x_follow`: small newest-first pages read before each daily
+    digest, stopping at a known id, since X bills every account returned; importing older follows is a separate button),
     `agent.py` (Haiku picks → Sonnet writes the daily digest; Opus writes Monday's weekly digest and projects; the
     model only cites candidate ids, URLs always come from the sources; `Scheduler` thread in the worker, `run_due`),
     `render.py` (Markdown, e-mail HTML, SMTP). Tables: `watch`, `digests`, `digest_feedback`.

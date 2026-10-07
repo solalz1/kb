@@ -424,3 +424,28 @@ def test_no_page_slides_sideways_on_a_phone(site):
         size = page.locator(field).first.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
         assert size >= 16, (path, size)
     assert page.evaluate("getComputedStyle(document.documentElement).overscrollBehaviorY") == "none"
+
+
+def test_link_x_account_and_its_follows(site, monkeypatch):
+    from app.digest import following
+
+    from .test_following import FakeX
+
+    fake = FakeX()
+    monkeypatch.setattr(following, "_get", fake)
+    page = site("/digest/interets")
+    page.get_by_label("Ton compte X").fill("solal_test")
+    page.get_by_role("button", name="Relier").click()
+    expect(page.get_by_text("Relié à @solal_test")).to_be_visible()
+    expect(page.locator(".watch-row")).to_have_count(0)
+
+    fake.follow("karpathy", "Andrej Karpathy")
+    page.get_by_role("button", name="Vérifier maintenant").click()
+    expect(page.locator(".watch-row", has_text="Andrej Karpathy")).to_contain_text("suivi sur X")
+    expect(page.get_by_text("Ajouté la dernière fois : Andrej Karpathy")).to_be_visible()
+
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name=re.compile("Importer ceux d'avant")).click()
+    expect(page.locator(".watch-row")).to_have_count(13)
+    page.get_by_role("button", name="Délier").click()
+    expect(page.get_by_label("Ton compte X")).to_be_visible()

@@ -28,6 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import chat, db, export, llm, migrate, notion, pipeline, search, storage
 from .config import get_settings
 from .digest import agent as digest_agent
+from .digest import following as digest_following
 from .digest import profile as digest_profile
 from .digest import render as digest_render
 from .digest import sources as digest_sources
@@ -755,7 +756,38 @@ def interests():
             "enabled": settings.digest_enabled, "hour": settings.digest_hour, "timezone": settings.digest_timezone,
             "email": digest_render.email_enabled(), "x": bool(settings.x_bearer_token and settings.digest_x_max_posts),
         },
+        "x_follow": digest_following.public_state(),
     }
+
+
+class XAccountIn(BaseModel):
+    username: str
+
+
+def _following(fn, *args):
+    try:
+        return fn(*args)
+    except digest_following.FollowError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@api.put("/api/x-follow", dependencies=auth)
+def link_x_account(body: XAccountIn):
+    """Link the user's X account: the people they follow from now on join the digest's people."""
+    if not body.username.strip():
+        return digest_following.unlink()
+    return _following(digest_following.link, body.username)
+
+
+@api.post("/api/x-follow/sync", dependencies=auth)
+def sync_x_follows():
+    return _following(digest_following.sync)
+
+
+@api.post("/api/x-follow/import", dependencies=auth)
+def import_x_follows():
+    """Every account followed so far, at the cost shown in the app."""
+    return _following(digest_following.import_all)
 
 
 class InterestsText(BaseModel):

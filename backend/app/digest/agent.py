@@ -20,7 +20,7 @@ import anthropic
 
 from .. import db, llm, pipeline
 from ..config import get_settings
-from . import profile, render, sources
+from . import following, profile, render, sources
 
 log = logging.getLogger(__name__)
 
@@ -197,6 +197,7 @@ def _profile_text() -> str:
 
 def build_daily(day: date) -> dict:
     s = get_settings()
+    following.sync_due()          # people followed on X since yesterday are in today's digest
     prof = _profile_text()
     since = datetime.now(timezone.utc) - timedelta(hours=26)
     seen = sources.shown_recently(except_day=day)

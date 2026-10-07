@@ -189,13 +189,17 @@ create table if not exists public.watch (
   x_handle   text,                 -- compte X, sans @
   url        text,                 -- site ou page de la personne
   feed_url   text,                 -- flux RSS/Atom
-  origin     text not null default 'manual' check (origin in ('manual', 'auto', 'default', 'suggested')),
+  origin     text not null default 'manual' check (origin in ('manual', 'auto', 'default', 'suggested', 'x_follow')),
   status     text not null default 'active' check (status in ('active', 'suggested', 'muted')),
   note       text,                 -- pourquoi la suivre
   last_ok_at timestamptz,
   last_error text,
   created_at timestamptz not null default now()
 );
+-- x_follow: followed on X by the user (digest/following.py). Re-created so older databases accept it.
+alter table public.watch drop constraint if exists watch_origin_check;
+alter table public.watch add constraint watch_origin_check
+  check (origin in ('manual', 'auto', 'default', 'suggested', 'x_follow'));
 create unique index if not exists watch_handle_idx on public.watch (lower(x_handle)) where x_handle is not null;
 create unique index if not exists watch_feed_idx   on public.watch (feed_url) where feed_url is not null;
 

@@ -1,13 +1,15 @@
-import { ArrowLeft, AtSign, Check, Loader2, Plus, RefreshCw, Rss, X as Close } from "lucide-react";
+import { ArrowLeft, AtSign, Check, Download, Link2, Loader2, Plus, RefreshCw, Rss, X as Close } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Interests as InterestsT, type Watch } from "../api";
-import { t } from "../i18n";
+import { lang, t } from "../i18n";
 import { ago } from "../kinds";
 
 const ORIGIN: Record<Watch["origin"], string> = {
   manual: t("ajouté par toi"), auto: t("appris de ta KB"), default: t("par défaut"), suggested: t("suggéré par l'agent"),
+  x_follow: t("suivi sur X"),
 };
+const dollars = (n: number) => n.toLocaleString(lang === "fr" ? "fr-FR" : "en-US", { style: "currency", currency: "USD" });
 // the server writes this note for people it follows automatically (backend/app/digest/profile.py, auto_follow)
 const noteOf = (note: string) => {
   const m = note.match(/^(\d+) tweets sauvegardés dans ta KB$/);
@@ -24,6 +26,7 @@ export default function Interests() {
   const [handle, setHandle] = useState("");
   const [name, setName] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
+  const [xUser, setXUser] = useState("");
 
   const load = () => api.interests().then((d) => { setData(d); setText(d.text); setSavedText(d.text); }).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -136,6 +139,7 @@ export default function Interests() {
       <section className="section">
         <h2>{t("Ingénieurs suivis")}</h2>
         <p className="hint" style={{ marginTop: 0 }}>{t("Leurs posts X des dernières 24 h (et leur blog, si tu en donnes l'adresse) entrent dans « Tes ingénieurs ».")}</p>
+        <XFollowBox x={data.x_follow} busy={busy} xUser={xUser} setXUser={setXUser} run={run} />
         {people.length ? <ul className="watch-list">{people.map(row)}</ul> : <p className="muted">{t("Personne pour l'instant.")}</p>}
         <form className="add-row" onSubmit={(e) => { e.preventDefault(); run("person", async () => {
           await api.addWatch({ x_handle: handle, name: name || undefined });
@@ -161,6 +165,57 @@ export default function Interests() {
       </section>
 
       {error && <div className="error-box">{error}</div>}
+    </div>
+  );
+}
+
+/** Link the user's X account: whoever they follow from now on joins the people above, every morning. */
+function XFollowBox({ x, busy, xUser, setXUser, run }: {
+  x: InterestsT["x_follow"]; busy: string; xUser: string; setXUser: (v: string) => void;
+  run: (label: string, fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  if (!x.available) {
+    return <p className="hint x-follow">{t("Pour ajouter tout seul les comptes que tu suis sur X, renseigne X_BEARER_TOKEN dans Railway.")}</p>;
+  }
+  if (!x.configured) {
+    return (
+      <div className="x-follow">
+        <p className="x-follow-lead">{t("Relie ton compte X : chaque personne que tu suis sur X arrive ici toute seule.")}</p>
+        <form className="add-row" onSubmit={(e) => { e.preventDefault(); run("xlink", () => api.linkX(xUser).then(() => setXUser(""))); }}>
+          <div className="with-icon"><AtSign size={15} /><input className="field" aria-label={t("Ton compte X")} placeholder={t("ton compte X")}
+                                                          value={xUser} onChange={(e) => setXUser(e.target.value)} required /></div>
+          <button className="btn small" disabled={Boolean(busy) || !xUser.trim()}>
+            {busy === "xlink" ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />} {t("Relier")}
+          </button>
+        </form>
+        <p className="hint">{t("Chaque matin, avant le digest, l'agent lit tes 5 derniers abonnements (0,05 $ de crédits X) et continue tant qu'il en trouve de nouveaux.")}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="x-follow">
+      <p className="x-follow-lead">
+        {t("Relié à {handle}", { handle: `@${x.username}` })}
+        {x.following_count != null && <> · {t("{n} abonnements", { n: x.following_count })}</>}
+        {x.last_sync_at && <> · {t("vérifié {when}", { when: ago(x.last_sync_at) })}</>}
+      </p>
+      {x.last_added.length > 0 && <p className="hint">{t("Ajouté la dernière fois : {names}", { names: x.last_added.join(", ") })}</p>}
+      {x.last_error && <p className="w-err">{x.last_error}</p>}
+      <div className="x-follow-actions">
+        <button className="btn small" onClick={() => run("xsync", api.syncX)} disabled={Boolean(busy)}>
+          {busy === "xsync" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} {t("Vérifier maintenant")}
+        </button>
+        {!x.imported_at && (x.following_count ?? 0) > 0 && (
+          <button className="btn small" disabled={Boolean(busy)} onClick={() => {
+            if (window.confirm(t("Importer les {n} comptes que tu suis déjà ? Ça coûte environ {cost} de crédits X, une seule fois.",
+                                 { n: x.following_count ?? 0, cost: dollars(x.import_cost) }))) run("ximport", api.importX);
+          }}>
+            {busy === "ximport" ? <Loader2 size={14} className="spin" /> : <Download size={14} />}{" "}
+            {t("Importer ceux d'avant (≈ {cost})", { cost: dollars(x.import_cost) })}
+          </button>
+        )}
+        <button className="linkish" disabled={Boolean(busy)} onClick={() => run("xunlink", () => api.linkX(""))}>{t("Délier")}</button>
+      </div>
     </div>
   );
 }

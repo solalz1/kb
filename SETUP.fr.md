@@ -103,6 +103,7 @@ Chaque matin à `DIGEST_HOUR`, le worker lit Hacker News, les papiers du jour de
 2. Dans l'app, **Digest → Mes intérêts** :
    - écris quelques phrases sur ce que tu veux suivre et à quel niveau ;
    - ajoute les ingénieurs que tu aimes par leur compte X (leurs posts arrivent dans « Tes ingénieurs »), et des blogs par leur adresse (le flux RSS est trouvé tout seul) ;
+   - relie ton compte X (**Relier**) : chaque personne que tu suis sur X à partir de là est ajoutée chaque matin, avant le digest. L'agent lit tes 5 derniers abonnements (0,05 $ de crédits X) et continue tant qu'ils sont nouveaux ; **Vérifier maintenant** vérifie tout de suite. **Importer ceux d'avant** ajoute les comptes que tu suivais déjà, une seule fois, à 0,01 $ par compte (le total s'affiche avant). Te désabonner de quelqu'un sur X ne le retire pas ici : mets-le en pause ou retire-le dans l'app ;
    - accepte ou ignore les ingénieurs que l'agent te suggère. Les personnes dont tu sauvegardes deux tweets sont suivies automatiquement.
 3. **Digest → Générer maintenant** pour avoir le premier tout de suite (environ une minute). Ensuite, il arrive seul chaque matin.
 4. Vote sur les éléments et les projets (pouces, **Garder**, **Je le fais**) : le profil est recalculé chaque lundi à partir de tes sauvegardes, de tes objectifs Perso et de ces votes. **Je le fais** enregistre le projet comme une note taguée `projet`.

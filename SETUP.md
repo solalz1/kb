@@ -103,6 +103,7 @@ Every morning at `DIGEST_HOUR`, the worker reads Hacker News, the Hugging Face p
 2. In the app, **Digest → Mes intérêts**:
    - write a few sentences about what you want to follow and at what level;
    - add the engineers you like by their X handle (their posts land in « Tes ingénieurs »), and blogs by URL (the RSS feed is found automatically);
+   - link your X account (**Relier**): everyone you follow on X from then on is added every morning, before the digest. The agent reads your 5 latest follows ($0.05 of X credits) and goes on while they are new; **Vérifier maintenant** checks right away. **Importer ceux d'avant** adds the accounts you followed before, once, at $0.01 per account (the total is shown first). Unfollowing someone on X doesn't remove them here: pause or remove them in the app;
    - accept or ignore the engineers the agent suggests. People whose tweets you save twice are followed automatically.
 3. **Digest → Générer maintenant** to get the first one right away (about a minute). Then it arrives on its own every morning.
 4. Vote on entries and projects (thumbs, **Garder**, **Je le fais**): the profile is recomputed every Monday from your saves, your Perso goals and these votes. **Je le fais** saves the project as a note tagged `projet`.
