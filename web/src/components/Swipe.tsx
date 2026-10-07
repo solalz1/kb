@@ -52,6 +52,16 @@ export function SwipeRow({ children, start, end = [], open, onOpenChange }: Prop
     if (!gesture.current && !leavingRef.current) setOffset(rest);
   }, [rest]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Once the finger is swiping sideways, the page must not scroll (or coast) up or down: a coasting page makes the
+  // browser swallow the next tap, which would then miss the revealed buttons. React's touch handlers are passive.
+  useEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const hold = (e: TouchEvent) => { if (gesture.current?.mode === "swipe" && e.cancelable) e.preventDefault(); };
+    el.addEventListener("touchmove", hold, { passive: false });
+    return () => el.removeEventListener("touchmove", hold);
+  }, []);
+
   // a tap anywhere else closes an open row
   useEffect(() => {
     if (!open) return;
@@ -117,6 +127,12 @@ export function SwipeRow({ children, start, end = [], open, onOpenChange }: Prop
     const g = gesture.current;
     if (!g || g.id !== e.pointerId) return;
     gesture.current = null;
+    if (g.mode === "pending" && !cancelled && open && !(e.target as HTMLElement).closest(".swipe-actions")) {
+      // a tap on an open card closes it, without waiting for a click the browser may never send
+      swiped.current = true;
+      onOpenChange(null);
+      return;
+    }
     if (g.mode !== "swipe") return;
     swiped.current = true;
     setDragging(false);
@@ -173,9 +189,23 @@ export function SwipeRow({ children, start, end = [], open, onOpenChange }: Prop
 function SwipeButton({ action, armed, hidden, tabIndex, onClick }: {
   action: SwipeAction; armed?: boolean; hidden?: boolean; tabIndex: number; onClick: () => void;
 }) {
+  // A finger runs the action when it lifts: right after a swipe, browsers may drop the click of a quick tap.
+  // A mouse or the keyboard go through the click as usual.
+  const press = useRef<{ id: number; x: number; y: number } | null>(null);
+  const ran = useRef(false);
   return (
     <button type="button" className={`swipe-btn${armed ? " armed" : ""}${hidden ? " hidden" : ""}`} data-tone={action.tone}
-            data-action={action.id} tabIndex={tabIndex} onClick={onClick}>
+            data-action={action.id} tabIndex={tabIndex}
+            onPointerDown={(e) => { press.current = e.pointerType === "mouse" ? null : { id: e.pointerId, x: e.clientX, y: e.clientY }; }}
+            onPointerUp={(e) => {
+              const p = press.current;
+              press.current = null;
+              if (!p || p.id !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) > LOCK) return;
+              ran.current = true;
+              window.setTimeout(() => { ran.current = false; }, 600);
+              onClick();
+            }}
+            onClick={() => { if (ran.current) { ran.current = false; return; } onClick(); }}>
       {action.icon}
       <span>{action.label}</span>
     </button>

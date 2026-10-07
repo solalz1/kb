@@ -344,17 +344,9 @@ def test_swipe_to_pin_archive_and_delete(site):
     page.get_by_role("button", name="Archives").click()
     expect(page.get_by_role("heading", name="Archives")).to_be_visible()
     expect(cards).to_have_count(1)
-    page.evaluate("""() => { window.__ev = [];
-      for (const t of ["pointerdown", "pointerup", "pointercancel", "click", "touchstart", "touchend", "touchcancel"])
-        document.addEventListener(t, (e) => window.__ev.push(`${t}:${e.pointerType || ""}:${(e.target.className?.baseVal ?? e.target.className) || e.target.tagName}`), true); }""")
     _swipe(page, cards.first, -110)
-    page.evaluate("() => window.__ev.push('--- tap')")
     cards.first.get_by_role("button", name="Ressortir").tap()
-    try:
-        expect(toast).to_contain_text("Sorti des archives")
-    except AssertionError as e:
-        raise AssertionError(f"{e}\nEVENTS: {page.evaluate('() => window.__ev')}\n"
-                             f"ROW: {cards.first.evaluate('el => el.outerHTML.slice(0, 1500)')}") from None
+    expect(toast).to_contain_text("Sorti des archives")
     expect(page.get_by_text("Rien dans les archives.")).to_be_visible()
     page.get_by_role("button", name="Veille").click()
     expect(cards).to_have_count(2)
