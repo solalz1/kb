@@ -287,6 +287,15 @@ def test_app_shell_files(site):
     assert page.request.get("/api/health").json()["ok"] is True
 
 
+def _wait_for(condition, page: Page, seconds: float = 10):
+    """For effects the page triggers in the background (an undo, a deletion): poll instead of guessing a delay."""
+    for _ in range(int(seconds * 10)):
+        if condition():
+            return
+        page.wait_for_timeout(100)
+    assert condition()
+
+
 def _exists(item_id: str) -> bool:
     from app import db
 
@@ -317,8 +326,7 @@ def test_swipe_to_pin_archive_and_delete(site):
     assert _api(page, "GET", f"/api/items/{ids['article']}")["body"]["pinned"] is True
     toast.get_by_role("button", name="Annuler").click()
     expect(card.locator(".fiche-head .pin")).to_have_count(0)
-    page.wait_for_timeout(300)
-    assert _api(page, "GET", f"/api/items/{ids['article']}")["body"]["pinned"] is False
+    _wait_for(lambda: _api(page, "GET", f"/api/items/{ids['article']}")["body"]["pinned"] is False, page)
 
     # short swipe left: the actions stay open; tapping the card closes them instead of opening it
     _swipe(page, card, -110)
@@ -360,11 +368,7 @@ def test_swipe_to_pin_archive_and_delete(site):
     expect(cards).to_have_count(1)
     page.locator(".tabbar").get_by_role("link", name="Perso").click()
     expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
-    for _ in range(40):
-        if not _exists(second):
-            break
-        page.wait_for_timeout(100)
-    assert not _exists(second)
+    _wait_for(lambda: not _exists(second), page)
 
 
 def test_mouse_clicks_still_open_cards(site):
