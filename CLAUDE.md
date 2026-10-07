@@ -37,6 +37,9 @@ update both.
   - `notion.py`: optional one-way copy to a Notion database (API version `2026-03-11`, data sources, `markdown` page
     content, `in_trash`). A `Syncer` thread in the worker, throttled to ~3 req/s; deleted items go through the
     `notion_trash` table; database IDs live in `kb_settings`.
+  - `costs.py`: Settings → Costs. Every paid call is recorded in `usage_log` (`costs.record*`, priced from the public
+    price lists). The Claude Console Cost API (`ANTHROPIC_ADMIN_KEY`, cents per UTC day) and the X credit balance are
+    synced and cached 10 min; tests never reach them (the autouse `billing_apis` fixture fakes `_http_get`).
   - `mcp_server.py`: `mcp` SDK **v2** (`MCPServer`, not `FastMCP`), stateless, JSON responses.
   - `digest/`: the tech-digest agent. `sources.py` (HN Algolia, Hugging Face daily papers, GitHub search, RSS via
     feedparser, followed people on X via `/tweets/search/recent`), `profile.py` (interest profile learned from tags,

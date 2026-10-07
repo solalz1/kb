@@ -129,3 +129,96 @@ def test_summary_balances_plans_and_totals(client):
     assert client.put("/api/costs/anthropic", json={"clear_balance": True}, headers=AUTH).json()["services"][0]["remaining"] is None
     assert client.put("/api/costs/inconnu", json={"monthly": 1}, headers=AUTH).status_code == 404
     assert client.put("/api/costs/railway", json={"monthly": -1}, headers=AUTH).status_code == 400
+
+
+def _by_service(client):
+    return {s["id"]: s for s in client.get("/api/costs", headers=AUTH).json()["services"]}
+
+
+def test_claude_costs_come_from_the_console_with_an_admin_key(client, billing_apis, monkeypatch):
+    from app import db
+    from app.config import get_settings
+
+    now = datetime.now(timezone.utc)
+    last_month = (now.replace(day=1) - timedelta(days=3)).replace(hour=9)
+    db.execute("insert into items (kind, title, status, created_at) values ('note', 'La première', 'ready', %s)",
+               (last_month,))
+    costs.record("anthropic", 0.12)
+
+    # without an admin key: the KB's own measure, marked as an estimate
+    by = _by_service(client)
+    assert by["anthropic"]["synced"] is False and by["anthropic"]["month"] == 0.12
+    assert billing_apis.calls == [(costs.X_CREDITS_URL, billing_apis.calls[0][1], {})]   # only X was asked
+
+    # the Console bills in cents, by day, a page at a time
+    monkeypatch.setattr(get_settings(), "anthropic_admin_key", "sk-ant-admin01-test")
+    day = lambda d, *cents: {"starting_at": d.strftime("%Y-%m-%dT00:00:00Z"),            # noqa: E731
+                             "results": [{"amount": c, "currency": "USD"} for c in cents]}
+    pages = {None: {"data": [day(last_month, "250.5")], "has_more": True, "next_page": "p2"},
+             "p2": {"data": [day(now, "40", "17.25"), day(now + timedelta(days=1))], "has_more": False, "next_page": None}}
+    billing_apis.answers[costs.ANTHROPIC_COST_URL] = lambda params: pages[params.get("page")]
+    costs._cache.clear()
+    billing_apis.calls.clear()
+
+    claude = _by_service(client)["anthropic"]
+    assert claude["synced"] is True and claude["sync_error"] is None
+    assert claude["month"] == pytest.approx(0.5725) and claude["total"] == pytest.approx(3.0775)
+    assert claude["kb_month"] == 0.12                                   # what the KB itself used, shown alongside
+    console = [c for c in billing_apis.calls if c[0] == costs.ANTHROPIC_COST_URL]
+    assert len(console) == 2 and console[0][1]["x-api-key"] == "sk-ant-admin01-test"
+    assert console[0][2]["starting_at"] == last_month.strftime("%Y-%m-%dT00:00:00Z")
+    assert console[0][2]["bucket_width"] == "1d" and console[1][2]["page"] == "p2"
+
+    # the monthly spend limit set in the Console; "before tracking" doesn't apply to the Console's own figure
+    r = client.put("/api/costs/anthropic", json={"limit": 20, "before": 7.5}, headers=AUTH)
+    claude = {s["id"]: s for s in r.json()["services"]}["anthropic"]
+    assert claude["limit"] == 20 and claude["left_this_month"] == pytest.approx(19.4275)
+    assert claude["total"] == pytest.approx(3.0775)
+    assert len([c for c in billing_apis.calls if c[0] == costs.ANTHROPIC_COST_URL]) == 2    # cached for a while
+
+    # the Console doesn't answer: back to the estimate, with the reason
+    billing_apis.answers[costs.ANTHROPIC_COST_URL] = lambda params: (_ for _ in ()).throw(
+        RuntimeError("401 : invalid x-api-key"))
+    costs._cache.clear()
+    claude = _by_service(client)["anthropic"]
+    assert claude["synced"] is False and "401" in claude["sync_error"]
+    assert claude["month"] == 0.12 and claude["total"] == pytest.approx(0.12 + 7.5)
+    assert claude["left_this_month"] == pytest.approx(19.88)
+
+    assert client.put("/api/costs/anthropic", json={"limit": 0}, headers=AUTH).json()["services"][0]["limit"] is None
+    assert client.put("/api/costs/anthropic", json={"limit": -1}, headers=AUTH).status_code == 400
+
+
+def test_x_balance_comes_from_x(client, billing_apis):
+    costs.record("x", 0.05)
+    client.put("/api/costs/x", json={"balance": 10}, headers=AUTH)
+
+    # X doesn't answer: the balance noted by hand, minus what the KB read since
+    x = _by_service(client)["x"]
+    assert x["remaining"] == 10 and x["remaining_synced"] is False and x["sync_error"]
+
+    billing_apis.answers[costs.X_CREDITS_URL] = {"data": {"total_balance": 4.2, "prepaid_balance": 4.2,
+                                                          "free_balance": 0, "free_grants": []}}
+    costs._cache.clear()
+    x = _by_service(client)["x"]
+    assert x["remaining"] == 4.2 and x["remaining_synced"] is True and x["sync_error"] is None
+    assert x["month"] == 0.05 and x["synced"] is False                  # what was spent stays the KB's measure
+    token = [c[1] for c in billing_apis.calls if c[0] == costs.X_CREDITS_URL][-1]["Authorization"]
+    assert token == "Bearer x-test"
+
+
+def test_voyage_bills_only_past_its_free_tokens(client, monkeypatch):
+    from app import db
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "embeddings_provider", "voyage")
+    last_month = datetime.now(timezone.utc).replace(day=1) - timedelta(days=2)
+    db.execute("""insert into usage_log (service, model, cost, units, at)
+                  values ('voyage', 'voyage-4', 9, '{"tokens": 150000000}', %s)""", (last_month,))
+    voyage = _by_service(client)["voyage"]
+    assert voyage["month"] == 0 and voyage["total"] == 0 and voyage["tokens"] == 150_000_000
+
+    costs.record("voyage", 6, model="voyage-4", units={"tokens": 100_000_000})
+    voyage = _by_service(client)["voyage"]
+    assert voyage["tokens"] == 250_000_000
+    assert voyage["month"] == pytest.approx(3.0) and voyage["total"] == pytest.approx(3.0)   # 50 M past the free 200 M

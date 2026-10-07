@@ -134,6 +134,31 @@ Cost: about $0.10–0.20 of Claude API per day, plus $0.005 per X post read (at 
 5. If Notion is set up: the item appears in the Notion database within a minute.
 6. **Digest → Générer maintenant**: a digest appears within a minute or two, with links to every source.
 
+## 12. Costs: match the consoles (optional)
+
+**Settings → Costs** shows what each service cost this month and in all, and what's left, in US dollars. Each line says where its figure comes from:
+
+| Service | Figure | Where it comes from |
+|---|---|---|
+| Claude | **synced** with an Admin key, estimated otherwise | the Claude Console's Cost API: the same figure as the Console's spend this month |
+| X | spend estimated, balance **synced** | X's credits endpoint, with `X_BEARER_TOKEN` |
+| Voyage AI | estimated | tokens counted by the KB, minus the 200 M free ones (Voyage has no billing API) |
+| Groq | estimated | seconds of audio counted by the KB (no billing API) |
+| Railway | your plan | the $5/month Hobby minimum, usage included; going over isn't seen (Railway's API has no dollar figures) |
+| Supabase, Notion | your plan | what you enter (free by default) |
+
+An estimate counts the KB's own calls at the public price, from the day the KB started measuring. What the same account spends elsewhere (another app, the Workbench, Claude Code on the API) isn't in it, so it can be lower than the console's figure.
+
+To show the Claude Console's exact figure:
+
+1. The Admin API needs a Console organization: if your account is an individual one, set one up in **Settings → Organization**.
+2. **Settings → Admin keys → Create admin key** (organization admins only). It starts with `sk-ant-admin01-`.
+3. Add it to Railway as `ANTHROPIC_ADMIN_KEY`. The figure refreshes every 10 minutes, and the Console takes a few minutes to count a call.
+
+Weigh it first: an Admin key has full admin rights over the organization (members, workspaces, API keys) and can't be limited to reading costs. The KB only reads the cost report with it, but anyone who can read your Railway variables would get those rights. If that's not worth it, leave it empty and the KB estimates.
+
+The spend limit set in the Console can't be read through the API: enter it with the pencil on the Claude line (**Limite de dépenses mensuelle**), and the app shows what's left this month. A balance shown on a console works the same way: note it, and the app subtracts what the KB spends afterwards.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

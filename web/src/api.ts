@@ -215,15 +215,25 @@ export interface CostService {
   kind: "metered" | "plan";
   url: string;
   prepaid: boolean;
-  free: string | null;
+  free_tokens: number | null;
   in_use: boolean;
   month: number;
   total: number;
   monthly: number | null;
+  /** month and total come from the service itself (the Claude Console), not from the KB's measure */
+  synced: boolean;
+  sync_error: string | null;
+  kb_month: number;
+  kb_total: number;
+  tokens: number | null;
   before: number | null;
   balance: number | null;
   balance_at: string | null;
   remaining: number | null;
+  /** the balance comes from the service (X credits), not from one noted by hand */
+  remaining_synced: boolean;
+  limit: number | null;
+  left_this_month: number | null;
 }
 
 export interface Costs {
@@ -231,6 +241,7 @@ export interface Costs {
   total: number;
   measured_since: string | null;
   started: string;
+  anthropic_admin: boolean;
   services: CostService[];
 }
 
@@ -367,7 +378,7 @@ export const api = {
     request<Watch>(`/api/watch/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   removeWatch: (id: number) => request<{ ok: boolean }>(`/api/watch/${id}`, { method: "DELETE" }),
   costs: () => request<Costs>("/api/costs"),
-  setCosts: (service: string, body: { balance?: number; clear_balance?: boolean; before?: number; monthly?: number }) =>
+  setCosts: (service: string, body: { balance?: number; clear_balance?: boolean; before?: number; monthly?: number; limit?: number }) =>
     request<Costs>(`/api/costs/${service}`, { method: "PUT", body: JSON.stringify(body) }),
   linkX: (username: string) => request<XFollow>("/api/x-follow", { method: "PUT", body: JSON.stringify({ username }) }),
   syncX: () => request<XFollow>("/api/x-follow/sync", { method: "POST" }),

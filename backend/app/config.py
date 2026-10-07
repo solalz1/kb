@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # --- Claude ---
     anthropic_api_key: str = ""
+    anthropic_admin_key: str = ""     # optional: Console Admin API key (sk-ant-admin01-…), to sync costs
     enrich_model: str = "claude-haiku-4-5"
     chat_model: str = "claude-sonnet-5-5"   # modèle par défaut du chat de l'app
     chat_models: str = ""           # choix proposés dans l'app : "id:Libellé,id:Libellé" (vide = liste par défaut)

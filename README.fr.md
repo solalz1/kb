@@ -61,7 +61,7 @@ Si Railway ne redéploie pas, donne accès à ton fork à son app GitHub (GitHub
 
 ## Ce que ça coûte
 
-Avec un usage quotidien, compte 5 à 15 $ par mois : environ 5 $ de Railway, puis Claude. Claude, c'est à peu près 1 centime par élément sauvegardé, 2 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que la KB a dépensé, service par service, ce mois-ci et en tout. Notes-y le solde affiché sur une console, et l'app te dit ce qu'il reste. Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
+Avec un usage quotidien, compte 5 à 15 $ par mois : environ 5 $ de Railway, puis Claude. Claude, c'est à peu près 1 centime par élément sauvegardé, 2 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que chaque service a coûté, ce mois-ci et en tout, en dollars US : synchronisé avec le service quand il a une API pour ça (le solde X, et le chiffre de la Console Claude avec une clé Admin facultative), estimé ailleurs à partir des appels de la KB ([SETUP.fr.md](SETUP.fr.md), étape 12). Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
 
 ## Confidentialité
 

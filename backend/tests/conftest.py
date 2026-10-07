@@ -54,6 +54,30 @@ def clean_db(database):
     yield
 
 
+@pytest.fixture(autouse=True)
+def billing_apis(monkeypatch):
+    """The services' billing APIs (Claude Console costs, X credits) are never called from tests: a test puts the answer
+    for a URL in `.answers` (a dict, or a function of the query parameters); any other URL fails like a service that
+    doesn't answer. `.calls` lists (url, headers, params)."""
+    from types import SimpleNamespace
+
+    from app import costs
+
+    fake = SimpleNamespace(answers={}, calls=[])
+
+    def get(url, headers, params=None):
+        fake.calls.append((url, headers, params or {}))
+        answer = fake.answers.get(url)
+        if answer is None:
+            raise RuntimeError("503 : no billing API in tests")
+        return answer(params or {}) if callable(answer) else answer
+
+    monkeypatch.setattr(costs, "_http_get", get)
+    costs._cache.clear()
+    yield fake
+    costs._cache.clear()
+
+
 @pytest.fixture
 def fake_llm(monkeypatch):
     """Remplace tous les appels à Claude par des réponses déterministes."""
