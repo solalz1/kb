@@ -1,4 +1,4 @@
-import { BookOpen, ListChecks, MessageSquare, Newspaper, Plus, Settings as Cog, Sprout } from "lucide-react";
+import { BookOpen, CalendarDays, ListChecks, MessageSquare, Newspaper, Plus, Settings as Cog, Sprout } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { ApiError, api, auth } from "./api";
@@ -9,6 +9,7 @@ import Digest from "./pages/Digest";
 import Feed from "./pages/Feed";
 import Interests from "./pages/Interests";
 import ItemPage from "./pages/ItemPage";
+import Journal from "./pages/Journal";
 import NoteEditor from "./pages/NoteEditor";
 import Settings from "./pages/Settings";
 import Todo from "./pages/Todo";
@@ -16,6 +17,7 @@ import Todo from "./pages/Todo";
 const NAV = [
   { to: "/", label: t("Veille"), icon: BookOpen, end: true, tab: true },
   { to: "/perso", label: t("Perso"), icon: Sprout, tab: true },
+  { to: "/journal", label: t("Journal"), icon: CalendarDays, tab: false },   // on phones: from the Personal page
   { to: "/digest", label: "Digest", icon: Newspaper, tab: true },
   { to: "/ask", label: t("Demander"), icon: MessageSquare, tab: true },
   { to: "/add", label: t("Ajouter"), icon: Plus, tab: false },   // on phones: the + in the top bar
@@ -134,6 +136,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Feed key="main" space="main" />} />
           <Route path="/perso" element={<Feed key="perso" space="perso" />} />
+          <Route path="/journal" element={<Journal />} />
+          <Route path="/journal/:day" element={<Journal />} />
           <Route path="/note/new" element={<NoteEditor key="new" />} />
           <Route path="/note/:id/edit" element={<NoteEditor key="edit" />} />
           <Route path="/item/:id" element={<ItemPage />} />

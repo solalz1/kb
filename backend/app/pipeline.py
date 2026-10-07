@@ -6,7 +6,8 @@ import logging
 import re
 import unicodedata
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from . import db, embeddings, llm, notion, storage, urls
 from .chunking import chunk_text
@@ -172,6 +173,11 @@ def ingest(
     raise ValueError("Envoie une URL, un texte ou un fichier")
 
 
+def today() -> date:
+    """Today where the user lives (DIGEST_TIMEZONE), not where the server runs."""
+    return datetime.now(ZoneInfo(get_settings().digest_timezone)).date()
+
+
 def create_note(
     *,
     content: str,
@@ -180,6 +186,7 @@ def create_note(
     category: str | None = None,
     tags: list[str] | None = None,
     why: str | None = None,
+    entry_date: date | None = None,
 ) -> dict:
     """Note écrite à la main (ou dictée) : le texte est gardé tel quel, Claude ajoute résumé, tags et liens."""
     content = (content or "").strip()
@@ -194,10 +201,12 @@ def create_note(
         metadata["manual_title"] = True
     if tags:
         metadata["user_tags"] = tags
+    # a journal note belongs to a day: the one chosen in the calendar, today otherwise
+    entry_date = (entry_date or today()) if category == "journal" else None
     row = db.fetchone(
-        """insert into items (input_text, user_note, kind, title, space, category, tags, metadata)
-           values (%s, %s, 'note', %s, %s, %s, %s, %s) returning id, status""",
-        (content, (why or "").strip() or None, title, space, category, tags, db.jsonb(metadata)),
+        """insert into items (input_text, user_note, kind, title, space, category, tags, metadata, entry_date)
+           values (%s, %s, 'note', %s, %s, %s, %s, %s, %s) returning id, status""",
+        (content, (why or "").strip() or None, title, space, category, tags, db.jsonb(metadata), entry_date),
     )
     _wake()
     return {"id": str(row["id"]), "status": row["status"], "duplicate": False}

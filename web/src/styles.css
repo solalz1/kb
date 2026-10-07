@@ -627,3 +627,64 @@ details summary { cursor: pointer; font-weight: 500; color: var(--ink-2); }
 /* upload progress under "Ajouter à la KB" */
 .upload-bar { height: 4px; margin-top: 10px; max-width: 320px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .upload-bar span { display: block; height: 100%; background: var(--waterman); transition: width 0.2s; }
+
+/* ---------- Journal ---------- */
+
+.journal-layout { display: grid; gap: 28px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 980px) { .journal-layout { grid-template-columns: 360px minmax(0, 1fr); align-items: start; gap: 44px; } }
+.calendar {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 14px 14px 12px;
+}
+@media (min-width: 980px) { .calendar { position: sticky; top: 24px; } }
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.cal-head h2 { margin: 0; font-family: var(--display); font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+.cal-grid { display: grid; gap: 4px; }
+.cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-wd {
+  text-align: center; padding: 4px 0 6px; font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
+}
+.cal-day {
+  position: relative; aspect-ratio: 1 / 1; min-height: 38px; display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink);
+  font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; padding: 0;
+}
+.cal-day.empty { border: 0; }
+button.cal-day:hover { border-color: var(--line); background: var(--desk); }
+.cal-day[aria-current="date"] { border-color: var(--waterman); color: var(--waterman); font-weight: 500; }
+.cal-day[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--desk); }
+.cal-day .mark {
+  position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+  min-width: 6px; height: 6px; border-radius: 3px; background: var(--rule-red);
+  font-size: 0; line-height: 1;
+}
+.cal-day .mark:not(:empty) {
+  height: auto; padding: 1px 4px; bottom: 3px; font-size: 9.5px; color: #fff; border-radius: 6px;
+}
+.cal-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); min-height: 32px; }
+
+.day h2 {
+  margin: 0; font-family: var(--display); font-size: clamp(22px, 3.4vw, 28px); font-weight: 700;
+  letter-spacing: -0.025em; line-height: 1.1; padding-bottom: 12px; border-bottom: 1px solid var(--ink);
+}
+.day > .mono-label { margin: 10px 0 0; }
+.entries { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 12px; }
+.entry {
+  background: var(--b-perso); border-radius: var(--radius); padding: 12px 16px 14px;
+  border: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.entry-head {
+  display: flex; align-items: center; gap: 12px; padding-bottom: 8px; margin-bottom: 10px;
+  border-bottom: 1.5px solid var(--rule-red); font-size: 14px;
+}
+.entry-head .mono-label { color: var(--ink); }
+.entry-actions { margin-left: auto; display: flex; gap: 6px; }
+.entry-actions .icon-btn { width: 30px; height: 30px; }
+.entry-text { margin: 0; white-space: pre-wrap; font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.entry-link { display: inline-block; margin-top: 10px; font-size: 13.5px; color: var(--ink-3); }
+.entry-edit textarea { min-height: 140px; }
+.entries-empty { margin: 16px 0 0; }
+.composer-journal { margin-top: 18px; }
+.composer-journal textarea { min-height: 150px; }
+.composer-journal .editor-actions { margin-top: 12px; }
+@media (hover: none) { .kbd-hint { display: none; } }   /* no keyboard shortcut on a phone */

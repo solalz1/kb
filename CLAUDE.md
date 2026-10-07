@@ -50,9 +50,13 @@ update both.
 
 ```bash
 cd backend && pytest -q        # Postgres+pgvector required (KB_TEST_DATABASE_URL, see tests/conftest.py)
-cd web && npm run build        # typecheck + build
+cd web && npm run build        # i18n check + typecheck + build
+cd backend && pytest -q tests/test_site.py   # the built site in Chromium (Playwright), skipped without web/dist
 docker compose up --build      # everything locally on :8000
 ```
+
+Before opening a PR: backend tests, `npm run build` and the browser tests must all pass (CI runs the three jobs:
+`backend`, `web`, `site`). Add a browser test in `tests/test_site.py` for every new page or flow.
 
 Tests never call external services: Claude is faked by the `fake_llm` fixture, embeddings by
 `EMBEDDINGS_PROVIDER=fake`, storage by the local disk, Notion by an `httpx.MockTransport` (`tests/test_notion.py`),

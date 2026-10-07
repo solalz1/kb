@@ -31,6 +31,19 @@ export interface ItemSummary {
   file_mime?: string | null;
   /** Same card in another language, e.g. { en: { title, summary, key_points, use_cases } }: see i18n.localized */
   translations?: Record<string, ItemTranslation>;
+  entry_date?: string | null;   // journal notes: the day they belong to
+}
+
+export interface JournalEntry {
+  id: string;
+  kind: Kind | null;
+  status: ItemSummary["status"];
+  title: string | null;
+  text: string | null;          // the user's own words (or the title of a link filed in the journal)
+  source_url: string | null;
+  created_at: string;
+  updated_at: string;
+  day: string;
 }
 
 export interface ItemTranslation { title?: string | null; summary?: string | null; key_points?: string[]; use_cases?: string[] }
@@ -261,6 +274,7 @@ export interface ItemPatch {
   space: Space;
   category: string | null;
   content: string;
+  entry_date: string;
 }
 
 export const api = {
@@ -271,9 +285,13 @@ export const api = {
   item: (id: string) => request<ItemDetail>(`/api/items/${id}`),
   patch: (id: string, body: Partial<ItemPatch>) =>
     request<{ ok: boolean; requeued?: boolean }>(`/api/items/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  createNote: (body: { content: string; title?: string; space: Space; category?: string | null; tags?: string[] }) =>
+  createNote: (body: { content: string; title?: string; space: Space; category?: string | null; tags?: string[];
+                        entry_date?: string }) =>
     request<{ ok: boolean; id: string }>("/api/notes", { method: "POST", body: JSON.stringify(body) }),
   remove: (id: string) => request<{ ok: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
+  journalMonth: (month: string) =>
+    request<{ month: string; today: string; days: Record<string, number> }>(`/api/journal${qs({ month })}`),
+  journalDay: (day: string) => request<{ date: string; entries: JournalEntry[] }>(`/api/journal/${day}`),
   reprocess: (id: string) => request<{ ok: boolean }>(`/api/items/${id}/reprocess`, { method: "POST" }),
   ingest: (body: { url?: string; text?: string; note?: string; space?: Space; category?: string }) =>
     request<IngestResult>("/api/ingest", { method: "POST", body: JSON.stringify(body) }),
