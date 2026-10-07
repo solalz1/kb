@@ -1,16 +1,24 @@
 """What the KB costs, service by service.
 
-Every paid call is measured where it happens (Claude tokens, Voyage tokens, seconds of audio, X reads) and priced with
-the public price lists below; nothing here calls a billing API, since none of these services tells a key its balance.
-The user adds what only they know: the balance they see in a console (the app subtracts what the KB spent since),
-what was spent before measuring started, and fixed monthly plans (Railway, Supabase).
+Synced from the service where it has an API for it:
+- Claude: the Cost API of the Claude Console (exact, in cents), with an Admin API key (ANTHROPIC_ADMIN_KEY), which
+  only Console organizations have. It covers the whole organization, like the Console's own figure.
+- X: the prepaid credit balance (GET /2/usage/credits), with the app's bearer token.
+
+Estimated everywhere else: every paid call is measured where it happens (Claude tokens, Voyage tokens, seconds of
+audio, X reads) and priced with the public price lists below. Voyage, Groq and Railway have no billing API.
+The user adds what only they know: a balance read in a console (the app subtracts what the KB spent since), a monthly
+spend limit, what was spent before measuring started, and fixed monthly plans (Railway, Supabase).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import httpx
 
 from . import db
 from .config import get_settings
@@ -40,6 +48,7 @@ CLAUDE_UNKNOWN = (3, 3.75, 6, 0.3, 15)
 
 VOYAGE_PRICES = {"voyage-4": 0.06, "voyage-4-lite": 0.02, "voyage-4-large": 0.12, "voyage-3.5": 0.06,
                  "voyage-3.5-lite": 0.02}           # $ per million tokens; the first 200 M tokens of voyage-4 are free
+VOYAGE_FREE_TOKENS = 200_000_000                    # per account, for the voyage-4 family
 TRANSCRIPTION_PRICES = {"whisper-large-v3-turbo": 0.04, "whisper-large-v3": 0.111, "whisper-1": 0.36}  # $ per hour
 TRANSCRIPTION_MIN_SECONDS = 10                      # Groq bills at least 10 s per request
 X_POST_READ = 0.005                                 # X API pay-per-use, per post returned
@@ -50,7 +59,7 @@ SERVICES: list[dict[str, Any]] = [
     {"id": "anthropic", "name": "Claude (Anthropic)", "kind": "metered", "prepaid": True,
      "url": "https://platform.claude.com/settings/billing"},
     {"id": "voyage", "name": "Voyage AI", "kind": "metered", "prepaid": False, "url": "https://dashboard.voyageai.com/",
-     "free": "200 M tokens"},
+     "free_tokens": VOYAGE_FREE_TOKENS},
     {"id": "x", "name": "X API", "kind": "metered", "prepaid": True, "url": "https://console.x.com/"},
     {"id": "transcription", "name": "Groq", "kind": "metered", "prepaid": False, "url": "https://console.groq.com/settings/billing"},
     {"id": "railway", "name": "Railway", "kind": "plan", "monthly": 5.0, "url": "https://railway.com/dashboard"},
@@ -133,7 +142,7 @@ def user_settings() -> dict:
 
 
 def set_service(service: str, *, balance: float | None = None, before: float | None = None,
-                monthly: float | None = None, clear_balance: bool = False) -> dict:
+                monthly: float | None = None, limit: float | None = None, clear_balance: bool = False) -> dict:
     if service not in SERVICE_IDS:
         raise ValueError(f"Service inconnu : {service}")
     all_settings = user_settings()
@@ -148,12 +157,97 @@ def set_service(service: str, *, balance: float | None = None, before: float | N
         cur["before"] = round(float(before), 2)
     if monthly is not None:
         cur["monthly"] = round(float(monthly), 2)
+    if limit is not None:
+        if limit:
+            cur["limit"] = round(float(limit), 2)
+        else:
+            cur.pop("limit", None)
     all_settings[service] = cur
     db.execute(
         """insert into kb_settings (key, value) values (%s, %s)
            on conflict (key) do update set value = excluded.value, updated_at = now()""",
         (SETTING, db.jsonb(all_settings)))
     return summary()
+
+
+# ---------------------------------------------------------------------------
+# Synced from the services
+# ---------------------------------------------------------------------------
+
+ANTHROPIC_COST_URL = "https://api.anthropic.com/v1/organizations/cost_report"
+X_CREDITS_URL = "https://api.x.com/2/usage/credits"
+CACHE_SECONDS = 600                       # the Claude Console updates its costs within minutes; X in real time
+_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _http_get(url: str, headers: dict, params: dict | None = None) -> dict:
+    r = httpx.get(url, headers=headers, params=params or {}, timeout=20)
+    if r.status_code >= 400:
+        raise RuntimeError(f"{r.status_code} : {r.text[:160]}")
+    return r.json()
+
+
+def _cached(key: str, fetch) -> Any:
+    now = time.time()
+    hit = _cache.get(key)
+    if hit and now - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    try:
+        value = fetch()
+    except Exception as exc:  # noqa: BLE001 — a service that doesn't answer falls back to the estimate
+        log.warning("Coûts : %s injoignable (%s)", key, exc)
+        value = {"error": str(exc)[:200]}
+    _cache[key] = (now, value)
+    return value
+
+
+def _iso(d: datetime) -> str:
+    return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def anthropic_console(since: datetime, month_start: datetime, now: datetime) -> dict | None:
+    """What the Claude Console bills, from `since` (the KB's start) and since the start of the month, in dollars."""
+    key = get_settings().anthropic_admin_key
+    if not key:
+        return None
+
+    def fetch():
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+        midnight = lambda d: d.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)  # noqa: E731
+        tomorrow = midnight(now) + timedelta(days=1)          # buckets are UTC days; today's is included
+        params = {"starting_at": _iso(midnight(since)),
+                  "ending_at": _iso(tomorrow), "bucket_width": "1d", "limit": 31}
+        month_start_utc = month_start.astimezone(timezone.utc)
+        total = month = 0.0
+        page = None
+        for _ in range(60):                 # five years of daily buckets at most
+            body = _http_get(ANTHROPIC_COST_URL, headers, {**params, **({"page": page} if page else {})})
+            for bucket in body.get("data") or []:
+                dollars = sum(float(r.get("amount") or 0) for r in bucket.get("results") or []) / 100   # cents
+                total += dollars
+                if datetime.fromisoformat(bucket["starting_at"].replace("Z", "+00:00")) >= month_start_utc:
+                    month += dollars
+            page = body.get("next_page")
+            if not body.get("has_more") or not page:
+                break
+        return {"month": month, "total": total}
+
+    return _cached("anthropic", fetch)
+
+
+def x_credits() -> dict | None:
+    """The X developer account's prepaid credit balance, in dollars."""
+    token = get_settings().x_bearer_token
+    if not token:
+        return None
+
+    def fetch():
+        data = _http_get(X_CREDITS_URL, {"Authorization": f"Bearer {token}"}).get("data") or {}
+        if "total_balance" not in data:
+            raise RuntimeError("réponse sans total_balance")
+        return {"balance": float(data["total_balance"]), "free": float(data.get("free_balance") or 0)}
+
+    return _cached("x", fetch)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +270,20 @@ def _in_use(service: str) -> bool:
     }.get(service, True)
 
 
+def _voyage_billed(month_start: datetime) -> tuple[float, float, int]:
+    """Voyage bills only past its free tokens: (this month, in all, tokens used). The KB is assumed to be the account's
+    only user, and tokens are counted since measuring started."""
+    row = db.fetchone(
+        """select coalesce(sum((units->>'tokens')::bigint), 0)::bigint as total,
+                  coalesce(sum((units->>'tokens')::bigint) filter (where at < %s), 0)::bigint as before_month,
+                  max(model) as model
+           from usage_log where service = 'voyage'""", (month_start,))
+    price = VOYAGE_PRICES.get(row["model"] or "voyage-4", 0.06) / 1_000_000
+    billed = lambda tokens: max(0, tokens - VOYAGE_FREE_TOKENS) * price  # noqa: E731
+    total = billed(row["total"])
+    return total - billed(row["before_month"]), total, int(row["total"])
+
+
 def summary(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -194,34 +302,54 @@ def summary(now: datetime | None = None) -> dict:
         sid = svc["id"]
         mine = user.get(sid) or {}
         m = measured.get(sid) or {}
+        kb_month, kb_total = float(m.get("month") or 0), float(m.get("total") or 0)
+        synced, sync_error, remaining, remaining_synced, tokens = False, None, None, False, None
+        monthly = None
         if svc["kind"] == "plan":
             monthly = float(mine.get("monthly", svc["monthly"]))
-            month = monthly
-            total = monthly * _months_between(started, now)
+            month, total = monthly, monthly * _months_between(started, now)
+        elif sid == "anthropic" and (console := anthropic_console(started, month_start, now)) is not None:
+            if "error" in console:
+                sync_error = console["error"]
+                month, total = kb_month, kb_total
+            else:
+                synced = True
+                month, total = console["month"], console["total"]
+        elif sid == "voyage":
+            month, total, tokens = _voyage_billed(month_start)
         else:
-            monthly = None
-            month = float(m.get("month") or 0)
-            total = float(m.get("total") or 0)
-        total += float(mine.get("before") or 0)
+            month, total = kb_month, kb_total
+        if not synced:
+            total += float(mine.get("before") or 0)
         if not (_in_use(sid) or month or total or mine):
             continue
-        remaining = None
-        if mine.get("balance") is not None:
+
+        if sid == "x" and (credits := x_credits()) is not None:
+            if "error" in credits:
+                sync_error = credits["error"]
+            else:
+                remaining, remaining_synced = round(credits["balance"], 4), True
+        if remaining is None and mine.get("balance") is not None:
             spent_since = db.fetchone(
                 "select coalesce(sum(cost), 0)::float s from usage_log where service = %s and at >= %s",
                 (sid, mine["balance_at"]))["s"]
             remaining = round(float(mine["balance"]) - spent_since, 4)
+        limit = mine.get("limit")
         services.append({
             "id": sid, "name": svc["name"], "kind": svc["kind"], "url": svc["url"], "prepaid": svc.get("prepaid", False),
-            "free": svc.get("free"), "in_use": _in_use(sid),
+            "free_tokens": svc.get("free_tokens"), "in_use": _in_use(sid),
             "month": round(month, 4), "total": round(total, 4), "monthly": monthly,
+            "synced": synced, "sync_error": sync_error,
+            "kb_month": round(kb_month, 4), "kb_total": round(kb_total, 4), "tokens": tokens,
             "before": mine.get("before"), "balance": mine.get("balance"), "balance_at": mine.get("balance_at"),
-            "remaining": remaining,
+            "remaining": remaining, "remaining_synced": remaining_synced,
+            "limit": limit, "left_this_month": round(float(limit) - month, 4) if limit is not None else None,
         })
         month_total += month
         all_total += total
     return {
         "month": round(month_total, 4), "total": round(all_total, 4),
         "measured_since": since.isoformat() if since else None, "started": started.isoformat(),
+        "anthropic_admin": bool(get_settings().anthropic_admin_key),
         "services": services,
     }

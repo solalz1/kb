@@ -9,7 +9,7 @@ import re
 import socket
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -451,11 +451,13 @@ def test_link_x_account_and_its_follows(site, monkeypatch):
     expect(page.get_by_label("Ton compte X")).to_be_visible()
 
 
-def test_settings_menu_and_costs(site):
+def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
     from app import costs
+    from app.config import get_settings
 
     costs.record("anthropic", 0.42, model="claude-haiku-4-5")
     costs.record("x", 0.05)
+    billing_apis.answers[costs.X_CREDITS_URL] = {"data": {"total_balance": 4.2, "free_balance": 0}}
     page = site("/settings", touch=True)
 
     # the strip of sections stays on screen and takes you straight to one
@@ -468,20 +470,49 @@ def test_settings_menu_and_costs(site):
     expect(nav).to_be_in_viewport()
     expect(nav.get_by_role("link", name="Tes données")).to_have_attribute("aria-current", "true")
 
-    # costs: totals, by service, and a balance noted from the console
+    # costs in US dollars, by service, each marked synced or estimated
     nav.get_by_role("link", name="Coûts").click()
     section = page.locator("#couts")
     expect(section.locator(".cost-totals")).to_contain_text("Ce mois-ci")
     claude = section.locator(".cost-row[data-service='anthropic']")
-    expect(claude).to_contain_text("0,42")
-    expect(section.locator(".cost-row[data-service='railway']")).to_contain_text("forfait 5,00 $ / mois")
+    expect(claude).to_contain_text("0,42 $US")
+    expect(claude.locator(".cost-tag")).to_have_text("estimé")
+    expect(claude).to_contain_text("Seulement ce que la KB consomme")
+    expect(section.locator(".cost-row[data-service='railway']")).to_contain_text("forfait 5,00 $US / mois")
+    expect(section).to_contain_text("ANTHROPIC_ADMIN_KEY")
+
+    # X: the balance comes from X itself, nothing to note by hand
+    x = section.locator(".cost-row[data-service='x']")
+    expect(x).to_contain_text("Reste 4,20 $US")
+    expect(x).to_contain_text("solde du compte, synchronisé")
+    x.get_by_role("button", name="Modifier X API").click()
+    expect(x.get_by_label("Limite de dépenses mensuelle")).to_be_visible()
+    expect(x.get_by_label("Solde affiché sur ton compte")).to_have_count(0)
+
+    # Claude: a balance and the monthly limit noted from the Console
     claude.get_by_role("button", name="Modifier Claude (Anthropic)").click()
     claude.get_by_label("Solde affiché sur ton compte").fill("12,5")
+    claude.get_by_label("Limite de dépenses mensuelle").fill("20")
     claude.get_by_role("button", name="Enregistrer").click()
-    expect(claude).to_contain_text("Reste ≈ 12,50")
+    expect(claude).to_contain_text("Reste ≈ 12,50 $US")
+    expect(claude).to_contain_text("Reste ce mois ≈ 19,58 $US sur 20,00 $US de limite")
     costs.record("anthropic", 0.5)
     page.reload()
-    expect(page.locator(".cost-row[data-service='anthropic']")).to_contain_text("Reste ≈ 12,00")
+    expect(page.locator(".cost-row[data-service='anthropic']")).to_contain_text("Reste ≈ 12,00 $US")
+
+    # with an Admin key, Claude's figures are the Console's own
+    monkeypatch.setattr(get_settings(), "anthropic_admin_key", "sk-ant-admin01-test")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+    billing_apis.answers[costs.ANTHROPIC_COST_URL] = {
+        "data": [{"starting_at": today, "results": [{"amount": "157", "currency": "USD"}]}], "has_more": False}
+    costs._cache.clear()
+    page.reload()
+    claude = page.locator(".cost-row[data-service='anthropic']")
+    expect(claude.locator(".cost-tag")).to_have_text("synchronisé")
+    expect(claude.locator(".cost-nums b")).to_have_text("1,57 $US")
+    expect(claude).to_contain_text("Dont la KB : 0,92 $US ce mois-ci")
+    expect(claude).to_contain_text("Reste ce mois 18,43 $US sur 20,00 $US de limite")
+    expect(page.locator("#couts")).not_to_contain_text("ANTHROPIC_ADMIN_KEY")
 
 
 def test_generate_button_on_the_digest(site):

@@ -765,6 +765,12 @@ button.cal-day:hover { border-color: var(--line); background: var(--desk); }
 .cost-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .cost-name { font-family: var(--display); font-weight: 700; letter-spacing: -0.01em; }
 .cost-sub { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.03em; color: var(--ink-3); }
+.cost-tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px;
+  font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); vertical-align: 2px; }
+.cost-tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.cost-note { font-size: 13px; color: var(--ink-3); overflow-wrap: anywhere; }
+.cost-note.warn { color: var(--danger); }
 .cost-left { font-size: 14px; color: var(--ok); overflow-wrap: anywhere; }
 .cost-left.low { color: var(--danger); }
 .cost-nums { display: grid; justify-items: end; text-align: right; gap: 1px; font-variant-numeric: tabular-nums; flex: none; }

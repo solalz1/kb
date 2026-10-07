@@ -65,18 +65,37 @@ export default {
   "Sections des réglages": "Settings sections",
   "Ce mois-ci": "This month",
   "Depuis le début": "Since the start",
-  "Mesuré par la KB depuis le {date} : chaque appel payant (Claude, Voyage, transcription, X) est compté au prix public. ":
-    "Measured by the KB since {date}: every paid call (Claude, Voyage, transcription, X) is counted at the public price. ",
-  "Chaque appel payant (Claude, Voyage, transcription, X) sera compté au prix public dès le premier. ":
-    "Every paid call (Claude, Voyage, transcription, X) will be counted at the public price, from the first one. ",
-  "Ce que ces comptes dépensent hors de la KB n'y est pas. Le reste d'un compte prépayé, c'est le solde que tu as noté moins ce que la KB a dépensé depuis.":
-    "What these accounts spend outside the KB isn't included. What's left on a prepaid account is the balance you noted minus what the KB spent since.",
+  "Synchronisé : le chiffre vient du service lui-même. ": "Synced: the figure comes from the service itself. ",
+  "Estimé : la KB compte chacun de ses appels payants au prix public, depuis le {date}. ":
+    "Estimated: the KB counts each of its paid calls at the public price, since {date}. ",
+  "Estimé : la KB comptera chacun de ses appels payants au prix public, dès le premier. ":
+    "Estimated: the KB will count each of its paid calls at the public price, from the first one. ",
+  "Ce que ces comptes dépensent hors de la KB n'y est pas, et Voyage, Groq et Railway n'ont pas d'API de facturation. ":
+    "What these accounts spend outside the KB isn't included, and Voyage, Groq and Railway have no billing API. ",
+  "Pour le chiffre exact de la Console Claude, ajoute une clé Admin (ANTHROPIC_ADMIN_KEY, voir SETUP.md). ":
+    "For the Claude Console's exact figure, add an Admin key (ANTHROPIC_ADMIN_KEY, see SETUP.md). ",
+  "Montants en dollars US, comme les services les facturent.": "Amounts in US dollars, as the services bill them.",
+  "Chiffre de la Console : toute ton organisation. Dont la KB : {amount} ce mois-ci.":
+    "The Console's figure: your whole organization. The KB's share: {amount} this month.",
+  "Seulement ce que la KB consomme. La Console compte aussi tes autres usages de l'API.":
+    "Only what the KB uses. The Console also counts your other API usage.",
+  "Le minimum de l'offre Hobby, usage compris. Un dépassement n'est pas compté ici.":
+    "The Hobby plan's minimum, usage included. Going over isn't counted here.",
+  "synchronisé": "synced",
+  "estimé": "estimated",
+  "{used} tokens sur {free} offerts": "{used} of {free} free tokens",
+  "Synchronisation impossible ({error}).": "Couldn't sync ({error}).",
+  "Reste ce mois {amount} sur {limit} de limite": "{amount} left this month of a {limit} limit",
+  "Reste ce mois ≈ {amount} sur {limit} de limite": "≈ {amount} left this month of a {limit} limit",
+  "solde du compte, synchronisé": "account balance, synced",
+  "Limite de dépenses mensuelle": "Monthly spend limit",
+  "aucune": "none",
   "Un montant positif, en dollars.": "A positive amount, in dollars.",
   "forfait {amount} / mois": "{amount} / month plan",
   "gratuit": "free",
-  "{free} offerts, non déduits ici": "{free} free, not deducted here",
   "à l'usage": "pay as you go",
   "Reste ≈ {amount}": "≈ {amount} left",
+  "Reste {amount}": "{amount} left",
   "sur {balance} notés {when}": "of {balance} noted {when}",
   "{amount} en tout": "{amount} in all",
   "Modifier {name}": "Edit {name}",

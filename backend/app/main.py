@@ -771,16 +771,17 @@ class CostSettingsIn(BaseModel):
     clear_balance: bool = False
     before: float | None = None        # spent before the KB measured it
     monthly: float | None = None       # a fixed monthly plan
+    limit: float | None = None         # a monthly spend limit set in the service's console (0 removes it)
 
 
 @api.put("/api/costs/{service}", dependencies=auth)
 def set_costs(service: str, body: CostSettingsIn):
-    for value in (body.balance, body.before, body.monthly):
+    for value in (body.balance, body.before, body.monthly, body.limit):
         if value is not None and value < 0:
             raise HTTPException(400, "Montant négatif")
     try:
         return costs.set_service(service, balance=body.balance, before=body.before, monthly=body.monthly,
-                                 clear_balance=body.clear_balance)
+                                 limit=body.limit, clear_balance=body.clear_balance)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
