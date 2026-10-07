@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 from datetime import date
 from functools import lru_cache
@@ -39,6 +40,15 @@ def client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=key, max_retries=3, timeout=180)
 
 
+# Models that refuse a forced tool call (Sonnet 5.5, Opus 5.5 and later): they get structured outputs instead.
+# Filled the first time a model answers « tool_choice … not supported », so the refused request happens once per run.
+_NO_FORCED_TOOL: set[str] = set()
+
+# JSON Schema keywords structured outputs don't accept (they only guide the model, so dropping them is harmless)
+_UNSUPPORTED_KEYWORDS = {"minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+                         "multipleOf", "maxItems", "minProperties", "maxProperties", "default"}
+
+
 def call_tool(
     *,
     system: str,
@@ -50,8 +60,28 @@ def call_tool(
     max_tokens: int = 2000,
 ) -> dict:
     """Appel avec un outil imposé : renvoie directement le JSON structuré."""
+    model = model or get_settings().enrich_model
+    if model not in _NO_FORCED_TOOL:
+        try:
+            return _forced_tool(system=system, content=content, tool_name=tool_name,
+                                tool_description=tool_description, schema=schema, model=model, max_tokens=max_tokens)
+        except anthropic.BadRequestError as e:
+            if not _refuses_forced_tool(e):
+                raise
+            _NO_FORCED_TOOL.add(model)
+            log.info("%s refuses forced tool use: structured outputs from now on", model)
+    return _structured_output(system=system, content=content, tool_name=tool_name,
+                              tool_description=tool_description, schema=schema, model=model, max_tokens=max_tokens)
+
+
+def _refuses_forced_tool(e: anthropic.BadRequestError) -> bool:
+    text = str(e)
+    return "tool_choice" in text and "not supported" in text
+
+
+def _forced_tool(*, system, content, tool_name, tool_description, schema, model, max_tokens) -> dict:
     kwargs = dict(
-        model=model or get_settings().enrich_model,
+        model=model,
         max_tokens=max_tokens,
         system=system,
         tools=[{"name": tool_name, "description": tool_description, "input_schema": schema}],
@@ -64,12 +94,63 @@ def call_tool(
             resp = stream.get_final_message()
     else:
         resp = client().messages.create(**kwargs)
-    if resp.stop_reason == "max_tokens":
-        raise RuntimeError(f"Réponse de Claude tronquée ({tool_name}, max_tokens={max_tokens})")
+    _check_stop(resp, tool_name, max_tokens)
     for block in resp.content:
         if block.type == "tool_use":
             return dict(block.input)
     raise RuntimeError("Claude n'a pas renvoyé de résultat structuré")
+
+
+def _structured_output(*, system, content, tool_name, tool_description, schema, model, max_tokens) -> dict:
+    """Same result through structured outputs: the answer is JSON that follows the schema. These models always think
+    first, and max_tokens counts the thinking too, so they get more room. Always streamed: thinking takes time."""
+    budget = max(2 * max_tokens, max_tokens + 8000)
+    with client().messages.stream(
+        model=model,
+        max_tokens=budget,
+        system=f"{system}\n\nRéponds par un objet JSON conforme au schéma demandé. {tool_description}",
+        messages=[{"role": "user", "content": content}],
+        output_config={"format": {"type": "json_schema", "schema": strict_schema(schema)}},
+    ) as stream:
+        resp = stream.get_final_message()
+    _check_stop(resp, tool_name, budget)
+    text = "".join(b.text for b in resp.content if b.type == "text").strip()
+    try:
+        out = json.loads(text)
+    except ValueError as e:
+        raise RuntimeError(f"Claude n'a pas renvoyé de JSON valide ({tool_name})") from e
+    if not isinstance(out, dict):
+        raise RuntimeError(f"Claude n'a pas renvoyé d'objet JSON ({tool_name})")
+    return out
+
+
+def _check_stop(resp, tool_name: str, max_tokens: int) -> None:
+    if resp.stop_reason == "max_tokens":
+        raise RuntimeError(f"Réponse de Claude tronquée ({tool_name}, max_tokens={max_tokens})")
+    if resp.stop_reason == "refusal":
+        raise RuntimeError(f"Claude a refusé de répondre ({tool_name})")
+
+
+def strict_schema(schema: Any) -> Any:
+    """A copy of a tool schema that structured outputs accept: every object closed with additionalProperties: false,
+    unsupported keywords removed, minItems kept only at 0 or 1. Required fields are unchanged."""
+    if isinstance(schema, list):
+        return [strict_schema(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out: dict = {}
+    for key, value in schema.items():
+        if key in _UNSUPPORTED_KEYWORDS or (key == "minItems" and value not in (0, 1)):
+            continue
+        if key in ("properties", "$defs", "definitions") and isinstance(value, dict):
+            out[key] = {name: strict_schema(sub) for name, sub in value.items()}
+        elif key == "enum":
+            out[key] = value
+        else:
+            out[key] = strict_schema(value)
+    if out.get("type") == "object" or "properties" in out:
+        out["additionalProperties"] = False
+    return out
 
 
 def complete(*, system: str, prompt: str, model: str | None = None, max_tokens: int = 400) -> str:

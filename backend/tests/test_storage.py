@@ -31,7 +31,8 @@ def test_local_storage_when_supabase_is_not_configured(database):
     from app.main import app
 
     with TestClient(app) as c:
-        assert c.get("/api/health").json() == {"ok": True, "db": True, "auth_configured": True, "storage": "local"}
+        assert c.get("/api/health").json() == {"ok": True, "db": True, "auth_configured": True, "schema": "off",
+                                               "storage": "local"}
 
 
 def test_check_reports_what_storage_answered(supabase):

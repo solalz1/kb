@@ -25,7 +25,7 @@ Fixe une limite de dépense mensuelle sur chaque console (Anthropic, Voyage, Gro
 ## 2. Supabase (base de données et fichiers)
 
 1. Crée un projet sur [supabase.com](https://supabase.com), **région Paris (eu-west-3)**, avec un mot de passe de base solide.
-2. **SQL Editor** → New query → colle tout le fichier `supabase/migrations/20261002000000_init.sql` → **Run**. Avec la CLI : `supabase link` puis `supabase db push`.
+2. **SQL Editor** → New query → colle tout le fichier `supabase/migrations/20261002000000_init.sql` → **Run**. Avec la CLI : `supabase link` puis `supabase db push`. Les mises à jour ne demandent rien de plus : l'app réapplique ce fichier à chaque démarrage (il peut être relancé sans risque), donc une nouvelle colonne est en place avant que le nouveau code s'en serve. `/api/health` affiche `"schema": "ok"` ; mets `AUTO_MIGRATE=false` pour le faire à la main.
 3. Vérifie dans **Storage** que le bucket privé `kb-files` existe.
 4. Bouton **Connect** → onglet **Session pooler** → copie l'URI dans `DATABASE_URL` (remplace `[YOUR-PASSWORD]`). Prends bien le *Session* pooler (port 5432), pas le *Transaction* pooler (6543).
 5. **Project Settings → API Keys** : copie la clé *secret* (`sb_secret_…`, ou l'ancienne `service_role`) dans `SUPABASE_SERVICE_KEY`, et l'URL du projet dans `SUPABASE_URL`.
