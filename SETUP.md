@@ -25,7 +25,7 @@ Set a monthly spending limit in each console (Anthropic, Voyage, Groq). On X, pr
 ## 2. Supabase (database and files)
 
 1. Create a project on [supabase.com](https://supabase.com) in the region closest to you, with a strong database password.
-2. **SQL Editor** → New query → paste the whole `supabase/migrations/20261002000000_init.sql` file → **Run**. With the CLI: `supabase link`, then `supabase db push`.
+2. **SQL Editor** → New query → paste the whole `supabase/migrations/20261002000000_init.sql` file → **Run**. With the CLI: `supabase link`, then `supabase db push`. Updates need nothing more: the app applies this file again every time it starts (it's safe to re-run), so a new column is in place before the new code uses it. `/api/health` shows `"schema": "ok"`; set `AUTO_MIGRATE=false` to do it by hand instead.
 3. In **Storage**, check that the private `kb-files` bucket exists.
 4. **Connect** button → **Session pooler** tab → copy the URI into `DATABASE_URL` (replace `[YOUR-PASSWORD]`). Use the *Session* pooler (port 5432), not the *Transaction* pooler (6543).
 5. **Project Settings → API Keys**: copy the *secret* key (`sb_secret_…`, or the legacy `service_role` key) into `SUPABASE_SERVICE_KEY`, and the project URL into `SUPABASE_URL`.

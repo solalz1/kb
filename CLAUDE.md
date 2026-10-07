@@ -10,7 +10,9 @@ update both.
 
 ## Architecture
 
-- `supabase/migrations/`: Postgres schema. **Idempotent**, safe to re-run. `vector(1024)` is fixed (= `EMBED_DIM`).
+- `supabase/migrations/`: Postgres schema. **Idempotent**, safe to re-run: `app/migrate.py` applies it at every start
+  (advisory lock, `AUTO_MIGRATE`, status in `/api/health`), so a migration must never destroy data. `vector(1024)` is
+  fixed (= `EMBED_DIM`).
   Key SQL functions: `hybrid_search` (RRF of vectors + full text with the `kb` FR/EN config, `filter_spaces`),
   `similar_items`, `claim_next_item` (job queue, recovers stale items, stops after `max_attempts`). The `items_touch`
   trigger sets `notion_synced_at = null` whenever visible content changes (that's how the Notion copy knows what to
@@ -27,8 +29,10 @@ update both.
   - `worker.py`: threads calling `claim_next_item()`. `ExtractionError` = permanent failure; any other exception = retry.
   - `extractors/`: one module per source. URL routing in `urls.classify()`, then `extractors/__init__.py`.
     PDFs use pypdfium2 (not thread-safe: always go through `_PDFIUM_LOCK`).
-  - `llm.py`: every Claude call (structured output through a forced `tool_choice`; Perso items get extra rules and a
-    `category`). `chat.py`: RAG, project mode and advice mode (`advise`: charter + Perso search + a little Veille), SSE.
+  - `llm.py`: every Claude call. Structured answers go through `call_tool`: a forced `tool_choice`, or structured
+    outputs (`output_config.format`, `strict_schema`) on models that refuse forced tools (Sonnet 5.5, Opus 5.5). Perso
+    items get extra rules and a `category`. These models also think before answering, and `max_tokens` counts it.
+  - `chat.py`: RAG, project mode and advice mode (`advise`: charter + Perso search + a little Veille), SSE.
   - `notion.py`: optional one-way copy to a Notion database (API version `2026-03-11`, data sources, `markdown` page
     content, `in_trash`). A `Syncer` thread in the worker, throttled to ~3 req/s; deleted items go through the
     `notion_trash` table; database IDs live in `kb_settings`.

@@ -103,6 +103,7 @@ class Settings(BaseSettings):
 
     # --- Worker ---
     run_worker: bool = True       # traite la file dans le même process que l'API
+    auto_migrate: bool = True     # apply supabase/migrations at startup (idempotent)
     worker_concurrency: int = 2
     max_attempts: int = 3
     link_min_similarity: float = 0.45

@@ -17,6 +17,7 @@ os.environ.update({
     "EMBEDDINGS_PROVIDER": "fake",
     "ANTHROPIC_API_KEY": "sk-test",
     "RUN_WORKER": "false",
+    "AUTO_MIGRATE": "false",     # the session fixture applies the schema; tests/test_migrate.py covers startup
     "LOCAL_STORAGE_DIR": tempfile.mkdtemp(prefix="kb-files-"),
     "SUPABASE_URL": "",
     "SUPABASE_SERVICE_KEY": "",

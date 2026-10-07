@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, db, export, llm, notion, pipeline, search, storage
+from . import chat, db, export, llm, migrate, notion, pipeline, search, storage
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import profile as digest_profile
@@ -58,6 +58,8 @@ def _build_mcp_http():
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # the database first: the code that was just deployed may need a new column
+    await run_in_threadpool(migrate.run_at_startup)
     worker = None
     if settings.run_worker:
         worker = Worker()
@@ -136,7 +138,7 @@ async def health():
         db_ok = False
     # "ok" only depends on the database (Railway's health check); "storage" tells why file shares would fail
     return {"ok": db_ok, "db": db_ok, "auth_configured": bool(settings.kb_api_token),
-            "storage": await run_in_threadpool(storage.check)}
+            "schema": migrate.status, "storage": await run_in_threadpool(storage.check)}
 
 
 # ---------------------------------------------------------------------------
