@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, db, export, llm, migrate, notion, pipeline, search, storage
+from . import chat, costs, db, export, llm, migrate, notion, pipeline, search, storage
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -758,6 +758,31 @@ def interests():
         },
         "x_follow": digest_following.public_state(),
     }
+
+
+@api.get("/api/costs", dependencies=auth)
+def costs_summary():
+    """What the KB cost this month and in all, by service, and what is left on prepaid accounts."""
+    return costs.summary()
+
+
+class CostSettingsIn(BaseModel):
+    balance: float | None = None       # what the service's console shows now (prepaid credits)
+    clear_balance: bool = False
+    before: float | None = None        # spent before the KB measured it
+    monthly: float | None = None       # a fixed monthly plan
+
+
+@api.put("/api/costs/{service}", dependencies=auth)
+def set_costs(service: str, body: CostSettingsIn):
+    for value in (body.balance, body.before, body.monthly):
+        if value is not None and value < 0:
+            raise HTTPException(400, "Montant négatif")
+    try:
+        return costs.set_service(service, balance=body.balance, before=body.before, monthly=body.monthly,
+                                 clear_balance=body.clear_balance)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 class XAccountIn(BaseModel):

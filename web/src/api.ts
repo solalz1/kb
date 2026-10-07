@@ -208,6 +208,32 @@ export interface XFollow {
   last_error: string | null;
 }
 
+/** What the KB costs, by service (backend/app/costs.py). Amounts in USD. */
+export interface CostService {
+  id: string;
+  name: string;
+  kind: "metered" | "plan";
+  url: string;
+  prepaid: boolean;
+  free: string | null;
+  in_use: boolean;
+  month: number;
+  total: number;
+  monthly: number | null;
+  before: number | null;
+  balance: number | null;
+  balance_at: string | null;
+  remaining: number | null;
+}
+
+export interface Costs {
+  month: number;
+  total: number;
+  measured_since: string | null;
+  started: string;
+  services: CostService[];
+}
+
 export interface TodoAction extends Action {
   item_id: string;
   item_title: string | null;
@@ -340,6 +366,9 @@ export const api = {
   patchWatch: (id: number, body: { status?: Watch["status"]; name?: string }) =>
     request<Watch>(`/api/watch/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   removeWatch: (id: number) => request<{ ok: boolean }>(`/api/watch/${id}`, { method: "DELETE" }),
+  costs: () => request<Costs>("/api/costs"),
+  setCosts: (service: string, body: { balance?: number; clear_balance?: boolean; before?: number; monthly?: number }) =>
+    request<Costs>(`/api/costs/${service}`, { method: "PUT", body: JSON.stringify(body) }),
   linkX: (username: string) => request<XFollow>("/api/x-follow", { method: "PUT", body: JSON.stringify({ username }) }),
   syncX: () => request<XFollow>("/api/x-follow/sync", { method: "POST" }),
   importX: () => request<XFollow>("/api/x-follow/import", { method: "POST" }),

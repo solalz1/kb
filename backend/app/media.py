@@ -10,6 +10,7 @@ from pathlib import Path
 
 import httpx
 
+from . import costs
 from .config import get_settings
 
 log = logging.getLogger(__name__)
@@ -82,6 +83,9 @@ def _transcribe_segment(part: Path, offset: float) -> list[str]:
         if r.status_code >= 400:
             raise RuntimeError(f"Transcription {r.status_code} : {r.text[:300]}")
         data = r.json()
+        seconds = float(data.get("duration") or probe_duration(part) or SEGMENT_SECONDS)
+        costs.record("transcription", costs.transcription_cost(s.transcription_model, seconds),
+                     model=s.transcription_model, units={"seconds": round(seconds, 1)})
         segments = data.get("segments") or []
         if not segments:
             return [f"[{fmt_ts(offset)}] {data.get('text', '').strip()}"]

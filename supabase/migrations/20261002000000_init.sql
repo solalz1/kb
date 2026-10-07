@@ -203,6 +203,18 @@ alter table public.watch add constraint watch_origin_check
 create unique index if not exists watch_handle_idx on public.watch (lower(x_handle)) where x_handle is not null;
 create unique index if not exists watch_feed_idx   on public.watch (feed_url) where feed_url is not null;
 
+-- What the KB spends: one row per paid call (Claude, Voyage, transcription, X), priced in app/costs.py
+create table if not exists public.usage_log (
+  id       bigserial primary key,
+  at       timestamptz not null default now(),
+  service  text not null,
+  model    text,
+  cost     numeric(16, 8) not null default 0,
+  units    jsonb not null default '{}'::jsonb,
+  purpose  text
+);
+create index if not exists usage_log_service_at_idx on public.usage_log (service, at);
+
 create table if not exists public.digests (
   id           bigserial primary key,
   kind         text not null check (kind in ('daily', 'weekly')),
@@ -392,6 +404,7 @@ alter table public.notion_trash enable row level security;
 alter table public.watch           enable row level security;
 alter table public.digests         enable row level security;
 alter table public.digest_feedback enable row level security;
+alter table public.usage_log       enable row level security;
 
 do $$
 declare r text;

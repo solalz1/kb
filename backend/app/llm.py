@@ -12,6 +12,7 @@ from typing import Any, Iterator
 
 import anthropic
 
+from . import costs
 from .config import get_settings
 from .taxonomy import CATEGORIES
 
@@ -94,6 +95,7 @@ def _forced_tool(*, system, content, tool_name, tool_description, schema, model,
             resp = stream.get_final_message()
     else:
         resp = client().messages.create(**kwargs)
+    costs.record_claude(model, getattr(resp, "usage", None), tool_name)
     _check_stop(resp, tool_name, max_tokens)
     for block in resp.content:
         if block.type == "tool_use":
@@ -113,6 +115,7 @@ def _structured_output(*, system, content, tool_name, tool_description, schema, 
         output_config={"format": {"type": "json_schema", "schema": strict_schema(schema)}},
     ) as stream:
         resp = stream.get_final_message()
+    costs.record_claude(model, getattr(resp, "usage", None), tool_name)
     _check_stop(resp, tool_name, budget)
     text = "".join(b.text for b in resp.content if b.type == "text").strip()
     try:
@@ -154,23 +157,27 @@ def strict_schema(schema: Any) -> Any:
 
 
 def complete(*, system: str, prompt: str, model: str | None = None, max_tokens: int = 400) -> str:
+    model = model or get_settings().enrich_model
     resp = client().messages.create(
-        model=model or get_settings().enrich_model,
+        model=model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": prompt}],
     )
+    costs.record_claude(model, getattr(resp, "usage", None), "complete")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
 def stream_text(*, system: str, messages: list[dict], model: str | None = None, max_tokens: int = 4000) -> Iterator[str]:
+    model = model or get_settings().chat_model
     with client().messages.stream(
-        model=model or get_settings().chat_model,
+        model=model,
         max_tokens=max_tokens,
         system=system,
         messages=messages,
     ) as stream:
         yield from stream.text_stream
+        costs.record_claude(model, getattr(stream.get_final_message(), "usage", None), "chat")
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +429,7 @@ def describe_frames(frames: list[bytes], context: str = "") -> str:
     )})
     resp = client().messages.create(model=get_settings().enrich_model, max_tokens=1500,
                                     messages=[{"role": "user", "content": content}])
+    costs.record_claude(get_settings().enrich_model, getattr(resp, "usage", None), "video_frames")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
@@ -441,7 +449,9 @@ def transcribe_pdf(data: bytes, first_page: int = 1) -> str:
             ],
         }],
     ) as stream:
-        return stream.get_final_text()
+        resp = stream.get_final_message()
+    costs.record_claude(get_settings().enrich_model, getattr(resp, "usage", None), "pdf_ocr")
+    return "".join(b.text for b in resp.content if b.type == "text")
 
 
 # ---------------------------------------------------------------------------

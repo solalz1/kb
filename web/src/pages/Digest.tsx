@@ -27,6 +27,13 @@ const PROJECT_KIND: Record<string, string> = {
 const day = (iso: string, opts: Intl.DateTimeFormatOptions) =>
   new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString(locale, { ...opts, timeZone: "UTC" });
 const weekEnd = (iso: string) => new Date(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) + 6 * 86400_000).toISOString();
+/** First day of the period a digest written now covers: today, or last week's Monday (as in digest/agent.py). */
+function currentStart(kind: DigestKind): string {
+  const d = new Date();
+  if (kind === "weekly") d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function titleOf(d: { kind: DigestKind; title: string; period_start: string; period_end?: string }): string {
   if (lang === "fr") return d.title;
   if (d.kind === "weekly") {
@@ -97,11 +104,14 @@ export default function Digest() {
   const flash = (text: string) => { setToast(text); setTimeout(() => setToast(""), 3500); };
   const shownKind: DigestKind = digest?.kind ?? kind;
 
-  // first digest of a period
-  const generate = async () => {
+  // the current period's digest, written now (or rewritten: it costs Claude calls again, so ask first)
+  const generate = async (which: DigestKind = kind) => {
+    const done = history.some((h) => h.kind === which && h.period_start === currentStart(which) && h.status === "ready");
+    if (done && !window.confirm(which === "weekly" ? t("Le digest de la semaine existe déjà. Le réécrire ?")
+                                                  : t("Le digest d'aujourd'hui existe déjà. Le réécrire ?"))) return;
     try {
-      const r = await api.generateDigest(kind);
-      flash(kind === "weekly" ? t("Je prépare la semaine… (une à deux minutes)") : t("Je prépare le digest… (environ une minute)"));
+      const r = await api.generateDigest(which);
+      flash(which === "weekly" ? t("Je prépare la semaine… (une à deux minutes)") : t("Je prépare le digest… (environ une minute)"));
       if (String(r.id) === id) await load(); else nav(`/digest/${r.id}`);
     } catch (e) { setError((e as Error).message); }
   };
@@ -171,6 +181,9 @@ export default function Digest() {
           </label>
         )}
         <Link className="btn small ghost" to="/digest/interets"><Settings2 size={14} /> {t("Mes intérêts")}</Link>
+        {(digest || error) && (
+          <button className="btn small" onClick={() => generate(shownKind)}><RefreshCw size={14} /> {t("Générer maintenant")}</button>
+        )}
       </div>
 
       {error && <div className="error-box">{error}</div>}
@@ -183,7 +196,7 @@ export default function Digest() {
             + "garde ce qui compte pour toi et te le résume, du plus général au plus technique. Le lundi, il ajoute la semaine "
             + "et des idées de projets.")}</p>
           <div className="space-actions" style={{ justifyContent: "center" }}>
-            <button className="btn primary" onClick={generate}><RefreshCw size={16} /> {t("Générer maintenant")}</button>
+            <button className="btn primary" onClick={() => generate()}><RefreshCw size={16} /> {t("Générer maintenant")}</button>
             <Link className="btn" to="/digest/interets">{t("Dire ce qui m'intéresse")}</Link>
           </div>
         </div>

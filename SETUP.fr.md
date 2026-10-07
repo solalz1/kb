@@ -6,7 +6,7 @@ Compte environ une heure. À la fin, tu as l'app sur `https://kb.example.com` (i
 
 ## 0. Ce qu'il te faut
 
-- Le dépôt sur ton GitHub, public ou privé : il ne contient aucune donnée. `git init && git add . && git commit -m "KB" && gh repo create kb --public --source . --push` (ou `--private`). Ne commite jamais ton `.env` : il est dans `.gitignore`.
+- Ta propre copie du dépôt : **Fork** sur GitHub (public ou privé, il ne contient aucune donnée). Pour récupérer les mises à jour ensuite, **Sync fork** sur GitHub. Si tu gardes un `.env` en local, ne le commite jamais : il est dans `.gitignore`.
 - Sur le Mac : `git`, et éventuellement Docker Desktop pour tester en local.
 - `openssl rand -hex 32`, lancé deux fois : la première valeur sera `KB_API_TOKEN`, la seconde `KB_MCP_SECRET`. Garde-les dans ton gestionnaire de mots de passe.
 
@@ -36,7 +36,7 @@ Sécurité : les tables ont le RLS activé et aucun accès pour les rôles publi
 
 ## 3. Railway (l'API, le worker, le connecteur et l'app)
 
-1. [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → choisis `kb`. Le `Dockerfile` est détecté via `railway.json`.
+1. [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → choisis ton fork. Le `Dockerfile` est détecté via `railway.json`. Si ton fork n'apparaît pas, ou si **Settings → Source** affiche plus tard *Auto deploy unavailable*, donne accès à ton fork à l'app GitHub de Railway (GitHub → Settings → Applications → Railway → Configure) : sans elle, Railway ne voit jamais les nouveaux commits.
 2. Onglet **Variables → Raw Editor** : colle le contenu de `.env.example` rempli avec tes valeurs.
 3. **Settings → Networking → Generate Domain**. Ouvre `https://<…>.up.railway.app/api/health` : la réponse attendue est `{"ok": true, …, "storage": "ok"}`. Toute autre valeur de `storage` (la réponse de Supabase) veut dire que les fichiers partagés échoueront : vérifie `SUPABASE_URL` (`https://<ref>.supabase.co`), `SUPABASE_SERVICE_KEY` (la clé **secrète** `sb_secret_…`, pas la clé publishable) et le bucket `kb-files`.
 4. Domaine perso : **Custom Domain** → `kb.example.com`. Ajoute le **CNAME** `kb` → la cible indiquée par Railway, et le TXT de vérification demandé, **là où ton DNS est géré** : chez ton registrar (ex. Namecheap → Advanced DNS) ou, si les serveurs de noms de ton domaine pointent vers un autre hébergeur comme Netlify, dans les réglages DNS de cet hébergeur (Netlify → Domains → ton domaine → DNS settings → Add new record). Un enregistrement ajouté chez le registrar est ignoré quand les serveurs de noms pointent ailleurs.

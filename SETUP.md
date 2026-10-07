@@ -6,7 +6,7 @@ Plan for about an hour. At the end you have the app at `https://kb.example.com` 
 
 ## 0. What you need
 
-- The repository on your GitHub, public or private: it holds no data. `git init && git add . && git commit -m "KB" && gh repo create kb --public --source . --push` (or `--private`). Never commit your `.env`: it's in `.gitignore`.
+- Your own copy of the repository: **Fork** it on GitHub (public or private, it holds no data). To get updates later, **Sync fork** on GitHub. If you keep a `.env` locally, never commit it: it's in `.gitignore`.
 - On your Mac: `git`, and optionally Docker Desktop to test locally.
 - Run `openssl rand -hex 32` twice: the first value is your `KB_API_TOKEN`, the second your `KB_MCP_SECRET`. Keep them in your password manager.
 
@@ -36,7 +36,7 @@ Note: on the free plan, Supabase pauses projects that stay inactive for a week. 
 
 ## 3. Railway (API, worker, connector and app)
 
-1. [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → pick `kb`. The `Dockerfile` is picked up through `railway.json`.
+1. [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → pick your fork. The `Dockerfile` is picked up through `railway.json`. If your fork isn't listed, or **Settings → Source** later says *Auto deploy unavailable*, give Railway's GitHub app access to it (GitHub → Settings → Applications → Railway → Configure): without it, Railway never sees new commits.
 2. **Variables → Raw Editor**: paste `.env.example` filled in with your values.
 3. **Settings → Networking → Generate Domain**. Open `https://<…>.up.railway.app/api/health`: you should get `{"ok": true, …, "storage": "ok"}`. Any other `storage` value (Supabase's answer) means file shares will fail: check `SUPABASE_URL` (`https://<ref>.supabase.co`), `SUPABASE_SERVICE_KEY` (the **secret** `sb_secret_…` key, not the publishable one) and the `kb-files` bucket.
 4. Custom domain: **Custom Domain** → `kb.example.com`. Add the **CNAME** `kb` → the target Railway shows, plus the verification TXT record Railway asks for, **where your DNS is managed**: at your registrar (e.g. Namecheap → Advanced DNS), or, if your domain's nameservers point to another host such as Netlify, in that host's DNS settings (Netlify → Domains → your domain → DNS settings → Add new record). Records added at the registrar are ignored when the nameservers point elsewhere.

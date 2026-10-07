@@ -9,6 +9,7 @@ import time
 
 import httpx
 
+from . import costs
 from .config import get_settings
 
 VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
@@ -61,7 +62,11 @@ def _voyage(batch: list[str], input_type: str) -> list[list[float]]:
             continue
         if r.status_code >= 400:
             raise RuntimeError(f"Voyage {r.status_code} : {r.text[:300]}")
-        data = sorted(r.json()["data"], key=lambda d: d["index"])
+        body = r.json()
+        tokens = (body.get("usage") or {}).get("total_tokens") or 0
+        costs.record("voyage", costs.voyage_cost(s.embed_model, tokens), model=s.embed_model, units={"tokens": tokens},
+                     purpose=input_type)
+        data = sorted(body["data"], key=lambda d: d["index"])
         return [d["embedding"] for d in data]
     raise RuntimeError("Voyage indisponible après plusieurs tentatives")
 

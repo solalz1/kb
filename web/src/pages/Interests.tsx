@@ -2,14 +2,15 @@ import { ArrowLeft, AtSign, Check, Download, Link2, Loader2, Plus, RefreshCw, Rs
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Interests as InterestsT, type Watch } from "../api";
-import { lang, t } from "../i18n";
+import { dollars } from "../components/Costs";
+import { t } from "../i18n";
 import { ago } from "../kinds";
 
 const ORIGIN: Record<Watch["origin"], string> = {
   manual: t("ajouté par toi"), auto: t("appris de ta KB"), default: t("par défaut"), suggested: t("suggéré par l'agent"),
   x_follow: t("suivi sur X"),
 };
-const dollars = (n: number) => n.toLocaleString(lang === "fr" ? "fr-FR" : "en-US", { style: "currency", currency: "USD" });
+
 // the server writes this note for people it follows automatically (backend/app/digest/profile.py, auto_follow)
 const noteOf = (note: string) => {
   const m = note.match(/^(\d+) tweets sauvegardés dans ta KB$/);
