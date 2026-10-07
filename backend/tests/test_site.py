@@ -377,3 +377,50 @@ def test_mouse_clicks_still_open_cards(site):
     page.reload()
     page.locator(f"a[href='/item/{ids['article']}']").click()
     expect(page.get_by_role("button", name="Archiver")).to_be_visible()
+
+
+_OVERFLOW = """() => {
+  // elements reaching past the screen's right edge that no scrolling strip (chips, cards to rediscover) clips
+  const vw = document.documentElement.clientWidth, out = [];
+  const clipped = (el) => {
+    for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (getComputedStyle(p).overflowX !== "visible") return true;
+    }
+    return false;
+  };
+  for (const el of document.querySelectorAll("body *")) {
+    const r = el.getBoundingClientRect();
+    if (r.width && r.right > vw + 1 && !clipped(el) && getComputedStyle(el).position !== "fixed")
+      out.push(`${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}: ${(el.textContent || "").trim().slice(0, 40)}`);
+  }
+  return out;
+}"""
+
+
+def test_no_page_slides_sideways_on_a_phone(site):
+    """Long names, links and errors stay inside the screen, and fields are big enough that iPhone doesn't zoom."""
+    from app import db
+
+    page = site("/", touch=True)
+    _seed(page)
+    long_url = "https://a-very-long-blog-name.example.com/feeds/all-posts-and-comments.atom?format=full&lang=fr"
+    db.execute("""insert into watch (kind, name, feed_url, origin, last_error) values
+                  ('feed', %s, %s, 'manual', %s)""", (long_url, long_url, f"HTTPError 404 for {long_url}"))
+    db.execute("""insert into watch (kind, name, x_handle, origin, note) values
+                  ('person', 'Quelqu''un au nom vraiment très long pour un téléphone', 'averyveryverylonghandle', 'manual',
+                   'Écrit sur https://averyveryverylonghandle.substack.com/p/une-adresse-sans-espaces-qui-ne-finit-pas')""")
+    entry = {"key": "hn:1", "section": "essentiel", "title": "Un titre", "summary": "Un résumé.", "why": "", "kind": "article",
+             "url": long_url, "source": "Hacker News", "author": "averyveryverylongauthornamewithoutanyspaceatall_and_more",
+             "person": None, "published_at": None, "in_kb": False, "links": {}}
+    db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
+                  values ('daily', current_date, current_date, 'ready', 'Une journée.', %s)""",
+               (db.jsonb({"entries": [entry]}),))
+    for path in ["/", "/perso", "/journal", "/digest", "/digest/interets", "/ask", "/add", "/todo", "/settings"]:
+        page.goto(path)
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate(_OVERFLOW) == [], path
+    for path, field in [("/", "#q"), ("/digest/interets", ".add-row .field")]:
+        page.goto(path)
+        size = page.locator(field).first.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
+        assert size >= 16, (path, size)
+    assert page.evaluate("getComputedStyle(document.documentElement).overscrollBehaviorY") == "none"
