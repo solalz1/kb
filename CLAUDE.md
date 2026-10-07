@@ -42,7 +42,9 @@ update both.
 - `shortcuts/build.py`: generates the three iOS/macOS Shortcuts (binary plists, stdlib only; the token is an import
   question, never written). Signing needs macOS (`--sign`). `tests/test_shortcuts.py` checks them against the API.
 - `web/`: React 19 + Vite PWA, no CSS framework. "Index card" design: card color = content type (`--b-*` variables in
-  `styles.css`), red rule under the card header. Keep this visual language.
+  `styles.css`), red rule under the card header, blue ink (`--waterman`) for actions. Type and shapes follow the
+  owner's site: Bricolage Grotesque titles, Geist text, Geist Mono uppercase labels, hairlines, 8px buttons (fonts
+  self-hosted with `@fontsource-variable`). Keep this visual language and these colors.
 
 ## Commands
 
