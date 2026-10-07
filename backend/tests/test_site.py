@@ -449,3 +449,52 @@ def test_link_x_account_and_its_follows(site, monkeypatch):
     expect(page.locator(".watch-row")).to_have_count(13)
     page.get_by_role("button", name="Délier").click()
     expect(page.get_by_label("Ton compte X")).to_be_visible()
+
+
+def test_settings_menu_and_costs(site):
+    from app import costs
+
+    costs.record("anthropic", 0.42, model="claude-haiku-4-5")
+    costs.record("x", 0.05)
+    page = site("/settings", touch=True)
+
+    # the strip of sections stays on screen and takes you straight to one
+    nav = page.get_by_role("navigation", name="Sections des réglages")
+    nav.get_by_role("link", name="Tes données").click()
+    heading = page.get_by_role("heading", name="Tes données")
+    page.wait_for_function("() => { const h = [...document.querySelectorAll('h2')].find(e => e.textContent === 'Tes données');"
+                           " const r = h.getBoundingClientRect(); return r.top > 0 && r.top < 260; }")
+    expect(heading).to_be_in_viewport()
+    expect(nav).to_be_in_viewport()
+    expect(nav.get_by_role("link", name="Tes données")).to_have_attribute("aria-current", "true")
+
+    # costs: totals, by service, and a balance noted from the console
+    nav.get_by_role("link", name="Coûts").click()
+    section = page.locator("#couts")
+    expect(section.locator(".cost-totals")).to_contain_text("Ce mois-ci")
+    claude = section.locator(".cost-row[data-service='anthropic']")
+    expect(claude).to_contain_text("0,42")
+    expect(section.locator(".cost-row[data-service='railway']")).to_contain_text("forfait 5,00 $ / mois")
+    claude.get_by_role("button", name="Modifier Claude (Anthropic)").click()
+    claude.get_by_label("Solde affiché sur ton compte").fill("12,5")
+    claude.get_by_role("button", name="Enregistrer").click()
+    expect(claude).to_contain_text("Reste ≈ 12,50")
+    costs.record("anthropic", 0.5)
+    page.reload()
+    expect(page.locator(".cost-row[data-service='anthropic']")).to_contain_text("Reste ≈ 12,00")
+
+
+def test_generate_button_on_the_digest(site):
+    from app import db
+
+    db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
+                  values ('daily', current_date, current_date, 'ready', 'Une journée.', '{"entries": []}')""")
+    page = site("/digest")
+    button = page.locator(".digest-bar").get_by_role("button", name="Générer maintenant")
+    expect(button).to_be_visible()
+    asked = []
+    page.once("dialog", lambda d: (asked.append(d.message), d.dismiss()))
+    button.click()
+    expect(page.get_by_role("heading", name="Digest du", exact=False)).to_be_visible()
+    assert asked and "existe déjà" in asked[0]
+    assert db.fetchone("select status from digests")["status"] == "ready"      # dismissed: nothing rewritten

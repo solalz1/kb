@@ -49,7 +49,7 @@ def database():
 def clean_db(database):
     from app import db
 
-    db.execute("truncate items, chunks, item_links, actions, kb_settings, notion_trash, watch, digests, digest_feedback "
+    db.execute("truncate items, chunks, item_links, actions, kb_settings, notion_trash, watch, digests, digest_feedback, usage_log "
                "restart identity cascade")
     yield
 

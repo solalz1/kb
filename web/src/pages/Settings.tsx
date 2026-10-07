@@ -1,7 +1,8 @@
 import { Copy, Download, ExternalLink, LogOut, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, auth, type NotionStatus } from "../api";
 import { claudePrefs } from "../claude";
+import { Costs } from "../components/Costs";
 import { lang, setLang, t } from "../i18n";
 import { ago, KINDS } from "../kinds";
 
@@ -48,10 +49,11 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   };
 
   return (
-    <div className="page">
+    <div className="page settings-page">
       <h1 className="title">{t("Réglages")}</h1>
+      <SectionNav />
 
-      <section className="section">
+      <section className="section" id="langue">
         <h2>{t("Langue")}</h2>
         <div className="modes small" role="group" aria-label={t("Langue")}>
           <button type="button" lang="fr" aria-pressed={lang === "fr"} onClick={() => lang !== "fr" && setLang("fr")}>Français</button>
@@ -76,7 +78,12 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
         <p className="muted">{stats.by_kind.map((k) => `${k.n} ${((k.n > 1 ? KINDS[k.kind]?.plural : KINDS[k.kind]?.label) ?? k.kind).toLowerCase()}`).join(", ")}</p>
       )}
 
-      <section className="section">
+      <section className="section" id="couts">
+        <h2>{t("Coûts")}</h2>
+        <Costs />
+      </section>
+
+      <section className="section" id="raccourcis">
         <h2>{t("Raccourcis iPhone et Mac")}</h2>
         <p>{t("Les Raccourcis envoient ce que tu partages à cette adresse, avec ton jeton :")}</p>
         <div className="code">{origin}/api/ingest</div>
@@ -87,7 +94,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
         <p className="hint">{t("Le pas-à-pas complet est dans SHORTCUT.md, à la racine du dépôt.")}</p>
       </section>
 
-      <section className="section">
+      <section className="section" id="connecteur">
         <h2>{t("Connecteur Claude")}</h2>
         <p>{t("Dans Claude (Réglages, Connecteurs, « Ajouter un connecteur personnalisé »), colle cette URL en remplaçant la fin par ton secret")} <code>KB_MCP_SECRET</code>{t(" :")}</p>
         <div className="code">{origin}/mcp/{t("TON_SECRET_MCP")}</div>
@@ -100,7 +107,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
         </label>
       </section>
 
-      <section className="section">
+      <section className="section" id="notion">
         <h2>{t("Copie dans Notion")}</h2>
         {!notion ? null : notion.configured ? (
           <>
@@ -130,7 +137,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
         )}
       </section>
 
-      <section className="section">
+      <section className="section" id="donnees">
         <h2>{t("Tes données")}</h2>
         <p>{t("Export complet en Markdown : une note par élément (source, résumé, liens), rangée dans Veille ou Perso. Il s'ouvre dans Obsidian et s'importe dans Notion (Importer, puis Texte et Markdown).")}</p>
         <div className="segmented-row" style={{ marginBottom: 12 }}>
@@ -144,7 +151,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
         <p className="hint">{t("La version avec les fichiers (PDF, images, audio) peut être lourde. Garde-en une copie de temps en temps : c'est ta sauvegarde hors ligne.")}</p>
       </section>
 
-      <section className="section">
+      <section className="section" id="appareil">
         <h2>{t("Cet appareil")}</h2>
         <p className="muted">{t("Connecté à {origin}.", { origin })}</p>
         <button className="btn danger" onClick={onLogout}><LogOut size={16} /> {t("Se déconnecter")}</button>
@@ -154,6 +161,51 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
 }
 
 const LANG_NAMES: Record<string, string> = { fr: "Français", en: "English" };
+
+const SECTIONS: [string, string][] = [
+  ["langue", t("Langue")], ["couts", t("Coûts")], ["raccourcis", t("Raccourcis")], ["connecteur", t("Connecteur Claude")],
+  ["notion", t("Notion")], ["donnees", t("Tes données")], ["appareil", t("Cet appareil")],
+];
+
+/** A strip of the page's sections that stays under the top bar: one tap to reach any of them. */
+function SectionNav() {
+  const [current, setCurrent] = useState(SECTIONS[0][0]);
+  const picked = useRef(0);       // time of the last tap: the tapped section stays lit while the page scrolls to it
+  useEffect(() => {
+    // the section whose top last went past the strip is the one being read
+    const onScroll = () => {
+      if (Date.now() - picked.current < 1200) return;
+      let id = SECTIONS[0][0];
+      for (const [sid] of SECTIONS) {
+        const el = document.getElementById(sid);
+        if (el && el.getBoundingClientRect().top < 160) id = sid;
+      }
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) id = SECTIONS[SECTIONS.length - 1][0];
+      setCurrent(id);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    document.querySelector(`.settings-nav [data-to="${current}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [current]);
+  return (
+    <nav className="settings-nav" aria-label={t("Sections des réglages")}>
+      {SECTIONS.map(([id, label]) => (
+        <a key={id} href={`#${id}`} data-to={id} className="chip" aria-current={current === id ? "true" : undefined}
+           onClick={(e) => {
+             e.preventDefault();
+             picked.current = Date.now();
+             setCurrent(id);
+             document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+           }}>
+          {label}
+        </a>
+      ))}
+    </nav>
+  );
+}
 
 function LangPicker({ value, options, onChange, disabled }: {
   value: string; options: string[]; onChange: (lang: string) => void; disabled?: boolean;

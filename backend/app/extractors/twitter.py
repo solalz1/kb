@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from .. import llm, media
+from .. import costs, llm, media
 from ..config import get_settings
 from .base import ExtractionError, Extracted, http_client, parse_date
 
@@ -78,6 +78,7 @@ class XClient:
         for m in includes.get("media") or []:
             self.media[m["media_key"]] = m
         self.reads += len(data)
+        costs.record_x(posts=len(data) + len(includes.get("tweets") or includes.get("posts") or []), purpose="posts")
 
     def lookup(self, ids: list[str]) -> None:
         ids = [i for i in ids if i not in self.tweets]

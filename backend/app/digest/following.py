@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from .. import db
+from .. import costs, db
 from ..config import get_settings
 
 log = logging.getLogger(__name__)
@@ -94,6 +94,7 @@ def link(username: str) -> dict:
         raise FollowError("Identifiant X invalide")
     found = _get(f"/users/by/username/{username}", {"user.fields": "public_metrics"})
     user = found.get("data")
+    costs.record_x(users=1 if user else 0, purpose="x_account")
     if not user:
         raise FollowError(f"Compte X introuvable : @{username}")
     page = _page(user["id"], PAGE)
@@ -116,7 +117,9 @@ def _page(user_id: str, size: int, token: str | None = None) -> dict:
     params = {"max_results": size}
     if token:
         params["pagination_token"] = token
-    return _get(f"/users/{user_id}/following", params)
+    page = _get(f"/users/{user_id}/following", params)
+    costs.record_x(users=len(page.get("data") or []), purpose="x_following")
+    return page
 
 
 def _add(users: list[dict]) -> list[str]:

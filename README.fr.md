@@ -1,98 +1,122 @@
-# KB : une knowledge base personnelle
+# KB : une base de connaissances personnelle
 
 [English](README.md) · **Français**
 
-Tu partages n'importe quoi depuis ton iPhone ou ton Mac (tweet, thread, article, vidéo YouTube ou TikTok, PDF, capture d'écran, note vocale, document Word…). Claude le lit, le résume, le tague et le relie à ce que tu as déjà sauvé. Ensuite tu peux le retrouver, l'interroger et t'en servir pour démarrer un projet.
+Partage n'importe quoi depuis ton iPhone ou ton Mac (un tweet ou un thread, un article, une vidéo YouTube, un PDF, une capture d'écran, un mémo vocal…). Claude le lit, le résume, le tague et le relie à ce que tu as déjà sauvegardé. Ensuite tu le retrouves, tu lui poses des questions et tu reçois des conseils fondés sur tes propres notes. Tout tourne sur tes propres comptes : tu paies quelques dollars par mois d'API et d'hébergement, et personne d'autre ne voit tes données.
 
-- **Capture** : bouton Partager d'iOS/macOS (Raccourci), app web, ou directement depuis Claude.
-- **Tous les formats** : X (API officielle, threads compris), articles, arXiv, GitHub, YouTube, TikTok/Instagram/Vimeo/podcasts, audio, vidéo, PDF (même scannés), images, Word/PowerPoint/Excel, notes.
-- **Sources toujours visibles** : chaque fiche garde l'URL d'origine (ex. `https://x.com/handle/status/…`), l'auteur, la date et le fichier original. Chaque réponse du chat cite ses sources `[1]`, avec un lien.
-- **Chat + mode projet** : « Qu'est-ce que ma KB dit de… ? » et « Je lance tel projet, qu'est-ce qui peut me servir ? », qui donne un dossier sourcé avec ce qui est utile, qui suivre et les angles morts.
-- **Espace Perso** : un département à part pour le développement personnel. Tu y écris à la main tes principes, tes valeurs, tes leçons, tes objectifs, tes habitudes et ton journal (ou tu y ranges n'importe quel partage avec `#perso`). Tes notes sont gardées mot pour mot ; Claude ajoute seulement un résumé, des tags et des liens.
-- **Mode Conseil** : « Est-ce que j'accepte ce poste ? » La réponse s'appuie sur *tes* principes et *tes* valeurs (toujours relus en entier), puis sur tes leçons et tes notes. Elle cite chacun, nomme les tensions entre eux et se termine par un prochain pas. Aussi dans Claude, via le connecteur (`get_principles`).
-- **Agent de veille tech** : chaque matin, un digest des dernières 24 h rangé du plus général au plus technique (Hacker News, papiers Hugging Face, dépôts GitHub qui montent, blogs des labs et des ingénieurs, les personnes que tu suis sur X), ajusté à ce que tu sauvegardes. Chaque lundi, la semaine en bref et 4 ou 5 projets à mener dans la semaine, chacun avec un plan et un livrable. Il apprend de tes sauvegardes, de tes objectifs Perso et de tes votes, et te suggère des ingénieurs à suivre. À lire dans l'app, par e-mail ou dans Claude (`get_digest`).
-- **Ne rien perdre** : copie automatique dans Notion en option (une page par élément, tenue à jour), et export Markdown avec les fichiers d'origine, qui s'ouvre dans Obsidian et s'importe dans Notion.
-- **Connecteur Claude (MCP)** : ta KB est disponible dans Claude (web, desktop, mobile) et dans Claude Code. Claude y cherche, la parcourt par type, tag ou personne, et lit les éléments en entier avant de répondre. Un bouton « Demander dans Claude » dans l'app y ouvre la question : elle passe alors par ton abonnement Claude, pas par les crédits API.
-- **En plus** : liens automatiques entre éléments (avec la raison du lien), détection de doublons, « à redécouvrir », actions extraites (outils à tester, papiers à lire), pages par personne/outil/concept, export Markdown compatible Obsidian.
+## Ce que ça fait
 
-> L'app est en français et en anglais (Réglages → Langue). Chaque fiche est résumée dans les deux langues, Claude répond dans la langue de l'app, et les tags sont toujours en anglais pour une meilleure recherche. `KB_LANGUAGE` fixe la langue principale (celle du connecteur Claude, du digest et de Notion), `KB_SECOND_LANGUAGE` l'autre.
+- **Capture de partout** : le bouton Partager sur iPhone et Mac (Raccourcis tout faits), l'app web, ou Claude lui-même.
+- **Tous les formats** : posts et threads X, articles web, arXiv, GitHub, YouTube, TikTok/Instagram/Vimeo, podcasts, audio, vidéo, PDF (scannés aussi), images, Word/PowerPoint/Excel, notes.
+- **Sources gardées** : chaque fiche garde le lien d'origine, l'auteur, la date et le fichier. Chaque réponse cite ses sources, avec les liens.
+- **Interroge ta KB** : « Qu'est-ce que j'ai sauvegardé sur… ? », ou « Je commence ce projet, qu'est-ce qui peut m'aider ? », qui renvoie une note sourcée.
+- **Espace perso** : écris tes principes, tes valeurs, tes leçons, tes objectifs et un journal quotidien (avec un calendrier). Tes mots restent tels que tu les as écrits. Le **mode Conseil** répond à une décision à partir de *tes* principes, et les cite.
+- **Digest tech du matin** (facultatif) : Hacker News, les papiers Hugging Face, les dépôts GitHub qui montent, des blogs et les personnes que tu suis sur X, classés selon ce que tu sauvegardes. Le lundi, la semaine en bref et des idées de projets.
+- **Dans Claude** : un connecteur (MCP) permet à Claude de chercher et de lire ta KB sur le web, l'ordinateur, le téléphone et dans Claude Code.
+- **Jamais enfermé** : une copie dans Notion tenue à jour (facultative), et un export Markdown complet (prêt pour Obsidian) avec tes fichiers d'origine.
+- **Pensé pour le téléphone** : une app à installer, en français ou en anglais, avec des gestes pour épingler, archiver ou supprimer. Elle te montre ce que coûte chaque service, mois par mois.
 
-## Architecture
+## Ce qu'il te faut
+
+| Service | Pour quoi | Obligatoire ? | Coût |
+|---|---|---|---|
+| [API Claude](https://platform.claude.com) | résumés, réponses, digest | oui | ~1 ¢ par élément, ~4 ¢ par question |
+| [Voyage AI](https://dashboard.voyageai.com) | recherche (embeddings) | oui | gratuit jusqu'à 200 M de tokens |
+| [Supabase](https://supabase.com) | base de données et fichiers | oui | l'offre gratuite suffit (25 $/mois avec sauvegardes) |
+| [Railway](https://railway.com) | fait tourner l'app | oui | environ 5 $/mois |
+| Compte développeur X | lire les tweets, les gens que tu suis | pour les liens X | 0,005 $ par post lu (prépayé) |
+| [Groq](https://console.groq.com) (ou OpenAI) | transcrire l'audio et la vidéo | pour l'audio et la vidéo | quelques centimes par heure d'audio |
+| Notion | copie de ta KB tenue à jour | non | gratuit |
+
+Il faut aussi un compte GitHub (pour forker ce dépôt) et, pour les Raccourcis tout faits, un Mac. Un nom de domaine est facultatif : Railway te donne une adresse.
+
+## Installer (environ une heure)
+
+1. **Forke** ce dépôt (en haut à droite sur GitHub). Il ne contient que du code : ton fork peut être public ou privé.
+2. **Supabase** : crée un projet, colle [`supabase/migrations/20261002000000_init.sql`](supabase/migrations/20261002000000_init.sql) dans le SQL Editor, puis lance-le.
+3. **Clés** : crée les clés du tableau ci-dessus, plus deux secrets avec `openssl rand -hex 32` (le mot de passe de ton app, `KB_API_TOKEN`, et le secret du connecteur, `KB_MCP_SECRET`).
+4. **Railway** : **New Project → Deploy from GitHub repo** → ton fork. Colle [`.env.example`](.env.example) rempli avec tes valeurs dans **Variables → Raw Editor**, puis **Settings → Networking → Generate Domain**.
+5. **L'app** : ouvre cette adresse dans Safari sur ton iPhone → Partager → **Sur l'écran d'accueil**, puis colle ton `KB_API_TOKEN`.
+6. **Le bouton Partager** : sur un Mac, dans un clone de ton fork, lance `python3 shortcuts/build.py --url https://ton-adresse --sign`, puis double-clique les fichiers qu'il écrit ([SHORTCUT.fr.md](SHORTCUT.fr.md)).
+
+Chaque clic, les parties facultatives (domaine perso, connecteur Claude, Notion, digest, e-mail) et un tableau de dépannage sont dans **[SETUP.fr.md](SETUP.fr.md)**.
+
+## L'essayer d'abord sur ton ordinateur (10 minutes)
+
+Avec Docker installé, et seulement une clé Claude et une clé Voyage :
+
+```bash
+cp .env.example .env
+# remplis KB_API_TOKEN, KB_MCP_SECRET (openssl rand -hex 32), ANTHROPIC_API_KEY et VOYAGE_API_KEY
+docker compose up --build
+```
+
+Ouvre http://localhost:8000 et colle ton `KB_API_TOKEN`. La base tourne dans Docker et les fichiers restent sur ton disque. Les tweets demandent une clé X, l'audio et la vidéo une clé de transcription.
+
+## Mettre à jour
+
+Sur GitHub, ouvre ton fork et clique sur **Sync fork** : Railway redéploie tout seul. Le schéma de la base se met à jour au démarrage de l'app (`/api/health` affiche `"schema": "ok"`) : une mise à jour ne demande jamais d'étape SQL.
+
+Si Railway ne redéploie pas, donne accès à ton fork à son app GitHub (GitHub → Settings → Applications → Railway).
+
+## Ce que ça coûte
+
+Avec un usage quotidien, compte 5 à 15 $ par mois : environ 5 $ de Railway, puis Claude. Claude, c'est à peu près 1 centime par élément sauvegardé, 2 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que la KB a dépensé, service par service, ce mois-ci et en tout. Notes-y le solde affiché sur une console, et l'app te dit ce qu'il reste. Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
+
+## Confidentialité
+
+Le dépôt est public, tes données ne le sont pas.
+
+- **Le code et les données sont séparés.** Tes éléments vivent dans ton projet Supabase (sécurité au niveau des lignes activée, aucun accès public), tes clés dans les variables Railway. L'app ne répond à rien sans ton jeton et demande aux moteurs de recherche de ne pas l'indexer.
+- **Ce qui sort de ton serveur.** Pour traiter un élément, son contenu part vers l'API Anthropic (résumés, réponses ; les données de l'API ne servent pas à l'entraînement par défaut) et vers Voyage AI (recherche ; refuse l'entraînement dans son tableau de bord, voir [SETUP.fr.md](SETUP.fr.md)). L'audio et la vidéo partent chez ton service de transcription, les tweets sont lus par l'API X, et la copie Notion écrit dans ton propre espace. Le digest lit des sources publiques et envoie à Claude un résumé de tes centres d'intérêt.
+- **Sauvegardes.** L'offre gratuite de Supabase n'en fait pas : voir [SETUP.fr.md](SETUP.fr.md), étape 9.
+
+## Limites connues
+
+- **Vieux threads X** : l'API X ne cherche que sur les 7 derniers jours. Partage le **dernier** post d'un thread plus ancien : tout ce qui précède est récupéré.
+- **YouTube** bloque souvent les serveurs cloud. Si les transcriptions manquent, configure un proxy résidentiel (`YOUTUBE_PROXY_URL`).
+- **LinkedIn, Instagram privé** : derrière une connexion. Partage plutôt une capture d'écran.
+- **Fichiers de plus de 50 Mo** : la limite de l'offre gratuite de Supabase. Pour une longue vidéo, partage le lien.
+
+## Comment c'est construit
 
 ```
-iPhone / Mac ──Partager──▶ Raccourci ──POST /api/ingest──┐
-App PWA (kb.example.com) ────────────────────────────────────┤
-Claude (connecteur MCP) ── /mcp/<secret> ────────────────┤
-                                                         ▼
-                      ┌──────────── Railway : 1 conteneur ────────────┐
-                      │ FastAPI  ─  worker (threads)  ─  serveur MCP   │
-                      │   extraction ▸ Claude Haiku ▸ chunks ▸ Voyage  │
-                      │   ▸ liens auto  │  chat RAG : Claude Sonnet    │
-                      └───────────────────────┬────────────────────────┘
+iPhone / Mac ──Partager──▶ Raccourci ──POST /api/ingest───┐
+App web (PWA à installer) ────────────────────────────────┤
+Claude (connecteur MCP) ── /mcp/<secret> ─────────────────┤
+                                                          ▼
+                      ┌──────────── Railway : 1 conteneur ─────────────┐
+                      │ FastAPI  ─  worker (threads)  ─  serveur MCP    │
+                      │   extraction ▸ Claude Haiku ▸ morceaux ▸ Voyage │
+                      │   ▸ liens auto  │  chat : Claude Sonnet         │
+                      └───────────────────────┬─────────────────────────┘
                                               ▼
-                    Supabase : Postgres + pgvector (recherche hybride) + Storage
+                 Supabase : Postgres + pgvector (recherche hybride) + Storage
                                               │
-                    Notion (facultatif) : une page par élément, tenue à jour
+                        Notion (facultatif) : une page par élément, tenue à jour
 
-Agent de veille (dans le worker, chaque matin) : HN · papiers HF · GitHub · blogs · X ──▶ Claude ──▶ app / e-mail / Claude
+Agent du digest (dans le worker, chaque matin) : HN · papiers HF · GitHub · blogs · X ──▶ Claude ──▶ app / e-mail / Claude
 ```
 
 | Dossier | Contenu |
 |---|---|
-| `supabase/migrations/` | Schéma : items, chunks (pgvector + plein texte FR/EN), liens, actions, recherche hybride RRF, file d'attente |
-| `backend/app/` | API FastAPI, worker, extracteurs par format, enrichissement, chat, serveur MCP, export |
-| `web/` | PWA React (Veille et Perso, fiche, éditeur de notes, chat, ajout, à faire, réglages), installable sur iPhone et Mac |
-| `SETUP.fr.md` | Mise en route pas à pas (comptes, Supabase, Railway, domaine, connecteur Claude) |
-| `SHORTCUT.fr.md` | Créer le Raccourci du bouton Partager |
+| `backend/app/` | API FastAPI, worker, un extracteur par source, enrichissement, chat, agent du digest, serveur MCP, export |
+| `web/` | l'app React (fils, fiche, notes, journal, chat, digest, réglages) |
+| `supabase/migrations/` | le schéma de la base, appliqué à chaque démarrage |
+| `shortcuts/` | le générateur des Raccourcis iPhone et Mac |
 
-## Confidentialité
-
-Le dépôt est public, tes données non.
-
-- **Code et données séparés.** Le dépôt ne contient que du code : ni domaine, ni identifiant, ni clé, ni élément. Tes éléments vivent dans ton propre projet Supabase (RLS activé, aucun accès public), tes clés dans les variables d'environnement de Railway, et l'app ne répond à rien sans ton jeton. Elle demande aussi aux moteurs de recherche de ne pas l'indexer.
-- **Ce qui sort de ton serveur, et pourquoi.** Pour traiter un élément, son contenu part vers l'API Anthropic (résumé, tags, réponses du chat ; les données de l'API ne servent pas à entraîner les modèles par défaut) et vers Voyage AI (embeddings pour la recherche ; désactive l'usage pour l'entraînement dans le tableau de bord Voyage, voir [SETUP.fr.md](SETUP.fr.md)). L'audio et la vidéo passent par ton service de transcription (Groq ou OpenAI), les tweets sont lus via l'API X, et la copie Notion, si tu l'actives, écrit dans ton propre espace Notion. L'agent de veille ne lit que des sources publiques ; pour les trier, il envoie à Claude un résumé de tes intérêts (tags principaux, personnes, objectifs Perso). Les notes Perso suivent le même chemin, et rien d'autre.
-- **Sauvegardes.** Le plan gratuit de Supabase n'a aucune sauvegarde. Voir [SETUP.fr.md](SETUP.fr.md), étape 9 : copie Notion, export complet et Supabase Pro.
-
-## Démarrage rapide
-
-Suis **[SETUP.fr.md](SETUP.fr.md)** (environ une heure), puis **[SHORTCUT.fr.md](SHORTCUT.fr.md)**.
-
-En local, avec Docker : `cp .env.example .env`, remplis les clés, puis `docker compose up --build` et ouvre http://localhost:8000.
-
-Pour développer sans Docker :
+Développer sans Docker :
 
 ```bash
-# backend
 cd backend && python -m venv .venv && . .venv/bin/activate && pip install -r requirements-dev.txt
 uvicorn app.main:app --reload            # http://localhost:8000
-# front (autre terminal) : relaie /api vers le backend
-cd web && npm install && npm run dev     # http://localhost:5173
-# tests : il faut un Postgres + pgvector, par exemple celui de docker compose (port 54322)
+cd web && npm install && npm run dev     # http://localhost:5173, redirige /api vers le backend
+# les tests demandent Postgres + pgvector, par exemple celui de docker compose (port 54322)
 cd backend && KB_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:54322/kb_test pytest
 ```
 
-## Coûts indicatifs (usage perso intensif)
-
-| Poste | Ordre de grandeur |
-|---|---|
-| Enrichissement d'un élément (Claude Haiku 4.5) | ~1 centime, plus pour un long PDF |
-| Question dans l'app | ~2 centimes (Haiku) à ~20 centimes (Fable) ; ~4 centimes avec Sonnet 5.5, le modèle par défaut. Le modèle se choisit dans le chat |
-| Question via le connecteur dans Claude | incluse dans ton abonnement Claude |
-| Lecture d'un tweet (API X) | 0,005 $ par post lu |
-| Embeddings (Voyage) | négligeable |
-| Transcription (Groq Whisper) | quelques centimes par heure d'audio |
-| Railway | ~5 $/mois |
-| Supabase | 0 $ (gratuit) ou 25 $/mois (Pro, avec sauvegardes quotidiennes) |
-| Copie Notion | gratuite (fonctionne avec le plan Notion gratuit) |
-| Digest tech | ~0,10 à 0,20 $/jour d'API Claude, plus 0,005 $ par post X lu (plafonné par `DIGEST_X_MAX_POSTS`) |
-
-## Limites connues
-
-- **Threads X anciens** : l'API ne permet de chercher la suite d'un thread que sur les 7 derniers jours. Pour un vieux thread, partage son **dernier** tweet : tout ce qui précède est récupéré.
-- **YouTube** bloque souvent les IP des serveurs cloud. Si les transcriptions manquent, ajoute un proxy résidentiel (`YOUTUBE_PROXY_URL`).
-- **LinkedIn, Instagram (posts privés)** : contenu derrière un login. Partage plutôt une capture d'écran.
-- **Fichiers > 50 Mo** : limite du plan gratuit Supabase. Pour une longue vidéo, partage plutôt le lien.
+Le dépôt contient un `CLAUDE.md` et deux skills (`/debug-item`, `/add-source`) pour travailler dessus avec Claude Code.
 
 ## Licence
 
-MIT, voir [LICENSE](LICENSE). Les dépendances sont sous licences permissives (MIT, BSD, Apache-2.0, LGPL, Unlicense). Pour signaler une faille : [SECURITY.md](SECURITY.md).
+MIT, voir [LICENSE](LICENSE). Pour signaler une vulnérabilité, voir [SECURITY.md](SECURITY.md).
