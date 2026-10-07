@@ -42,15 +42,21 @@ update both.
 - `shortcuts/build.py`: generates the three iOS/macOS Shortcuts (binary plists, stdlib only; the token is an import
   question, never written). Signing needs macOS (`--sign`). `tests/test_shortcuts.py` checks them against the API.
 - `web/`: React 19 + Vite PWA, no CSS framework. "Index card" design: card color = content type (`--b-*` variables in
-  `styles.css`), red rule under the card header. Keep this visual language.
+  `styles.css`), red rule under the card header, blue ink (`--waterman`) for actions. Type and shapes follow the
+  owner's site: Bricolage Grotesque titles, Geist text, Geist Mono uppercase labels, hairlines, 8px buttons (fonts
+  self-hosted with `@fontsource-variable`). Keep this visual language and these colors.
 
 ## Commands
 
 ```bash
 cd backend && pytest -q        # Postgres+pgvector required (KB_TEST_DATABASE_URL, see tests/conftest.py)
-cd web && npm run build        # typecheck + build
+cd web && npm run build        # i18n check + typecheck + build
+cd backend && pytest -q tests/test_site.py   # the built site in Chromium (Playwright), skipped without web/dist
 docker compose up --build      # everything locally on :8000
 ```
+
+Before opening a PR: backend tests, `npm run build` and the browser tests must all pass (CI runs the three jobs:
+`backend`, `web`, `site`). Add a browser test in `tests/test_site.py` for every new page or flow.
 
 Tests never call external services: Claude is faked by the `fake_llm` fixture, embeddings by
 `EMBEDDINGS_PROVIDER=fake`, storage by the local disk, Notion by an `httpx.MockTransport` (`tests/test_notion.py`),

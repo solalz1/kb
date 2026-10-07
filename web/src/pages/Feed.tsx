@@ -1,4 +1,4 @@
-import { Compass, NotebookPen, Search, Shuffle, X } from "lucide-react";
+import { CalendarDays, Compass, NotebookPen, Search, Shuffle, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type ItemSummary, type Kind, type Space } from "../api";
@@ -98,6 +98,7 @@ export default function Feed({ space }: { space: Space }) {
               </div>
               <div className="space-actions">
                 <Link className="btn primary" to={newNoteHref}><NotebookPen size={16} /> {t("Nouvelle note")}</Link>
+                <Link className="btn" to="/journal"><CalendarDays size={16} /> {t("Journal")}</Link>
                 <Link className="btn" to="/ask?mode=advice"><Compass size={16} /> {t("Demander conseil")}</Link>
               </div>
             </header>

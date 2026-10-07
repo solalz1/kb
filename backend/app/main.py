@@ -9,6 +9,7 @@ import re
 import secrets
 import threading
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -195,6 +196,7 @@ class NoteIn(BaseModel):
     space: str = "perso"
     category: str | None = None
     tags: list[str] | None = None
+    entry_date: date | None = None     # journal notes: the day they belong to (default: today)
 
 
 @api.post("/api/notes", dependencies=auth)
@@ -202,7 +204,7 @@ def create_note(note: NoteIn):
     """Note écrite dans l'app (espace Perso par défaut)."""
     try:
         res = pipeline.create_note(content=note.content, title=note.title, space=note.space,
-                                   category=note.category, tags=note.tags)
+                                   category=note.category, tags=note.tags, entry_date=note.entry_date)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "id": res["id"], "status": res["status"], "message": "Note ajoutée à ta KB ✓"}
@@ -224,7 +226,7 @@ def taxonomy():
 LIST_FIELDS = """id::text, kind, status, error, coalesce(title, left(input_text, 90)) as title, source_url, author,
                  site_name, published_at, created_at, left(coalesce(summary, input_text), 320) as summary, tags,
                  thumbnail_url, user_note, pinned, archived, file_path, file_mime,
-                 metadata->>'thumb_path' as thumb_path, genre, space, category, translations"""
+                 metadata->>'thumb_path' as thumb_path, genre, space, category, translations, entry_date"""
 
 
 def _with_thumbs(rows: list[dict]) -> list[dict]:
@@ -351,6 +353,7 @@ class ItemPatch(BaseModel):
     space: str | None = None
     category: str | None = None
     content: str | None = None    # notes uniquement : le texte est remplacé puis retraité
+    entry_date: date | None = None  # journal : déplace la note vers un autre jour
 
 
 @api.patch("/api/items/{item_id}", dependencies=auth)
@@ -376,6 +379,13 @@ def patch_item(item_id: str, patch: ItemPatch):
     elif "category" in changes:
         sets.append("category = %s")
         params.append(category)
+        if category == "journal" and not changes.get("entry_date"):
+            # filed in the journal: it belongs to the day it was written
+            sets.append("entry_date = coalesce(entry_date, (created_at at time zone %s)::date)")
+            params.append(settings.digest_timezone)
+    if changes.get("entry_date"):
+        sets.append("entry_date = %s")
+        params.append(changes["entry_date"])
     if "title" in changes:
         title = (changes["title"] or "").strip()[:300] or None
         sets.append("title = %s")
@@ -542,6 +552,51 @@ def stats():
         "this_week": week["n"],
         "open_actions": open_actions["n"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Journal: Perso notes of category 'journal', one calendar day each
+# ---------------------------------------------------------------------------
+
+JOURNAL_WHERE = "space = 'perso' and category = 'journal' and not archived"
+
+
+def _journal_day_sql() -> str:
+    # notes filed in the journal before the calendar existed: the day they were written
+    return "coalesce(entry_date, (created_at at time zone %(tz)s)::date)"
+
+
+@api.get("/api/journal", dependencies=auth)
+def journal_month(month: str | None = None):
+    """Number of journal notes per day of `month` (YYYY-MM, default: this month)."""
+    today = pipeline.today()
+    try:
+        first = date.fromisoformat(f"{month}-01") if month else today.replace(day=1)
+        if not 1900 <= first.year <= 9000:
+            raise ValueError(month)
+    except ValueError as exc:
+        raise HTTPException(400, "Mois invalide : attendu AAAA-MM") from exc
+    after = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    day = _journal_day_sql()
+    rows = db.fetchall(
+        f"""select {day} as day, count(*)::int as n from items
+            where {JOURNAL_WHERE} and {day} >= %(first)s and {day} < %(after)s group by 1 order by 1""",
+        {"tz": settings.digest_timezone, "first": first, "after": after},
+    )
+    return {"month": first.isoformat()[:7], "today": today.isoformat(),
+            "days": {r["day"].isoformat(): r["n"] for r in rows}}
+
+
+@api.get("/api/journal/{day}", dependencies=auth)
+def journal_day(day: date):
+    """The day's journal notes, in the order they were written: the user's own text, whatever their processing."""
+    rows = db.fetchall(
+        f"""select id::text, kind, status, title, coalesce(input_text, summary, title) as text, source_url,
+                   created_at, updated_at, {_journal_day_sql()} as day
+            from items where {JOURNAL_WHERE} and {_journal_day_sql()} = %(day)s order by created_at""",
+        {"tz": settings.digest_timezone, "day": day},
+    )
+    return {"date": day.isoformat(), "entries": rows}
 
 
 # ---------------------------------------------------------------------------

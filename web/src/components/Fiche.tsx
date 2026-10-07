@@ -2,7 +2,7 @@ import { AlertTriangle, Loader2, Pin } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { ItemSummary } from "../api";
 import { localized, t } from "../i18n";
-import { ago, hostOf } from "../kinds";
+import { ago, fullDate, hostOf } from "../kinds";
 import { headLabel } from "../perso";
 
 export function Fiche({ item, compact = false }: { item: ItemSummary; compact?: boolean }) {
@@ -20,7 +20,7 @@ export function Fiche({ item, compact = false }: { item: ItemSummary; compact?: 
         <span className="kind">{headLabel(item)}</span>
         {who && <span className="who">{who}</span>}
         {item.pinned && <Pin size={14} className="pin" aria-label={t("Épinglé")} />}
-        <span className="when">{ago(item.created_at)}</span>
+        <span className="when">{item.category === "journal" && item.entry_date ? fullDate(item.entry_date) : ago(item.created_at)}</span>
       </div>
       <div className="fiche-body">
         <div className="fiche-text">

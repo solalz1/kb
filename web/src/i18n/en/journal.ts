@@ -1,0 +1,27 @@
+// English for the journal.
+export default {
+  "Journal": "Journal",
+  "Une page par jour : ce qui s'est passé, ce que tu as ressenti, ce que tu retiens. Tes notes restent dans ton espace Perso.":
+    "One page a day: what happened, how you felt, what you take from it. Your notes stay in your Personal space.",
+  "Calendrier": "Calendar",
+  "Mois précédent": "Previous month",
+  "Mois suivant": "Next month",
+  "{n} notes": "{n} notes",
+  "1 note": "1 note",
+  "Aujourd'hui": "Today",
+  "{n} notes ce mois-ci": "{n} notes this month",
+  "{n} note ce mois-ci": "{n} note this month",
+  "Aucune note ce mois-ci": "No notes this month",
+  "Voir la fiche": "Open the card",
+  "Modifier": "Edit",
+  "Modifier la note": "Edit the note",
+  "Résumé, tags et liens": "Summary, tags and links",
+  "Supprimer cette note du journal ?": "Delete this journal note?",
+  "Rien pour ce jour. Tu peux déjà y noter ce que tu prévois.": "Nothing for this day yet. You can already note what you're planning.",
+  "Rien d'écrit ce jour-là.": "Nothing written that day.",
+  "Ajouter une note à ce jour": "Add a note to this day",
+  "Écrire pour ce jour": "Write for this day",
+  "Ce qui s'est passé, ce que tu as ressenti, ce que tu retiens…": "What happened, how you felt, what you take from it…",
+  "Ajouter au journal": "Add to the journal",
+  "⌘ + Entrée pour enregistrer": "⌘ + Return to save",
+} as Record<string, string>;

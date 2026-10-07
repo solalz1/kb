@@ -46,7 +46,10 @@ export function ago(iso: string | null | undefined): string {
 
 export function fullDate(iso: string | null | undefined): string {
   if (!iso) return "";
-  return new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
+  // a bare day ("2026-10-07") is a local date, not midnight UTC
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const d = day ? new Date(+day[1], +day[2] - 1, +day[3]) : new Date(iso);
+  return d.toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
 }
 
 export function hostOf(url: string | null | undefined): string {
