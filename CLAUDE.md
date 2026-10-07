@@ -3,7 +3,8 @@
 A personal knowledge base: the user shares anything (tweet, article, video, PDF, image, note) from iPhone/Mac, the
 backend extracts it, has Claude summarize it, indexes it (pgvector + full text), and it can be queried through the
 PWA, the API or the MCP server (Claude connector). **The UI is bilingual**: French strings in the code are the keys of `t()` (`web/src/i18n.ts`), their English lives
-in `web/src/i18n/en/*.ts`, and `npm run build` fails on a missing translation. LLM prompts are in French. Items
+in `web/src/i18n/en/*.ts`, and `npm run build` fails on a missing translation (a key may carry a context after `|`,
+never shown in French: `t("Annuler|undo")`). LLM prompts are in French. Items
 keep their card in a second language in `items.translations` (`localized()` in the front); tags are in English. Write new code comments and commit messages in English (older modules still have
 French comments). Public docs are in English with `*.fr.md` French copies:
 update both.
@@ -49,6 +50,8 @@ update both.
   `styles.css`), red rule under the card header, blue ink (`--waterman`) for actions. Type and shapes follow the
   owner's site: Bricolage Grotesque titles, Geist text, Geist Mono uppercase labels, hairlines, 8px buttons (fonts
   self-hosted with `@fontsource-variable`). Keep this visual language and these colors.
+  Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
+  each with an undo toast; a deletion waits 5 s before it reaches the API.
 
 ## Commands
 
