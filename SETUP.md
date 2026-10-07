@@ -84,11 +84,12 @@ The connector URL contains a secret, so treat it like a password. To revoke it, 
 
 Every item gets a page in a Notion database, rewritten whenever it changes: a second copy of your KB outside Supabase, readable everywhere, and an export that's already done.
 
-1. [notion.so/profile/integrations](https://www.notion.so/profile/integrations) → **New integration** → type **Internal**, your workspace, name `KB` → **Save**. Copy the **Internal Integration Secret** (`ntn_…`) into `NOTION_TOKEN`. Keep the default capabilities (read, update, insert content).
-2. In Notion, create an empty page, e.g. `KB` (it stays private to you). Open it → **•••** menu (top right) → **Connections** → find and add your `KB` integration. The integration can only see this page and what it creates inside it.
-3. **•••** → **Copy link**, and paste the link into `NOTION_PARENT_PAGE_ID` (the full link works, so does the 32-character ID).
-4. Optional: `NOTION_SPACES=perso` to copy only the Perso space.
-5. Save the variables: Railway redeploys. Within a minute, a **Knowledge base** database appears in the page, then fills up (about 3 items per second). In the app, **Réglages → Copie dans Notion** shows the progress, the last error if any, and a **Synchroniser maintenant** button.
+1. In Notion, create an empty page, e.g. `KB` (it stays private to you).
+2. [notion.so/profile/integrations](https://www.notion.so/profile/integrations) (it opens **Developer tools → Connections**) → **New connection** → name `KB`, your workspace, auth type **API token** (not OAuth). In the connection, **Configuration** tab: copy the **API token** (`ntn_…`) into `NOTION_TOKEN`, and keep the default capabilities (read, update, insert content). Use a connection rather than a personal access token: those expire (after a year at most) and see your whole workspace.
+3. Give the connection your page: **Content access** tab → **Edit access** → tick `KB`. Or, in the page, **•••** menu (top right) → **Connections** → **+ Add connection** → `KB`. A new connection sees nothing until then; afterwards it only sees this page and what it creates inside it.
+4. In the page, **•••** → **Copy link**, and paste the link into `NOTION_PARENT_PAGE_ID` (the full link works, so does the 32-character ID).
+5. Optional: `NOTION_SPACES=perso` to copy only the Perso space.
+6. Save the variables: Railway redeploys. Within a minute, a **Knowledge base** database appears in the page, then fills up (about 3 items per second). In the app, **Réglages → Copie dans Notion** shows the progress, the last error if any, and a **Synchroniser maintenant** button.
 
 Good to know: the copy goes one way, from the app to Notion. Edit in the app; changes made in Notion are overwritten the next time the item changes. Deleting an item in the app moves its page to Notion's trash. If you delete the database, it's recreated and refilled. In Notion, add views: filter `Espace` = `Perso` and group by `Catégorie`, for example.
 

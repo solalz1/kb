@@ -356,3 +356,20 @@ def test_export_language(client):
     assert "## Summary\nSummary of the article" in article and "> **Why I kept it:** à relire" in article
     fr = zipfile.ZipFile(io.BytesIO(client.get("/api/export", headers=AUTH).content))
     assert any(n.startswith("KB/Perso/Valeurs/") for n in fr.namelist())
+
+
+def test_page_not_given_to_the_connection(client, fake_notion, monkeypatch):
+    """A new Notion connection sees no page: the error says how to give it the parent page."""
+    _setup(client)
+
+    def no_access(request):
+        if request.method == "POST" and request.url.path == "/v1/databases":
+            return httpx.Response(404, json={"code": "object_not_found", "message": "Could not find page"})
+        return fake_notion(request)
+
+    monkeypatch.setattr(notion, "_client", httpx.Client(base_url=notion.API, transport=httpx.MockTransport(no_access)))
+    with pytest.raises(notion.NotionError) as err:
+        notion.sync_pending()
+    notion._record_error(err.value)                    # what the background sync does with it
+    error = notion.status()["last_error"]
+    assert "page parente introuvable" in error and "Ajouter une connexion" in error

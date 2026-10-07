@@ -84,11 +84,12 @@ L'URL du connecteur contient un secret : traite-la comme un mot de passe. Pour l
 
 Chaque élément a sa page dans une base Notion, réécrite à chaque modification : une deuxième copie de ta KB hors de Supabase, lisible partout, et un export déjà fait.
 
-1. [notion.so/profile/integrations](https://www.notion.so/profile/integrations) → **New integration** → type **Internal**, ton espace de travail, nom `KB` → **Save**. Copie l'**Internal Integration Secret** (`ntn_…`) dans `NOTION_TOKEN`. Garde les capacités par défaut (lire, modifier, insérer du contenu).
-2. Dans Notion, crée une page vide, par exemple `KB` (elle reste privée). Ouvre-la → menu **•••** (en haut à droite) → **Connexions** → cherche et ajoute ton intégration `KB`. L'intégration ne voit que cette page et ce qu'elle y crée.
-3. **•••** → **Copier le lien**, et colle le lien dans `NOTION_PARENT_PAGE_ID` (le lien complet marche, l'identifiant de 32 caractères aussi).
-4. Facultatif : `NOTION_SPACES=perso` pour ne copier que l'espace Perso.
-5. Enregistre les variables : Railway redéploie. En moins d'une minute, une base **Knowledge base** apparaît dans la page, puis se remplit (environ 3 éléments par seconde). Dans l'app, **Réglages → Copie dans Notion** montre l'avancement, la dernière erreur s'il y en a une, et un bouton **Synchroniser maintenant**.
+1. Dans Notion, crée une page vide, par exemple `KB` (elle reste privée).
+2. [notion.so/profile/integrations](https://www.notion.so/profile/integrations) (la page s'appelle maintenant **Developer tools → Connections**) → **New connection** → nom `KB`, ton espace de travail, type **API token** (pas OAuth). Dans la connexion, onglet **Configuration** : copie l'**API token** (`ntn_…`) dans `NOTION_TOKEN`, et garde les capacités par défaut (lire, modifier, insérer du contenu). Prends une connexion plutôt qu'un jeton personnel (*personal access token*) : ceux-là expirent (au bout d'un an au plus) et voient tout ton espace de travail.
+3. Donne ta page à la connexion : onglet **Content access** → **Edit access** → coche `KB`. Ou, dans la page, menu **•••** (en haut à droite) → **Connexions** → **+ Ajouter une connexion** → `KB`. Une connexion neuve ne voit rien avant ça ; ensuite, elle ne voit que cette page et ce qu'elle y crée.
+4. Dans la page, **•••** → **Copier le lien**, et colle le lien dans `NOTION_PARENT_PAGE_ID` (le lien complet marche, l'identifiant de 32 caractères aussi).
+5. Facultatif : `NOTION_SPACES=perso` pour ne copier que l'espace Perso.
+6. Enregistre les variables : Railway redéploie. En moins d'une minute, une base **Knowledge base** apparaît dans la page, puis se remplit (environ 3 éléments par seconde). Dans l'app, **Réglages → Copie dans Notion** montre l'avancement, la dernière erreur s'il y en a une, et un bouton **Synchroniser maintenant**.
 
 À savoir : la copie va dans un seul sens, de l'app vers Notion. Modifie dans l'app ; une retouche faite dans Notion est écrasée à la modification suivante de l'élément. Supprimer un élément dans l'app met sa page à la corbeille Notion. Si tu supprimes la base, elle est recréée et re-remplie. Dans Notion, ajoute des vues : par exemple un filtre `Espace` = `Perso`, groupé par `Catégorie`.
 

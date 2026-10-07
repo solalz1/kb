@@ -213,8 +213,8 @@ def ensure_database(lang: str | None = None) -> dict:
         })
     except NotionError as exc:
         if exc.status in (403, 404):
-            raise NotionError(exc.status, exc.code, "page parente introuvable : partage-la avec ton intégration "
-                                                    "(menu ··· de la page > Connexions)") from exc
+            raise NotionError(exc.status, exc.code, "page parente introuvable : donne-la à ta connexion Notion "
+                                                    "(menu ··· de la page > Connexions > Ajouter une connexion)") from exc
         raise
     sources = created.get("data_sources") or []
     if not sources:
