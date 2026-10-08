@@ -239,6 +239,27 @@ def test_journal_other_days(site):
     expect(page.locator(".fiche .when").first).to_contain_text(str(last_month.year))
 
 
+def test_phone_head_and_tab_bar(site):
+    """On a phone, Veille's head carries the To do badge and the settings cog; the + in the tab bar opens Add."""
+    page = site("/")
+    _seed(page)
+    page.reload()
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    expect(page.locator(".page-head .badge")).to_have_text(re.compile(r"^[1-9]\d*$"))   # one open action per seeded item
+    page.locator(".page-head").get_by_role("link", name=re.compile("À faire")).click()
+    expect(page.get_by_role("heading", name="À faire", exact=True)).to_be_visible()
+    page.goto("/")
+    page.locator(".page-head").get_by_role("link", name="Réglages").click()
+    expect(page.get_by_role("heading", name="Réglages")).to_be_visible()
+    page.locator(".tabbar").get_by_role("link", name="Ajouter").click()
+    expect(page.get_by_role("heading", name="Ajouter à ta KB")).to_be_visible()
+    # the "Tout" chip is the default filter and clears a type filter
+    page.goto("/?kind=article")
+    expect(page.locator(".chip[aria-pressed='true']")).to_have_text("Articles")
+    page.get_by_role("button", name="Tout", exact=True).click()
+    expect(page).not_to_have_url(re.compile(r"kind="))
+
+
 def test_journal_from_the_menus(site):
     page = site("/perso")
     page.get_by_role("link", name="Journal").click()
@@ -251,15 +272,19 @@ def test_journal_from_the_menus(site):
 def test_english(site):
     page = site("/")
     _seed(page)
-    page.locator(".topbar .lang").get_by_role("button", name="EN").click()
+    # on a phone the language lives in Settings (the sidebar's FR | EN switch is desktop only)
+    page.get_by_role("link", name="Réglages").click()
+    page.get_by_role("group", name="Langue").get_by_role("button", name="English").click()
+    page.goto("/")
     expect(page.locator(".tabbar").get_by_role("link", name="Feed")).to_be_visible()
     expect(page.get_by_placeholder("Search for a topic, an idea, a person…")).to_be_visible()
     expect(page.locator(".fiche .ruled").first).to_contain_text("Summary of the article")   # the English card
     page.goto("/journal")
     expect(page.locator(".cal-wd").first).to_have_text("Mon")
     expect(page.get_by_role("button", name="Add to the journal")).to_be_visible()
-    page.locator(".topbar .lang").get_by_role("button", name="FR").click()
-    expect(page.get_by_role("button", name="Ajouter au journal")).to_be_visible()
+    desk = site("/", viewport=DESKTOP, lang="en")
+    desk.locator(".rail .lang").get_by_role("button", name="FR").click()
+    expect(desk.get_by_placeholder("Chercher un sujet, une idée, une personne…")).to_be_visible()
 
 
 def test_add_a_link(site):

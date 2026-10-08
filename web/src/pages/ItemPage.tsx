@@ -79,6 +79,7 @@ export default function ItemPage() {
 
       <article className="fiche sheet" data-kind={item.kind ?? undefined} data-space={perso ? "perso" : undefined}>
         <div className="fiche-head">
+          {!perso && item.kind && <span className="dot" data-kind={item.kind} />}
           <span className="kind">{headLabel(item)}</span>
           {!perso && genreLabel(item.genre) && <span>{genreLabel(item.genre)}</span>}
           <span className="when">{writtenNote ? t("écrit le {date}", { date: fullDate(item.created_at) }) : t("sauvé le {date}", { date: fullDate(item.created_at) })}</span>

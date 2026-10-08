@@ -9,6 +9,8 @@ export default {
   "À faire": "To do",
   "Réglages": "Settings",
   "second cerveau": "second brain",
+  "Tout": "All",
+  "À faire, {n} en attente": "To do, {n} pending",
   "Ce jeton ne correspond pas à KB_API_TOKEN sur le serveur.": "This token doesn't match KB_API_TOKEN on the server.",
   "Serveur injoignable. Vérifie l'adresse de l'API.": "Server unreachable. Check the API address.",
   "connexion": "sign in",
