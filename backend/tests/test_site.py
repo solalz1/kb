@@ -516,6 +516,22 @@ def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
     expect(page.locator("#couts")).not_to_contain_text("ANTHROPIC_ADMIN_KEY")
 
 
+def test_thinking_can_be_turned_off_in_settings(site):
+    from app import llm
+
+    page = site("/settings")
+    page.get_by_role("navigation", name="Sections des réglages").get_by_role("link", name="Réflexion").click()
+    box = page.get_by_label("Laisser Claude réfléchir avant de répondre")
+    expect(box).to_be_checked()                          # on by default
+    box.uncheck()
+    _wait_for(lambda: llm.thinking_enabled() is False, page)
+    page.reload()
+    box = page.get_by_label("Laisser Claude réfléchir avant de répondre")
+    expect(box).not_to_be_checked()
+    box.check()
+    _wait_for(llm.thinking_enabled, page)
+
+
 def test_generate_button_on_the_digest(site):
     from app import db
 

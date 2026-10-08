@@ -54,7 +54,7 @@ class FakeClaude:
 
 
 @pytest.fixture
-def claude(monkeypatch):
+def claude(monkeypatch, clean_db):
     from app import llm
 
     monkeypatch.setattr(llm, "_NO_FORCED_TOOL", set())
@@ -186,7 +186,7 @@ class PlainClaude:
 
 
 @pytest.fixture
-def plain(monkeypatch):
+def plain(monkeypatch, clean_db):
     from app import llm
 
     fake = PlainClaude()
@@ -194,36 +194,81 @@ def plain(monkeypatch):
     return fake
 
 
-def test_plain_calls_dont_think_on_haiku_5_5(plain):
-    """Haiku 5.5 thinks by default and max_tokens counts it: rewriting a query, describing video frames and reading a
-    scanned PDF turn it off, so a short answer never runs out of room. Sonnet 5.5 can't turn it off: it gets room."""
+def _frame() -> bytes:
     from PIL import Image
 
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 32), "white").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_models_think_by_default_with_room_for_it(plain):
+    """Haiku 5.5, Sonnet 5.5 and Opus 5.5 think by default and max_tokens counts it: plain calls and chat answers
+    leave thinking on and add room for it, so a short answer never runs out of tokens."""
     from app import llm
     from app.config import get_settings
 
-    assert get_settings().enrich_model == "claude-haiku-5-5"
+    assert get_settings().enrich_model == "claude-haiku-5-5" and llm.thinking_enabled() is True
     assert llm.complete(system="s", prompt="p", max_tokens=200) == "agents rag"
-    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 200
-
-    llm.complete(system="s", prompt="p", model="claude-sonnet-5-5", max_tokens=200)
     assert "thinking" not in plain.calls[-1] and plain.calls[-1]["max_tokens"] == 200 + llm.THINKING_ROOM
-    llm.complete(system="s", prompt="p", model="claude-haiku-4-5", max_tokens=200)
-    assert "thinking" not in plain.calls[-1] and plain.calls[-1]["max_tokens"] == 200
-
-    frame = io.BytesIO()
-    Image.new("RGB", (32, 32), "white").save(frame, format="PNG")
-    assert llm.describe_frames([frame.getvalue()]) == "agents rag"
-    assert plain.calls[-1]["model"] == "claude-haiku-5-5" and plain.calls[-1]["thinking"] == {"type": "disabled"}
+    assert llm.describe_frames([_frame()]) == "agents rag"
+    assert "thinking" not in plain.calls[-1] and plain.calls[-1]["max_tokens"] == 2000 + llm.THINKING_ROOM
     assert llm.transcribe_pdf(b"%PDF-1.4", first_page=11) == "agents rag"
-    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 20000
-
-
-def test_chat_answers_keep_their_room_when_the_model_thinks(plain):
-    from app import llm
+    assert "thinking" not in plain.calls[-1] and plain.calls[-1]["max_tokens"] == 20000 + llm.THINKING_ROOM
 
     for model, room in (("claude-haiku-5-5", llm.THINKING_ROOM), ("claude-sonnet-5-5", llm.THINKING_ROOM),
-                        ("claude-haiku-4-5", 0)):
+                        ("claude-opus-5-5", llm.THINKING_ROOM), ("claude-haiku-4-5", 0)):
         out = "".join(llm.stream_text(system="s", messages=[{"role": "user", "content": "?"}], model=model, max_tokens=4000))
         assert out == "agents rag"
         assert plain.calls[-1]["max_tokens"] == 4000 + room and "thinking" not in plain.calls[-1]
+
+
+def test_thinking_turned_off_in_settings(plain):
+    """Off: Haiku 5.5 sends thinking "disabled", Sonnet 5.5 "between_tools" (no thinking before the answer), and both
+    keep max_tokens as is. Opus 5.5 can't stop thinking: unchanged, with its room."""
+    from app import llm
+
+    assert llm.set_thinking(False) == {"enabled": False}
+    llm.complete(system="s", prompt="p", max_tokens=200)
+    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 200
+    llm.describe_frames([_frame()])
+    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 2000
+    llm.transcribe_pdf(b"%PDF-1.4")
+    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 20000
+
+    expected = {"claude-haiku-5-5": ({"type": "disabled"}, 4000), "claude-sonnet-5-5": ({"type": "between_tools"}, 4000),
+                "claude-opus-5-5": (None, 4000 + llm.THINKING_ROOM), "claude-haiku-4-5": (None, 4000)}
+    for model, (thinking, max_tokens) in expected.items():
+        "".join(llm.stream_text(system="s", messages=[{"role": "user", "content": "?"}], model=model, max_tokens=4000))
+        assert plain.calls[-1].get("thinking") == thinking and plain.calls[-1]["max_tokens"] == max_tokens
+
+    assert llm.set_thinking(True) == {"enabled": True}
+    llm.complete(system="s", prompt="p", max_tokens=200)
+    assert "thinking" not in plain.calls[-1]
+
+
+def test_structured_outputs_follow_the_setting(claude):
+    from app import llm
+
+    _write_digest("claude-sonnet-5-5")
+    assert "thinking" not in claude.calls[-1]
+    llm.set_thinking(False)
+    _write_digest("claude-sonnet-5-5")
+    assert claude.calls[-1]["thinking"] == {"type": "between_tools"} and "output_config" in claude.calls[-1]
+    _write_digest("claude-opus-5-5")
+    assert "thinking" not in claude.calls[-1]
+
+
+def test_thinking_setting_api(clean_db):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    from .test_e2e import AUTH
+
+    with TestClient(app) as c:
+        assert c.get("/api/settings/thinking", headers=AUTH).json() == {"enabled": True}
+        assert c.put("/api/settings/thinking", json={"enabled": False}, headers=AUTH).json() == {"enabled": False}
+        assert c.get("/api/settings/thinking", headers=AUTH).json() == {"enabled": False}
+        assert c.put("/api/settings/thinking", json={}, headers=AUTH).status_code == 422
+        assert c.get("/api/settings/thinking").status_code == 401

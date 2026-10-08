@@ -14,10 +14,22 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [notion, setNotion] = useState<NotionStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [exportLang, setExportLang] = useState<string>(lang);
+  const [thinking, setThinking] = useState<boolean | null>(null);
+  const [thinkingError, setThinkingError] = useState("");
   const origin = auth.base || window.location.origin;
 
   const loadNotion = () => api.notion().then(setNotion).catch(() => {});
-  useEffect(() => { api.stats().then(setStats).catch(() => {}); loadNotion(); }, []);
+  useEffect(() => {
+    api.stats().then(setStats).catch(() => {});
+    loadNotion();
+    api.thinking().then((r) => setThinking(r.enabled)).catch(() => {});
+  }, []);
+
+  const toggleThinking = async (enabled: boolean) => {
+    setThinking(enabled);
+    setThinkingError("");
+    try { setThinking((await api.setThinking(enabled)).enabled); } catch (e) { setThinking(!enabled); setThinkingError((e as Error).message); }
+  };
 
   const syncNow = async () => {
     setSyncing(true);
@@ -81,6 +93,19 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
       <section className="section" id="couts">
         <h2>{t("Coûts")}</h2>
         <Costs />
+      </section>
+
+      <section className="section" id="reflexion">
+        <h2>{t("Réflexion de Claude")}</h2>
+        <label style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <input type="checkbox" checked={thinking ?? true} disabled={thinking === null} style={{ marginTop: 4 }}
+                 onChange={(e) => toggleThinking(e.target.checked)} />
+          <span>{t("Laisser Claude réfléchir avant de répondre")}
+            <span className="hint" style={{ display: "block", marginTop: 2 }}>
+              {t("Pour les réponses du chat, le digest et la lecture des PDF scannés et des vidéos : plus solide, un peu plus lent et plus cher. Décoché, Haiku 5.5 et Sonnet 5.5 répondent directement ; Opus 5.5 et Fable 5.1 réfléchissent toujours.")}
+            </span></span>
+        </label>
+        {thinkingError && <div className="error-box">{thinkingError}</div>}
       </section>
 
       <section className="section" id="raccourcis">
@@ -163,7 +188,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
 const LANG_NAMES: Record<string, string> = { fr: "Français", en: "English" };
 
 const SECTIONS: [string, string][] = [
-  ["langue", t("Langue")], ["couts", t("Coûts")], ["raccourcis", t("Raccourcis")], ["connecteur", t("Connecteur Claude")],
+  ["langue", t("Langue")], ["couts", t("Coûts")], ["reflexion", t("Réflexion|thinking")], ["raccourcis", t("Raccourcis")], ["connecteur", t("Connecteur Claude")],
   ["notion", t("Notion")], ["donnees", t("Tes données")], ["appareil", t("Cet appareil")],
 ];
 

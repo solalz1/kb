@@ -357,6 +357,9 @@ export const api = {
     request<{ ok: boolean }>(`/api/actions/${id}`, { method: "PATCH", body: JSON.stringify({ done }) }),
   resurface: (space?: Space) => request<ItemSummary[]>(`/api/resurface${qs({ count: 4, space })}`),
   models: () => request<ModelOption[]>("/api/models"),
+  thinking: () => request<{ enabled: boolean }>("/api/settings/thinking"),
+  setThinking: (enabled: boolean) =>
+    request<{ enabled: boolean }>("/api/settings/thinking", { method: "PUT", body: JSON.stringify({ enabled }) }),
   stats: () => request<{ total: number; this_week: number; open_actions: number; by_kind: { kind: Kind; n: number }[];
                          by_status: Record<string, number>; by_space: Partial<Record<Space, number>> }>("/api/stats"),
   notion: () => request<NotionStatus>("/api/notion"),

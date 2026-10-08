@@ -12,7 +12,7 @@ from typing import Any, Iterator
 
 import anthropic
 
-from . import costs
+from . import costs, db
 from .config import get_settings
 from .taxonomy import CATEGORIES
 
@@ -41,19 +41,50 @@ def client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=key, max_retries=3, timeout=180)
 
 
-# Models that think by default (adaptive thinking), and max_tokens counts the thinking.
+# ---------------------------------------------------------------------------
+# Thinking
+# ---------------------------------------------------------------------------
+
+# Models that think by default (adaptive thinking); max_tokens counts the thinking, so they get room for it.
 THINKS_BY_DEFAULT = ("claude-haiku-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5", "claude-mythos-5")
 THINKING_ROOM = 8000
+THINKING_SETTING = "thinking"
 
 
-def _thinking_off(model: str) -> dict:
-    """Transcribing and rewriting don't need thinking. Haiku 5.5 thinks by default but can turn it off (at effort high
-    or below; its default is medium); Sonnet and Opus 5.5 can't, so they keep it and get room for it instead."""
-    return {"thinking": {"type": "disabled"}} if model.startswith("claude-haiku-5") else {}
+def thinking_enabled() -> bool:
+    """On by default; the user can turn it off in Settings."""
+    try:
+        row = db.fetchone("select value from kb_settings where key = %s", (THINKING_SETTING,))
+    except Exception:  # noqa: BLE001 — a setting that can't be read keeps the default
+        log.warning("Réglage de réflexion illisible", exc_info=True)
+        return True
+    return bool((row["value"] or {}).get("enabled", True)) if row else True
 
 
-def _with_thinking_room(model: str, max_tokens: int) -> int:
-    return max_tokens + THINKING_ROOM if model.startswith(THINKS_BY_DEFAULT) else max_tokens
+def set_thinking(enabled: bool) -> dict:
+    db.execute(
+        """insert into kb_settings (key, value) values (%s, %s)
+           on conflict (key) do update set value = excluded.value, updated_at = now()""",
+        (THINKING_SETTING, db.jsonb({"enabled": bool(enabled)})))
+    return {"enabled": thinking_enabled()}
+
+
+def _thinking(model: str) -> dict:
+    """The `thinking` field of a request. With thinking on (the default), nothing: the models that think by default
+    keep doing so. Off, it's turned off where the API allows it: Haiku 5.5 ("disabled", accepted at its default effort)
+    and Sonnet 5.5 ("between_tools": no thinking before the answer). Opus 5.5 and Fable 5.1 always think."""
+    if thinking_enabled():
+        return {}
+    if model.startswith("claude-haiku-5"):
+        return {"thinking": {"type": "disabled"}}
+    if model.startswith("claude-sonnet-5-5"):
+        return {"thinking": {"type": "between_tools"}}
+    return {}
+
+
+def _room(model: str, max_tokens: int, thinking: dict) -> int:
+    """max_tokens for the answer, plus room for the thinking when the model will think."""
+    return max_tokens + THINKING_ROOM if model.startswith(THINKS_BY_DEFAULT) and not thinking else max_tokens
 
 
 # Models that refuse a forced tool call (Sonnet 5.5, Opus 5.5 and later): they get structured outputs instead.
@@ -121,13 +152,14 @@ def _forced_tool(*, system, content, tool_name, tool_description, schema, model,
 def _structured_output(*, system, content, tool_name, tool_description, schema, model, max_tokens) -> dict:
     """Same result through structured outputs: the answer is JSON that follows the schema. These models always think
     first, and max_tokens counts the thinking too, so they get more room. Always streamed: thinking takes time."""
-    budget = max(2 * max_tokens, max_tokens + 8000)
+    budget = max(2 * max_tokens, max_tokens + THINKING_ROOM)
     with client().messages.stream(
         model=model,
         max_tokens=budget,
         system=f"{system}\n\nRéponds par un objet JSON conforme au schéma demandé. {tool_description}",
         messages=[{"role": "user", "content": content}],
         output_config={"format": {"type": "json_schema", "schema": strict_schema(schema)}},
+        **_thinking(model),
     ) as stream:
         resp = stream.get_final_message()
     costs.record_claude(model, getattr(resp, "usage", None), tool_name)
@@ -173,13 +205,13 @@ def strict_schema(schema: Any) -> Any:
 
 def complete(*, system: str, prompt: str, model: str | None = None, max_tokens: int = 400) -> str:
     model = model or get_settings().enrich_model
-    off = _thinking_off(model)
+    thinking = _thinking(model)
     resp = client().messages.create(
         model=model,
-        max_tokens=max_tokens if off else _with_thinking_room(model, max_tokens),
+        max_tokens=_room(model, max_tokens, thinking),
         system=system,
         messages=[{"role": "user", "content": prompt}],
-        **off,
+        **thinking,
     )
     costs.record_claude(model, getattr(resp, "usage", None), "complete")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
@@ -187,11 +219,13 @@ def complete(*, system: str, prompt: str, model: str | None = None, max_tokens: 
 
 def stream_text(*, system: str, messages: list[dict], model: str | None = None, max_tokens: int = 4000) -> Iterator[str]:
     model = model or get_settings().chat_model
+    thinking = _thinking(model)
     with client().messages.stream(
         model=model,
-        max_tokens=_with_thinking_room(model, max_tokens),   # the answer keeps max_tokens, thinking comes on top
+        max_tokens=_room(model, max_tokens, thinking),   # the answer keeps max_tokens, thinking comes on top
         system=system,
         messages=messages,
+        **thinking,
     ) as stream:
         yield from stream.text_stream
         costs.record_claude(model, getattr(stream.get_final_message(), "usage", None), "chat")
@@ -445,9 +479,9 @@ def describe_frames(frames: list[bytes], context: str = "") -> str:
         f"transcris tout texte affiché à l'écran. Sois factuel." + (f"\nContexte : {context}" if context else "")
     )})
     model = get_settings().enrich_model
-    off = _thinking_off(model)
-    resp = client().messages.create(model=model, max_tokens=2000 if off else _with_thinking_room(model, 2000),
-                                    messages=[{"role": "user", "content": content}], **off)
+    thinking = _thinking(model)
+    resp = client().messages.create(model=model, max_tokens=_room(model, 2000, thinking),
+                                    messages=[{"role": "user", "content": content}], **thinking)
     costs.record_claude(model, getattr(resp, "usage", None), "video_frames")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
@@ -455,11 +489,11 @@ def describe_frames(frames: list[bytes], context: str = "") -> str:
 def transcribe_pdf(data: bytes, first_page: int = 1) -> str:
     """Pour les PDF scannés : Claude lit un lot de pages (≈10) et transcrit le texte (en streaming : pas de timeout)."""
     model = get_settings().enrich_model
-    off = _thinking_off(model)
+    thinking = _thinking(model)
     with client().messages.stream(
         model=model,
-        max_tokens=20000 if off else _with_thinking_room(model, 20000),
-        **off,
+        max_tokens=_room(model, 20000, thinking),
+        **thinking,
         messages=[{
             "role": "user",
             "content": [
