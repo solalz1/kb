@@ -2,8 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
-import "@fontsource-variable/bricolage-grotesque/opsz.css";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/newsreader/opsz-italic.css";
+import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/geist-mono";
 import "./styles.css";
 

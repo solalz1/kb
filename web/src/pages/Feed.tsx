@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowLeft, CalendarDays, Compass, NotebookPen, Pin, PinOff, Search, Shuffle, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, CalendarDays, Compass, ListChecks, NotebookPen, Pin, PinOff, Search, Settings as Cog, Shuffle, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type ItemSummary, type Kind, type Space } from "../api";
@@ -13,7 +13,8 @@ const UNDO_MS = 5000;     // how long the undo button stays, and how long a dele
 
 type Toast = { id: number; message: string; undo?: () => void };
 
-export default function Feed({ space }: { space: Space }) {
+/** `pending`: open actions, shown as a badge on the phone's Feed head (the sidebar shows it on desktop). */
+export default function Feed({ space, pending = 0 }: { space: Space; pending?: number }) {
   const perso = space === "perso";
   const [params, setParams] = useSearchParams();
   const kind = params.get("kind") || "";
@@ -204,6 +205,15 @@ export default function Feed({ space }: { space: Space }) {
               </div>
             </header>
           )}
+          {!archived && !perso && (
+            <header className="page-head">
+              <h1 className="title">{t("Veille")}</h1>
+              <Link className="icon-link" to="/todo" aria-label={pending > 0 ? t("À faire, {n} en attente", { n: pending }) : t("À faire")}>
+                <ListChecks size={22} />{pending > 0 && <span className="badge">{pending}</span>}
+              </Link>
+              <Link className="icon-link" to="/settings" aria-label={t("Réglages")}><Cog size={22} /></Link>
+            </header>
+          )}
           {!archived && perso && (
             <header className="space-head">
               <div>
@@ -229,6 +239,7 @@ export default function Feed({ space }: { space: Space }) {
 
           {perso ? (
             <div className="chips" role="group" aria-label={t("Filtrer par catégorie")}>
+              <button className="chip" aria-pressed={!category} onClick={() => setFilter("category", "")}>{t("Tout")}</button>
               {CATEGORIES.map((c) => (
                 <button key={c.id} className="chip" aria-pressed={category === c.id}
                         onClick={() => setFilter("category", category === c.id ? "" : c.id)}>
@@ -238,6 +249,7 @@ export default function Feed({ space }: { space: Space }) {
             </div>
           ) : (
             <div className="chips" role="group" aria-label={t("Filtrer par type")}>
+              <button className="chip" aria-pressed={!kind} onClick={() => setFilter("kind", "")}>{t("Tout")}</button>
               {FILTER_ORDER.map((k: Kind) => (
                 <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setFilter("kind", kind === k ? "" : k)}>
                   <span className="dot" data-kind={k} />{KINDS[k].plural}

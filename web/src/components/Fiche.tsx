@@ -17,6 +17,7 @@ export function Fiche({ item, compact = false }: { item: ItemSummary; compact?: 
     <Link to={`/item/${item.id}`} className={`fiche${pending ? " pending" : ""}`} data-kind={item.kind ?? undefined}
           data-space={perso ? "perso" : undefined}>
       <div className="fiche-head">
+        {!perso && item.kind && <span className="dot" data-kind={item.kind} />}
         <span className="kind">{headLabel(item)}</span>
         {who && <span className="who">{who}</span>}
         {item.pinned && <Pin size={14} className="pin" aria-label={t("Épinglé")} />}

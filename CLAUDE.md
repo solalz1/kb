@@ -55,10 +55,14 @@ update both.
     `render.py` (Markdown, e-mail HTML, SMTP). Tables: `watch`, `digests`, `digest_feedback`.
 - `shortcuts/build.py`: generates the three iOS/macOS Shortcuts (binary plists, stdlib only; the token is an import
   question, never written). Signing needs macOS (`--sign`). `tests/test_shortcuts.py` checks them against the API.
-- `web/`: React 19 + Vite PWA, no CSS framework. "Index card" design: card color = content type (`--b-*` variables in
-  `styles.css`), red rule under the card header, blue ink (`--waterman`) for actions. Type and shapes follow the
-  owner's site: Bricolage Grotesque titles, Geist text, Geist Mono uppercase labels, hairlines, 8px buttons (fonts
-  self-hosted with `@fontsource-variable`). Keep this visual language and these colors.
+- `web/`: React 19 + Vite PWA, no CSS framework. "Warm paper" design (`styles.css`): ivory ground (`--desk`), cream
+  cards (`--surface`), brown ink, one terracotta accent (`--waterman`) for every action, a kraft tint (`--tint`) for
+  the Perso space, "à redécouvrir" and stat tiles. Every card is the same sheet; the content type is a small colored
+  `.dot` (`--dot-*`) next to its label. Newsreader (serif) for titles, quotes and the user's notes, Instrument Sans
+  for the interface, Geist Mono for code only (fonts self-hosted with `@fontsource-variable`); 12–16px radii, pill
+  chips, 44px touch targets. Desktop: sidebar with "Ajouter" as the primary button and Réglages at the bottom.
+  Phone: no top bar; a five-slot tab bar with the + in the middle, and the Feed page head carries the À faire badge
+  and the settings cog. Keep this visual language and these colors.
   Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
   each with an undo toast; a deletion waits 5 s before it reaches the API.
 

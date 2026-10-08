@@ -1,6 +1,6 @@
 import { BookOpen, CalendarDays, ListChecks, MessageSquare, Newspaper, Plus, Settings as Cog, Sprout } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { ApiError, api, auth } from "./api";
 import { lang, setLang, t } from "./i18n";
 import Add from "./pages/Add";
@@ -14,15 +14,17 @@ import NoteEditor from "./pages/NoteEditor";
 import Settings from "./pages/Settings";
 import Todo from "./pages/Todo";
 
+// The sidebar (desktop). "Ajouter" is the primary button above it; on phones it is the + in the middle of the tab bar.
 const NAV = [
   { to: "/", label: t("Veille"), icon: BookOpen, end: true, tab: true },
   { to: "/perso", label: t("Perso"), icon: Sprout, tab: true },
   { to: "/journal", label: t("Journal"), icon: CalendarDays, tab: false },   // on phones: from the Personal page
   { to: "/digest", label: "Digest", icon: Newspaper, tab: true },
   { to: "/ask", label: t("Demander"), icon: MessageSquare, tab: true },
-  { to: "/add", label: t("Ajouter"), icon: Plus, tab: false },   // on phones: the + in the top bar
-  { to: "/todo", label: t("À faire"), icon: ListChecks, tab: true },
+  { to: "/todo", label: t("À faire"), icon: ListChecks, tab: false },        // on phones: the badge on the Feed page
 ];
+// The phone tab bar: five slots, the + in the middle.
+const TABS = [NAV[0], NAV[1], { to: "/add", label: t("Ajouter"), icon: Plus, end: false, tab: true }, NAV[3], NAV[4]];
 
 /** FR / EN switch, as in solalzana.com's header. */
 function LangSwitch() {
@@ -65,9 +67,11 @@ function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="login">
       <form className="fiche" data-kind="article" onSubmit={submit}>
-        <div className="fiche-head"><span className="kind">KB</span><span className="when">{t("connexion")}</span></div>
-        <div style={{ float: "right", marginTop: -2 }}><LangSwitch /></div>
-        <h3 style={{ fontSize: 22, lineHeight: "28px" }}>{t("Ta knowledge base")}</h3>
+        <div className="fiche-head">
+          <span className="brand" style={{ padding: 0 }}>KB<small>{t("second cerveau")}</small></span>
+          <span className="when"><LangSwitch /></span>
+        </div>
+        <h3>{t("Ta knowledge base")}</h3>
         <p className="ruled">{t("Colle le jeton défini dans la variable KB_API_TOKEN de ton serveur. Il reste sur cet appareil.")}</p>
         <label className="lbl" htmlFor="token">{t("Jeton d'accès")}</label>
         <input id="token" className="field" type="password" autoComplete="current-password" value={token}
@@ -112,29 +116,22 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Navigation">
-        <div className="brand"><span className="brand-mark">KB</span><span>Knowledge base<small>{t("second cerveau")}</small></span></div>
+        <div className="brand">KB<small>{t("second cerveau")}</small></div>
+        <Link className="btn primary add-btn" to="/add"><Plus size={18} /> {t("Ajouter")}</Link>
         {NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end}>
-            <Icon size={18} /> {label}
+            <Icon size={20} /> {label}
             {to === "/todo" && pending > 0 && <span className="badge">{pending}</span>}
           </NavLink>
         ))}
         <div className="spacer" />
-        <NavLink to="/settings"><Cog size={18} /> {t("Réglages")}</NavLink>
+        <NavLink to="/settings"><Cog size={20} /> {t("Réglages")}</NavLink>
         <div className="rail-foot"><LangSwitch /></div>
       </nav>
 
       <main>
-        <header className="topbar">
-          <span className="brand"><span className="brand-mark">KB</span>Knowledge base</span>
-          <span className="topbar-actions">
-            <LangSwitch />
-            <NavLink to="/add" aria-label={t("Ajouter")}><Plus size={22} /></NavLink>
-            <NavLink to="/settings" aria-label={t("Réglages")}><Cog size={20} /></NavLink>
-          </span>
-        </header>
         <Routes>
-          <Route path="/" element={<Feed key="main" space="main" />} />
+          <Route path="/" element={<Feed key="main" space="main" pending={pending} />} />
           <Route path="/perso" element={<Feed key="perso" space="perso" />} />
           <Route path="/journal" element={<Journal />} />
           <Route path="/journal/:day" element={<Journal />} />
@@ -148,14 +145,14 @@ export default function App() {
           <Route path="/add" element={<Add />} />
           <Route path="/todo" element={<Todo />} />
           <Route path="/settings" element={<Settings onLogout={() => { auth.token = ""; setAuthed(false); }} />} />
-          <Route path="*" element={<Feed key="main" space="main" />} />
+          <Route path="*" element={<Feed key="main" space="main" pending={pending} />} />
         </Routes>
       </main>
 
       <nav className="tabbar" aria-label="Navigation">
-        {NAV.filter((n) => n.tab).map(({ to, label, icon: Icon, end }) => (
-          <NavLink key={to} to={to} end={end}><Icon size={21} />{label}</NavLink>
-        ))}
+        {TABS.map(({ to, label, icon: Icon, end }) => to === "/add"
+          ? <NavLink key={to} to={to} className="add" aria-label={label}><span><Icon size={26} strokeWidth={2.25} /></span></NavLink>
+          : <NavLink key={to} to={to} end={end}><Icon size={22} />{label}</NavLink>)}
       </nav>
     </div>
   );
