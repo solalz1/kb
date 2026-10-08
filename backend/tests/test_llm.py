@@ -1,5 +1,6 @@
 """Structured answers from Claude: a forced tool call, or structured outputs on models that refuse forced tools."""
 
+import io
 import json
 from types import SimpleNamespace
 
@@ -18,7 +19,8 @@ def _bad_request(message):
 
 
 class FakeClaude:
-    """Haiku 4.5 accepts a forced tool; Sonnet 5.5 and Opus 5.5 refuse it, think first, and answer in JSON text."""
+    """Haiku (4.5 and 5.5) accepts a forced tool; Sonnet 5.5 and Opus 5.5 refuse it, think first, and answer in JSON
+    text."""
 
     def __init__(self, answer, stop_reason=None):
         self.answer = answer
@@ -29,7 +31,7 @@ class FakeClaude:
     def _call(self, **kw):
         self.calls.append(kw)
         forced = (kw.get("tool_choice") or {}).get("type") in ("tool", "any")
-        if kw["model"] != "claude-haiku-4-5":
+        if not kw["model"].startswith("claude-haiku"):
             if forced:
                 raise _bad_request(REFUSED)
             content = [SimpleNamespace(type="thinking", thinking="", signature="sig"),
@@ -71,7 +73,7 @@ def _write_digest(model, max_tokens=8000):
 
 
 def test_forced_tool_when_the_model_accepts_it(claude):
-    out = _write_digest("claude-haiku-4-5", max_tokens=2000)
+    out = _write_digest("claude-haiku-5-5", max_tokens=2000)
     assert out["headline"] == "Une journée calme."
     assert len(claude.calls) == 1
     assert claude.calls[0]["tool_choice"] == {"type": "tool", "name": "write_digest"}
@@ -97,7 +99,7 @@ def test_structured_outputs_when_the_model_refuses_forced_tools(claude):
     _write_digest("claude-sonnet-5-5")
     assert len(claude.calls) == 3 and "output_config" in claude.calls[2]
     # and other models keep their forced tool
-    _write_digest("claude-haiku-4-5", max_tokens=2000)
+    _write_digest("claude-haiku-5-5", max_tokens=2000)
     assert claude.calls[3]["tool_choice"]["type"] == "tool"
 
 
@@ -156,3 +158,72 @@ def test_strict_schema_closes_every_object_and_keeps_the_rest():
         strict = llm.strict_schema(real)
         assert all(o["additionalProperties"] is False for o in objects(strict))
         assert strict.get("required") == real.get("required")
+
+
+class PlainClaude:
+    """Answers plain text, as create() or as a stream, and keeps every request."""
+
+    def __init__(self):
+        self.calls = []
+        resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="agents rag")], stop_reason="end_turn", usage=None)
+        calls = self.calls
+
+        class Stream:
+            def __init__(self, **kw):
+                calls.append(kw)
+                self.text_stream = iter(["agents ", "rag"])
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def get_final_message(self):
+                return resp
+
+        self.messages = SimpleNamespace(create=lambda **kw: (calls.append(kw), resp)[1], stream=Stream)
+
+
+@pytest.fixture
+def plain(monkeypatch):
+    from app import llm
+
+    fake = PlainClaude()
+    monkeypatch.setattr(llm, "client", lambda: fake)
+    return fake
+
+
+def test_plain_calls_dont_think_on_haiku_5_5(plain):
+    """Haiku 5.5 thinks by default and max_tokens counts it: rewriting a query, describing video frames and reading a
+    scanned PDF turn it off, so a short answer never runs out of room. Sonnet 5.5 can't turn it off: it gets room."""
+    from PIL import Image
+
+    from app import llm
+    from app.config import get_settings
+
+    assert get_settings().enrich_model == "claude-haiku-5-5"
+    assert llm.complete(system="s", prompt="p", max_tokens=200) == "agents rag"
+    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 200
+
+    llm.complete(system="s", prompt="p", model="claude-sonnet-5-5", max_tokens=200)
+    assert "thinking" not in plain.calls[-1] and plain.calls[-1]["max_tokens"] == 200 + llm.THINKING_ROOM
+    llm.complete(system="s", prompt="p", model="claude-haiku-4-5", max_tokens=200)
+    assert "thinking" not in plain.calls[-1] and plain.calls[-1]["max_tokens"] == 200
+
+    frame = io.BytesIO()
+    Image.new("RGB", (32, 32), "white").save(frame, format="PNG")
+    assert llm.describe_frames([frame.getvalue()]) == "agents rag"
+    assert plain.calls[-1]["model"] == "claude-haiku-5-5" and plain.calls[-1]["thinking"] == {"type": "disabled"}
+    assert llm.transcribe_pdf(b"%PDF-1.4", first_page=11) == "agents rag"
+    assert plain.calls[-1]["thinking"] == {"type": "disabled"} and plain.calls[-1]["max_tokens"] == 20000
+
+
+def test_chat_answers_keep_their_room_when_the_model_thinks(plain):
+    from app import llm
+
+    for model, room in (("claude-haiku-5-5", llm.THINKING_ROOM), ("claude-sonnet-5-5", llm.THINKING_ROOM),
+                        ("claude-haiku-4-5", 0)):
+        out = "".join(llm.stream_text(system="s", messages=[{"role": "user", "content": "?"}], model=model, max_tokens=4000))
+        assert out == "agents rag"
+        assert plain.calls[-1]["max_tokens"] == 4000 + room and "thinking" not in plain.calls[-1]

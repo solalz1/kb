@@ -41,10 +41,16 @@ CLAUDE_PRICES: list[tuple[str, tuple[float, float, float, float, float]]] = [
     ("claude-opus-4", (5, 6.25, 10, 0.5, 25)),          # Opus 4.5 to 4.8
     ("claude-sonnet-5", (2, 2.5, 4, 0.2, 10)),          # Sonnet 5 and 5.5
     ("claude-sonnet-4", (3, 3.75, 6, 0.3, 15)),
+    ("claude-haiku-5", (0.1, 0.125, 0.2, 0.01, 0.5)),     # Haiku 5.5, prompts up to 100 K tokens (see below)
     ("claude-haiku-4", (1, 1.25, 2, 0.1, 5)),
     ("claude-3-5-haiku", (0.8, 1, 1.6, 0.08, 4)),
 ]
 CLAUDE_UNKNOWN = (3, 3.75, 6, 0.3, 15)
+# Models priced by prompt length: above the threshold (input + cache writes + cache reads), the whole request is billed
+# at the second price list.
+CLAUDE_LONG_PROMPT: list[tuple[str, int, tuple[float, float, float, float, float]]] = [
+    ("claude-haiku-5", 100_000, (0.5, 0.625, 1, 0.05, 2.5)),
+]
 
 VOYAGE_PRICES = {"voyage-4": 0.06, "voyage-4-lite": 0.02, "voyage-4-large": 0.12, "voyage-3.5": 0.06,
                  "voyage-3.5-lite": 0.02}           # $ per million tokens; the first 200 M tokens of voyage-4 are free
@@ -73,7 +79,10 @@ SERVICE_IDS = [s["id"] for s in SERVICES]
 # Prices
 # ---------------------------------------------------------------------------
 
-def claude_prices(model: str) -> tuple[float, float, float, float, float]:
+def claude_prices(model: str, prompt_tokens: int = 0) -> tuple[float, float, float, float, float]:
+    for prefix, threshold, prices in CLAUDE_LONG_PROMPT:
+        if model.startswith(prefix) and prompt_tokens > threshold:
+            return prices
     for prefix, prices in CLAUDE_PRICES:
         if model.startswith(prefix):
             return prices
@@ -86,7 +95,8 @@ def _get(obj: Any, key: str) -> Any:
 
 def claude_cost(model: str, usage: Any) -> float:
     """Price of one response from its `usage` (an SDK object or a dict). Thinking is billed as output."""
-    base, write5, write1h, read, out = claude_prices(model)
+    prompt = sum(_get(usage, k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    base, write5, write1h, read, out = claude_prices(model, prompt)
     creation = _get(usage, "cache_creation")
     w5 = _get(creation, "ephemeral_5m_input_tokens") if creation else None
     w1h = _get(creation, "ephemeral_1h_input_tokens") if creation else None

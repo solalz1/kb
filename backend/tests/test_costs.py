@@ -38,6 +38,16 @@ def test_claude_prices(model, expected):
     assert costs.claude_cost(model, {"input_tokens": 1_000_000, "output_tokens": 500_000}) == pytest.approx(expected)
 
 
+def test_haiku_5_5_is_priced_by_prompt_length():
+    short = {"input_tokens": 100_000, "output_tokens": 1_000}
+    assert costs.claude_cost("claude-haiku-5-5", short) == pytest.approx(100_000 * 0.1 / 1e6 + 1_000 * 0.5 / 1e6)
+    long = {"input_tokens": 100_001, "output_tokens": 1_000}            # past 100 K: the whole request at the long price
+    assert costs.claude_cost("claude-haiku-5-5", long) == pytest.approx(100_001 * 0.5 / 1e6 + 1_000 * 2.5 / 1e6)
+    cached = {"input_tokens": 50_000, "cache_read_input_tokens": 60_000, "output_tokens": 0}   # cache counts in the prompt
+    assert costs.claude_cost("claude-haiku-5-5", cached) == pytest.approx(50_000 * 0.5 / 1e6 + 60_000 * 0.05 / 1e6)
+    assert costs.claude_cost("claude-haiku-4-5", long) == pytest.approx(100_001 * 1 / 1e6 + 1_000 * 5 / 1e6)
+
+
 def test_cache_tokens_are_priced():
     usage = SimpleNamespace(input_tokens=0, output_tokens=0, cache_read_input_tokens=1_000_000,
                             cache_creation_input_tokens=1_000_000, cache_creation=None)

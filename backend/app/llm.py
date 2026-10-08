@@ -41,6 +41,21 @@ def client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=key, max_retries=3, timeout=180)
 
 
+# Models that think by default (adaptive thinking), and max_tokens counts the thinking.
+THINKS_BY_DEFAULT = ("claude-haiku-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5", "claude-mythos-5")
+THINKING_ROOM = 8000
+
+
+def _thinking_off(model: str) -> dict:
+    """Transcribing and rewriting don't need thinking. Haiku 5.5 thinks by default but can turn it off (at effort high
+    or below; its default is medium); Sonnet and Opus 5.5 can't, so they keep it and get room for it instead."""
+    return {"thinking": {"type": "disabled"}} if model.startswith("claude-haiku-5") else {}
+
+
+def _with_thinking_room(model: str, max_tokens: int) -> int:
+    return max_tokens + THINKING_ROOM if model.startswith(THINKS_BY_DEFAULT) else max_tokens
+
+
 # Models that refuse a forced tool call (Sonnet 5.5, Opus 5.5 and later): they get structured outputs instead.
 # Filled the first time a model answers « tool_choice … not supported », so the refused request happens once per run.
 _NO_FORCED_TOOL: set[str] = set()
@@ -158,11 +173,13 @@ def strict_schema(schema: Any) -> Any:
 
 def complete(*, system: str, prompt: str, model: str | None = None, max_tokens: int = 400) -> str:
     model = model or get_settings().enrich_model
+    off = _thinking_off(model)
     resp = client().messages.create(
         model=model,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens if off else _with_thinking_room(model, max_tokens),
         system=system,
         messages=[{"role": "user", "content": prompt}],
+        **off,
     )
     costs.record_claude(model, getattr(resp, "usage", None), "complete")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
@@ -172,7 +189,7 @@ def stream_text(*, system: str, messages: list[dict], model: str | None = None, 
     model = model or get_settings().chat_model
     with client().messages.stream(
         model=model,
-        max_tokens=max_tokens,
+        max_tokens=_with_thinking_room(model, max_tokens),   # the answer keeps max_tokens, thinking comes on top
         system=system,
         messages=messages,
     ) as stream:
@@ -320,7 +337,7 @@ def enrich(
         tool_name="save_card",
         tool_description="Enregistre la fiche de l'élément dans la knowledge base.",
         schema={**ENRICH_SCHEMA, "properties": properties, "required": required},
-        max_tokens=5000 if second else 2500,
+        max_tokens=6500 if second else 3500,
     )
     out["tags"] = _normalize_tags(out.get("tags", []))
     out["translations"] = {second: _clean_translation(out.pop("translation", None))} if second else {}
@@ -412,7 +429,7 @@ def describe_image(data: bytes, media_type: str | None = None, context: str = ""
         tool_name="save_image_analysis",
         tool_description="Enregistre l'analyse de l'image.",
         schema=IMAGE_SCHEMA,
-        max_tokens=3000,
+        max_tokens=4000,
     )
 
 
@@ -427,17 +444,22 @@ def describe_frames(frames: list[bytes], context: str = "") -> str:
         f"Ces images sont extraites dans l'ordre d'une vidéo. Décris en {lang_name()} ce que montre la vidéo et "
         f"transcris tout texte affiché à l'écran. Sois factuel." + (f"\nContexte : {context}" if context else "")
     )})
-    resp = client().messages.create(model=get_settings().enrich_model, max_tokens=1500,
-                                    messages=[{"role": "user", "content": content}])
-    costs.record_claude(get_settings().enrich_model, getattr(resp, "usage", None), "video_frames")
+    model = get_settings().enrich_model
+    off = _thinking_off(model)
+    resp = client().messages.create(model=model, max_tokens=2000 if off else _with_thinking_room(model, 2000),
+                                    messages=[{"role": "user", "content": content}], **off)
+    costs.record_claude(model, getattr(resp, "usage", None), "video_frames")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
 def transcribe_pdf(data: bytes, first_page: int = 1) -> str:
     """Pour les PDF scannés : Claude lit un lot de pages (≈10) et transcrit le texte (en streaming : pas de timeout)."""
+    model = get_settings().enrich_model
+    off = _thinking_off(model)
     with client().messages.stream(
-        model=get_settings().enrich_model,
-        max_tokens=16000,
+        model=model,
+        max_tokens=20000 if off else _with_thinking_room(model, 20000),
+        **off,
         messages=[{
             "role": "user",
             "content": [
@@ -450,7 +472,7 @@ def transcribe_pdf(data: bytes, first_page: int = 1) -> str:
         }],
     ) as stream:
         resp = stream.get_final_message()
-    costs.record_claude(get_settings().enrich_model, getattr(resp, "usage", None), "pdf_ocr")
+    costs.record_claude(model, getattr(resp, "usage", None), "pdf_ocr")
     return "".join(b.text for b in resp.content if b.type == "text")
 
 
@@ -492,7 +514,7 @@ def explain_links(item: dict, candidates: list[dict]) -> list[dict]:
         tool_name="save_links",
         tool_description="Enregistre les liens entre éléments.",
         schema=LINKS_SCHEMA,
-        max_tokens=1500,
+        max_tokens=2000,
     )
     return [l for l in out.get("links", []) if l.get("related")]
 
@@ -508,7 +530,7 @@ def rewrite_query(history: list[dict], question: str) -> str:
             system="Tu reformules la dernière question de l'utilisateur en une requête de recherche autonome "
                    "(mots-clés et entités explicites). Réponds uniquement par la requête.",
             prompt=f"Conversation :\n{convo}\n\nDernière question : {question}",
-            max_tokens=150,
+            max_tokens=200,
         )
         return out.strip().strip('"') or question
     except Exception:
@@ -539,5 +561,5 @@ def plan_project_queries(description: str) -> dict:
         tool_name="plan_search",
         tool_description="Enregistre le plan de recherche.",
         schema=PLAN_SCHEMA,
-        max_tokens=800,
+        max_tokens=1000,
     )

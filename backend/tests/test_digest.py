@@ -443,7 +443,7 @@ def test_try_again_on_models_that_refuse_forced_tools(client, digest_env, monkey
         def _call(self, **kw):
             forced = (kw.get("tool_choice") or {}).get("type") == "tool"
             seen.append((kw["model"], "forced" if forced else "structured"))
-            if forced and kw["model"] != "claude-haiku-4-5":
+            if forced and kw["model"] != "claude-haiku-5-5":
                 raise _bad_request(REFUSED)
             if forced:
                 name = kw["tools"][0]["name"]
@@ -467,7 +467,7 @@ def test_try_again_on_models_that_refuse_forced_tools(client, digest_env, monkey
     assert d["headline"].startswith("Un modèle ouvert géant")
     assert len(d["data"]["entries"]) >= 3
     assert ("claude-sonnet-5-5", "forced") in seen and ("claude-sonnet-5-5", "structured") in seen
-    assert ("claude-haiku-4-5", "forced") in seen and ("claude-haiku-4-5", "structured") not in seen
+    assert ("claude-haiku-5-5", "forced") in seen and ("claude-haiku-5-5", "structured") not in seen
 
     # an error from the API is stored as a readable sentence, not as the raw JSON of the answer
     def down(**kw):

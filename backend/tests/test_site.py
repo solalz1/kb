@@ -119,6 +119,7 @@ def _seed(client_page: Page) -> dict:
 
 def _swipe(page: Page, target, dx: float, steps: int = 14):
     """A finger dragged horizontally across `target` (real touch events, so the page sees pointerType "touch")."""
+    target.wait_for(state="visible")                    # bounding_box() is None until the row is laid out
     box = target.bounding_box()
     x = box["x"] + (box["width"] - 24 if dx < 0 else 24)
     y = box["y"] + min(50, box["height"] / 2)
@@ -455,7 +456,7 @@ def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
     from app import costs
     from app.config import get_settings
 
-    costs.record("anthropic", 0.42, model="claude-haiku-4-5")
+    costs.record("anthropic", 0.42, model="claude-haiku-5-5")
     costs.record("x", 0.05)
     billing_apis.answers[costs.X_CREDITS_URL] = {"data": {"total_balance": 4.2, "free_balance": 0}}
     page = site("/settings", touch=True)

@@ -162,7 +162,7 @@ def compute(*, force: bool = False) -> dict:
         tool_description="Enregistre le profil d'intérêts.",
         schema=PROFILE_SCHEMA,
         model=get_settings().enrich_model,
-        max_tokens=2500,
+        max_tokens=3500,
     )
     for p in out.get("people") or []:
         handle = (p.get("x_handle") or "").strip().lstrip("@")
