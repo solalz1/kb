@@ -119,6 +119,7 @@ def _seed(client_page: Page) -> dict:
 
 def _swipe(page: Page, target, dx: float, steps: int = 14):
     """A finger dragged horizontally across `target` (real touch events, so the page sees pointerType "touch")."""
+    target.wait_for(state="visible")                    # bounding_box() is None until the row is laid out
     box = target.bounding_box()
     x = box["x"] + (box["width"] - 24 if dx < 0 else 24)
     y = box["y"] + min(50, box["height"] / 2)
@@ -455,7 +456,7 @@ def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
     from app import costs
     from app.config import get_settings
 
-    costs.record("anthropic", 0.42, model="claude-haiku-4-5")
+    costs.record("anthropic", 0.42, model="claude-haiku-5-5")
     costs.record("x", 0.05)
     billing_apis.answers[costs.X_CREDITS_URL] = {"data": {"total_balance": 4.2, "free_balance": 0}}
     page = site("/settings", touch=True)
@@ -513,6 +514,22 @@ def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
     expect(claude).to_contain_text("Dont la KB : 0,92 $US ce mois-ci")
     expect(claude).to_contain_text("Reste ce mois 18,43 $US sur 20,00 $US de limite")
     expect(page.locator("#couts")).not_to_contain_text("ANTHROPIC_ADMIN_KEY")
+
+
+def test_thinking_can_be_turned_off_in_settings(site):
+    from app import llm
+
+    page = site("/settings")
+    page.get_by_role("navigation", name="Sections des réglages").get_by_role("link", name="Réflexion").click()
+    box = page.get_by_label("Laisser Claude réfléchir avant de répondre")
+    expect(box).to_be_checked()                          # on by default
+    box.uncheck()
+    _wait_for(lambda: llm.thinking_enabled() is False, page)
+    page.reload()
+    box = page.get_by_label("Laisser Claude réfléchir avant de répondre")
+    expect(box).not_to_be_checked()
+    box.check()
+    _wait_for(llm.thinking_enabled, page)
 
 
 def test_generate_button_on_the_digest(site):

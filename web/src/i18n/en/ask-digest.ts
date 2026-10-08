@@ -68,7 +68,7 @@ export default {
   "Recherche dans ta KB…": "Searching your KB…",
   "Je relis tes principes et tes notes…": "Rereading your principles and notes…",
   "Je prépare les recherches…": "Planning the searches…",
-  "le plus rapide, ≈ 2 ct la question": "fastest, ≈ 2¢ per question",
+  "le plus rapide, ≈ 0,3 ct la question": "fastest, ≈ 0.3¢ per question",
   "équilibré, ≈ 4 ct la question": "balanced, ≈ 4¢ per question",
   "plus fin sur les questions complexes, ≈ 8 ct": "sharper on complex questions, ≈ 8¢",
   "raisonnement le plus poussé, ≈ 20 ct": "deepest reasoning, ≈ 20¢",

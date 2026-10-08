@@ -137,7 +137,7 @@ def test_full_flow(client, fake_llm):
 
     # choix du modèle
     options = client.get("/api/models", headers=AUTH).json()
-    assert [o["id"] for o in options][:2] == ["claude-haiku-4-5", "claude-sonnet-5-5"]
+    assert [o["id"] for o in options][:2] == ["claude-haiku-5-5", "claude-sonnet-5-5"]
     assert next(o for o in options if o["default"])["id"] == "claude-sonnet-5-5"
     assert fake_llm["stream"][-1]["model"] == "claude-sonnet-5-5"          # défaut quand rien n'est choisi
     client.post("/api/chat", json={"model": "claude-opus-5-5", "messages": [{"role": "user", "content": "Et Opus ?"}]}, headers=AUTH)

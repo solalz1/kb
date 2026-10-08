@@ -20,7 +20,7 @@ Partage n'importe quoi depuis ton iPhone ou ton Mac (un tweet ou un thread, un a
 
 | Service | Pour quoi | Obligatoire ? | Coût |
 |---|---|---|---|
-| [API Claude](https://platform.claude.com) | résumés, réponses, digest | oui | ~1 ¢ par élément, ~4 ¢ par question |
+| [API Claude](https://platform.claude.com) | résumés, réponses, digest | oui | ~0,3 ¢ par élément, ~4 ¢ par question |
 | [Voyage AI](https://dashboard.voyageai.com) | recherche (embeddings) | oui | gratuit jusqu'à 200 M de tokens |
 | [Supabase](https://supabase.com) | base de données et fichiers | oui | l'offre gratuite suffit (25 $/mois avec sauvegardes) |
 | [Railway](https://railway.com) | fait tourner l'app | oui | environ 5 $/mois |
@@ -61,7 +61,7 @@ Si Railway ne redéploie pas, donne accès à ton fork à son app GitHub (GitHub
 
 ## Ce que ça coûte
 
-Avec un usage quotidien, compte 5 à 15 $ par mois : environ 5 $ de Railway, puis Claude. Claude, c'est à peu près 1 centime par élément sauvegardé, 2 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que chaque service a coûté, ce mois-ci et en tout, en dollars US : synchronisé avec le service quand il a une API pour ça (le solde X, et le chiffre de la Console Claude avec une clé Admin facultative), estimé ailleurs à partir des appels de la KB ([SETUP.fr.md](SETUP.fr.md), étape 12). Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
+Avec un usage quotidien, compte 5 à 15 $ par mois : environ 5 $ de Railway, puis Claude. Claude, c'est environ un tiers de centime par élément sauvegardé (Claude Haiku 5.5), 0,3 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que chaque service a coûté, ce mois-ci et en tout, en dollars US : synchronisé avec le service quand il a une API pour ça (le solde X, et le chiffre de la Console Claude avec une clé Admin facultative), estimé ailleurs à partir des appels de la KB ([SETUP.fr.md](SETUP.fr.md), étape 12). Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
 
 ## Confidentialité
 

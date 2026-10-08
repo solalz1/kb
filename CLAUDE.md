@@ -33,6 +33,10 @@ update both.
   - `llm.py`: every Claude call. Structured answers go through `call_tool`: a forced `tool_choice`, or structured
     outputs (`output_config.format`, `strict_schema`) on models that refuse forced tools (Sonnet 5.5, Opus 5.5). Perso
     items get extra rules and a `category`. These models also think before answering, and `max_tokens` counts it.
+    Haiku 5.5 (the enrich model) accepts forced tools, which never think. Calls without a forced tool think by default
+    on the 5.x models and get `THINKING_ROOM` on top of their `max_tokens`; Settings → Réflexion (`kb_settings` key
+    `thinking`) turns it off where the API allows: Haiku 5.5 `disabled`, Sonnet 5.5 `between_tools` (Opus 5.5 and
+    Fable always think).
   - `chat.py`: RAG, project mode and advice mode (`advise`: charter + Perso search + a little Veille), SSE.
   - `notion.py`: optional one-way copy to a Notion database (API version `2026-03-11`, data sources, `markdown` page
     content, `in_trash`). A `Syncer` thread in the worker, throttled to ~3 req/s; deleted items go through the

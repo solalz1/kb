@@ -620,6 +620,21 @@ def models():
     return settings.chat_model_options
 
 
+class ThinkingIn(BaseModel):
+    enabled: bool
+
+
+@api.get("/api/settings/thinking", dependencies=auth)
+def get_thinking():
+    """Whether Claude thinks before answering (on by default; off where the model allows it)."""
+    return {"enabled": llm.thinking_enabled()}
+
+
+@api.put("/api/settings/thinking", dependencies=auth)
+def put_thinking(body: ThinkingIn):
+    return llm.set_thinking(body.enabled)
+
+
 @api.post("/api/chat", dependencies=auth)
 def chat_endpoint(req: ChatRequest):
     if not req.messages or not str(req.messages[-1].get("content", "")).strip():

@@ -219,7 +219,7 @@ def build_daily(day: date) -> dict:
         ),
         content="Candidats :\n" + "\n".join(_candidate_line(c) for c in cands),
         tool_name="pick_items", tool_description="Enregistre les éléments retenus et leur section.",
-        schema=PICK_SCHEMA, max_tokens=3000,
+        schema=PICK_SCHEMA, max_tokens=4000,
     )
     picks = []
     for p in picked.get("picks") or []:

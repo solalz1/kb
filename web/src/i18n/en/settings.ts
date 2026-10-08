@@ -60,6 +60,11 @@ export default {
   "Connecté à {origin}.": "Connected to {origin}.",
   "Se déconnecter": "Sign out",
   "Coûts": "Costs",
+  "Réflexion|thinking": "Thinking",
+  "Réflexion de Claude": "Claude's thinking",
+  "Laisser Claude réfléchir avant de répondre": "Let Claude think before answering",
+  "Pour les réponses du chat, le digest et la lecture des PDF scannés et des vidéos : plus solide, un peu plus lent et plus cher. Décoché, Haiku 5.5 et Sonnet 5.5 répondent directement ; Opus 5.5 et Fable 5.1 réfléchissent toujours.":
+    "For chat answers, the digest and reading scanned PDFs and videos: sturdier, a little slower and more expensive. Unchecked, Haiku 5.5 and Sonnet 5.5 answer straight away; Opus 5.5 and Fable 5.1 always think.",
   "Raccourcis": "Shortcuts",
   "Notion": "Notion",
   "Sections des réglages": "Settings sections",

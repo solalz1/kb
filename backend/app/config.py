@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Ordre de grandeur pour une question type (~15 000 tokens de sources, ~800 de réponse), aux tarifs API d'octobre 2026.
 DEFAULT_CHAT_MODELS = [
-    {"id": "claude-haiku-4-5", "label": "Haiku 4.5", "note": "le plus rapide, ≈ 2 ct la question"},
+    {"id": "claude-haiku-5-5", "label": "Haiku 5.5", "note": "le plus rapide, ≈ 0,3 ct la question"},
     {"id": "claude-sonnet-5-5", "label": "Sonnet 5.5", "note": "équilibré, ≈ 4 ct la question"},
     {"id": "claude-opus-5-5", "label": "Opus 5.5", "note": "plus fin sur les questions complexes, ≈ 8 ct"},
     {"id": "claude-fable-5-1", "label": "Fable 5.1", "note": "raisonnement le plus poussé, ≈ 20 ct"},
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # --- Claude ---
     anthropic_api_key: str = ""
     anthropic_admin_key: str = ""     # optional: Console Admin API key (sk-ant-admin01-…), to sync costs
-    enrich_model: str = "claude-haiku-4-5"
+    enrich_model: str = "claude-haiku-5-5"
     chat_model: str = "claude-sonnet-5-5"   # modèle par défaut du chat de l'app
     chat_models: str = ""           # choix proposés dans l'app : "id:Libellé,id:Libellé" (vide = liste par défaut)
     kb_language: str = "fr"         # langue principale des résumés et des réponses (les tags sont en anglais)
