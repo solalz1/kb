@@ -39,7 +39,7 @@ Agent de veille (dans le worker, chaque matin) : HN · papiers HF · GitHub · b
 |---|---|
 | `supabase/migrations/` | Schéma : items, chunks (pgvector + plein texte FR/EN), liens, actions, recherche hybride RRF, file d'attente |
 | `backend/app/` | API FastAPI, worker, extracteurs par format, enrichissement, chat, serveur MCP, export |
-| `web/` | PWA React (Veille et Perso, fiche, éditeur de notes, chat, ajout, à faire, réglages), installable sur iPhone et Mac |
+| `web/` | PWA React (Veille et Perso, fiche, éditeur de notes, chat, ajout, à faire, réglages), installable sur iPhone et Mac. Deux apparences : le design pensé pour le téléphone (par défaut) et l'interface d'origine, au choix par appareil dans Réglages → Apparence |
 | `SETUP.fr.md` | Mise en route pas à pas (comptes, Supabase, Railway, domaine, connecteur Claude) |
 | `SHORTCUT.fr.md` | Créer le Raccourci du bouton Partager |
 

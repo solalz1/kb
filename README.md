@@ -41,7 +41,7 @@ Digest agent (in the worker, every morning): HN · HF papers · GitHub · blogs 
 |---|---|
 | `supabase/migrations/` | Schema: items, chunks (pgvector + FR/EN full text), links, actions, hybrid RRF search, job queue |
 | `backend/app/` | FastAPI API, worker, one extractor per source, enrichment, chat, MCP server, export |
-| `web/` | React PWA (Veille and Perso feeds, item page, note editor, chat, add, to-dos, settings), installable on iPhone and Mac |
+| `web/` | React PWA (Veille and Perso feeds, item page, note editor, chat, add, to-dos, settings), installable on iPhone and Mac. Two looks: the phone-first design (default) and the original one, switchable per device in Réglages → Apparence |
 | `SETUP.md` | Step-by-step setup (accounts, Supabase, Railway, domain, Claude connector) |
 | `SHORTCUT.md` | Build the Share-button Shortcut |
 

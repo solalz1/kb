@@ -5,6 +5,7 @@ import { api, type ItemSummary, type Kind, type Space } from "../api";
 import { Fiche } from "../components/Fiche";
 import { FILTER_ORDER, KINDS } from "../kinds";
 import { CATEGORIES, categoryOf } from "../perso";
+import { HOME_EVENT } from "../ui";
 
 const PAGE = 30;
 
@@ -70,6 +71,16 @@ export default function Feed({ space }: { space: Space }) {
     return () => clearInterval(t);
   }, [hasPending, searching]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // tapping the current tab again: back to the top, cursor in the search
+  useEffect(() => {
+    const home = () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      (document.getElementById("q") as HTMLInputElement | null)?.focus({ preventScroll: true });
+    };
+    window.addEventListener(HOME_EVENT, home);
+    return () => window.removeEventListener(HOME_EVENT, home);
+  }, []);
+
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     value ? next.set(key, value) : next.delete(key);
@@ -89,6 +100,11 @@ export default function Feed({ space }: { space: Space }) {
     <div className="page wide">
       <div className="feed-layout">
         <div>
+          {!perso && (
+            <header className="space-head v2-only">
+              <h1 className="title">Veille</h1>
+            </header>
+          )}
           {perso && (
             <header className="space-head">
               <div>

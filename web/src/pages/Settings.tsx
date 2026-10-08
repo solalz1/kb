@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, auth, type NotionStatus } from "../api";
 import { claudePrefs } from "../claude";
 import { ago, KINDS } from "../kinds";
+import { ui, type UiVersion } from "../ui";
 
 export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [stats, setStats] = useState<Awaited<ReturnType<typeof api.stats>> | null>(null);
@@ -12,6 +13,8 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [notion, setNotion] = useState<NotionStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
   const origin = auth.base || window.location.origin;
+  const [look, setLook] = useState<UiVersion>(ui.version);
+  const switchLook = (v: UiVersion) => { if (v === look) return; ui.version = v; setLook(v); window.location.reload(); };
 
   const loadNotion = () => api.notion().then(setNotion).catch(() => {});
   useEffect(() => { api.stats().then(setStats).catch(() => {}); loadNotion(); }, []);
@@ -64,6 +67,15 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
       {stats && stats.by_kind.length > 0 && (
         <p className="muted">{stats.by_kind.map((k) => `${k.n} ${(KINDS[k.kind]?.plural ?? k.kind).toLowerCase()}`).join(", ")}</p>
       )}
+
+      <section className="section">
+        <h2>Apparence</h2>
+        <div className="modes" role="group" aria-label="Interface">
+          <button aria-pressed={look === "v2"} onClick={() => switchLook("v2")}>Nouveau design</button>
+          <button aria-pressed={look === "classic"} onClick={() => switchLook("classic")}>Design classique</button>
+        </div>
+        <p className="hint">Le nouveau design est pensé pour le téléphone : le bouton Ajouter au centre, des fiches plus lisibles, tout à portée du pouce. Le classique est l'interface d'origine. Réglage propre à cet appareil.</p>
+      </section>
 
       <section className="section">
         <h2>Raccourci iPhone et Mac</h2>

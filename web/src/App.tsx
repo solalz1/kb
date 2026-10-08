@@ -1,7 +1,8 @@
 import { BookOpen, ListChecks, MessageSquare, Newspaper, Plus, Settings as Cog, Sprout } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ApiError, api, auth } from "./api";
+import { HOME_EVENT, ui } from "./ui";
 import Add from "./pages/Add";
 import Ask from "./pages/Ask";
 import Digest from "./pages/Digest";
@@ -91,7 +92,87 @@ export default function App() {
   }, [authed]);
 
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
+  const logout = () => { auth.token = ""; setAuthed(false); };
 
+  if (ui.version === "classic") return <ClassicShell pending={pending} onLogout={logout} />;
+  return <Shell pending={pending} onLogout={logout} />;
+}
+
+function Pages({ onLogout }: { onLogout: () => void }) {
+  return (
+    <Routes>
+      <Route path="/" element={<Feed key="main" space="main" />} />
+      <Route path="/perso" element={<Feed key="perso" space="perso" />} />
+      <Route path="/note/new" element={<NoteEditor key="new" />} />
+      <Route path="/note/:id/edit" element={<NoteEditor key="edit" />} />
+      <Route path="/item/:id" element={<ItemPage />} />
+      <Route path="/ask" element={<Ask />} />
+      <Route path="/digest" element={<Digest />} />
+      <Route path="/digest/interets" element={<Interests />} />
+      <Route path="/digest/:id" element={<Digest />} />
+      <Route path="/add" element={<Add />} />
+      <Route path="/todo" element={<Todo />} />
+      <Route path="/settings" element={<Settings onLogout={onLogout} />} />
+      <Route path="*" element={<Feed key="main" space="main" />} />
+    </Routes>
+  );
+}
+
+/** Phone-first shell: a raised + in the middle of the tab bar, to-dos and settings at the top. */
+function Shell({ pending, onLogout }: { pending: number; onLogout: () => void }) {
+  const { pathname } = useLocation();
+  // Tapping the tab of the page already on screen brings you back to the top (and to the search).
+  const retap = (to: string, end?: boolean) => (e: React.MouseEvent) => {
+    const here = end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`);
+    if (!here) return;
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent(HOME_EVENT, { detail: to }));
+  };
+  const tabs = NAV.filter((n) => n.tab && n.to !== "/todo");
+  const left = tabs.slice(0, 2), right = tabs.slice(2);
+  const tab = ({ to, label, icon: Icon, end }: (typeof NAV)[number]) => (
+    <NavLink key={to} to={to} end={end} onClick={retap(to, end)}><Icon size={22} strokeWidth={1.9} /><span>{label}</span></NavLink>
+  );
+
+  return (
+    <div className="shell">
+      <nav className="rail" aria-label="Navigation">
+        <div className="brand">KB <small>second cerveau</small></div>
+        {NAV.map(({ to, label, icon: Icon, end }) => (
+          <NavLink key={to} to={to} end={end}>
+            <Icon size={18} /> {label}
+            {to === "/todo" && pending > 0 && <span className="badge">{pending}</span>}
+          </NavLink>
+        ))}
+        <div className="spacer" />
+        <NavLink to="/settings"><Cog size={18} /> Réglages</NavLink>
+      </nav>
+
+      <main>
+        <header className="topbar">
+          <NavLink to="/" end className="brand" aria-label="Veille">KB</NavLink>
+          <span className="topbar-actions">
+            <NavLink to="/todo" aria-label={pending > 0 ? `À faire, ${pending} en attente` : "À faire"} className="icon-link">
+              <ListChecks size={22} strokeWidth={1.9} />
+              {pending > 0 && <span className="count">{pending > 99 ? "99+" : pending}</span>}
+            </NavLink>
+            <NavLink to="/settings" aria-label="Réglages" className="icon-link"><Cog size={22} strokeWidth={1.9} /></NavLink>
+          </span>
+        </header>
+        <Pages onLogout={onLogout} />
+      </main>
+
+      <nav className="tabbar" aria-label="Navigation">
+        {left.map(tab)}
+        <NavLink to="/add" className="add" aria-label="Ajouter à ta KB"><Plus size={28} strokeWidth={2.2} /></NavLink>
+        {right.map(tab)}
+      </nav>
+    </div>
+  );
+}
+
+/** The original shell, kept as is for « Design classique » in Réglages. */
+function ClassicShell({ pending, onLogout }: { pending: number; onLogout: () => void }) {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Navigation">
@@ -114,21 +195,7 @@ export default function App() {
             <NavLink to="/settings" aria-label="Réglages"><Cog size={20} /></NavLink>
           </span>
         </header>
-        <Routes>
-          <Route path="/" element={<Feed key="main" space="main" />} />
-          <Route path="/perso" element={<Feed key="perso" space="perso" />} />
-          <Route path="/note/new" element={<NoteEditor key="new" />} />
-          <Route path="/note/:id/edit" element={<NoteEditor key="edit" />} />
-          <Route path="/item/:id" element={<ItemPage />} />
-          <Route path="/ask" element={<Ask />} />
-          <Route path="/digest" element={<Digest />} />
-          <Route path="/digest/interets" element={<Interests />} />
-          <Route path="/digest/:id" element={<Digest />} />
-          <Route path="/add" element={<Add />} />
-          <Route path="/todo" element={<Todo />} />
-          <Route path="/settings" element={<Settings onLogout={() => { auth.token = ""; setAuthed(false); }} />} />
-          <Route path="*" element={<Feed key="main" space="main" />} />
-        </Routes>
+        <Pages onLogout={onLogout} />
       </main>
 
       <nav className="tabbar" aria-label="Navigation">
