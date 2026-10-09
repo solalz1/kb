@@ -150,7 +150,9 @@ def add_to_kb(base: str) -> dict:
     `page_wanted`: the phone then fetches the page itself and sends it to POST /api/items/<id>/page."""
     b = Builder("Add To KB")
     token = b.token()
-    urls = b.add("detect.link", "URLs", WFInput=attachment(SHORTCUT_INPUT))
+    # "Get URLs from Input" takes a text parameter: the variable goes inside a text, or Shortcuts shows an empty
+    # "Input" and the action gets nothing
+    urls = b.add("detect.link", "URLs", WFInput=text(SHORTCUT_INPUT))
     first = b.add("getitemfromlist", "Item from List", WFItemSpecifier="First Item", WFInput=attachment(urls))
     shared = b.add("detect.text", "Text", WFInput=attachment(SHORTCUT_INPUT))
     why = b.add("ask", "Provided Input", WFAskActionPrompt="Pourquoi tu gardes ça ?", WFInputType="Text")

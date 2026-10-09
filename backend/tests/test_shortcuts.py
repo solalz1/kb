@@ -187,3 +187,13 @@ def test_add_fetches_the_page_from_the_phone_when_asked(build, shortcuts):
     page = _keys(send["WFFormValues"])["page"]
     assert page["WFItemType"] == 5 and page["WFValue"]["Value"]["Value"]["OutputUUID"] == fetch["UUID"]
     assert _keys(send["WFHTTPHeaders"])["Authorization"]["WFValue"]["Value"]["string"] == "Bearer " + build.OBJECT
+
+
+def test_get_urls_reads_the_shared_input(shortcuts):
+    """Get URLs from Input takes a text parameter: given a bare variable, Shortcuts shows an empty "Input" and the
+    action gets nothing (seen on a Mac: no URL, so no page fetched from the phone)."""
+    params = next(a["WFWorkflowActionParameters"] for a in shortcuts["Add To KB"]["WFWorkflowActions"]
+                  if a["WFWorkflowActionIdentifier"].endswith("detect.link"))
+    value = params["WFInput"]
+    assert value["WFSerializationType"] == "WFTextTokenString"
+    assert list(value["Value"]["attachmentsByRange"].values()) == [{"Type": "ExtensionInput"}]
