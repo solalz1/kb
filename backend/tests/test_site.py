@@ -626,8 +626,10 @@ def test_thinking_can_be_turned_off_in_settings(site):
 def test_generate_button_on_the_digest(site):
     from app import db
 
+    # today as the page sees it (Paris), not the database's UTC date: they differ between 22:00 and midnight UTC
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()
     db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
-                  values ('daily', current_date, current_date, 'ready', 'Une journée.', '{"entries": []}')""")
+                  values ('daily', %s, %s, 'ready', 'Une journée.', '{"entries": []}')""", (today, today))
     page = site("/digest")
     button = page.locator(".digest-bar").get_by_role("button", name="Générer maintenant")
     expect(button).to_be_visible()
