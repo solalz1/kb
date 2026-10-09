@@ -329,12 +329,56 @@ export interface ItemPatch {
   entry_date: string;
 }
 
+/** A list of strings as the API sends it. Older cards may hold a list as one text (JSON, "<item>…</item>…", or one
+ * entry per line), and a page must never crash on that. */
+export function textList(v: unknown): string[] {
+  if (Array.isArray(v)) return v.filter((x) => typeof x === "string" || typeof x === "number").map(String).filter((x) => x.trim());
+  if (typeof v !== "string") return [];
+  if (v.trimStart().startsWith("[")) {
+    try { const parsed = JSON.parse(v); if (Array.isArray(parsed)) return textList(parsed); } catch { /* not JSON: read it as text */ }
+  }
+  const tagged = [...v.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1].trim()).filter(Boolean);
+  if (tagged.length) return tagged;
+  return v.split("\n").map((l) => l.replace(/^\s*[-*•]\s*/, "").trim()).filter((l) => l && !/^<\/?\w+>$/.test(l));
+}
+
+const objects = <T,>(v: unknown, key: string): T[] =>
+  Array.isArray(v) ? v.filter((x) => x && typeof x === "object" && typeof (x as Record<string, unknown>)[key] === "string") as T[] : [];
+
+function cleanTranslations(v: unknown): Record<string, ItemTranslation> | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const out: Record<string, ItemTranslation> = {};
+  for (const [lang, tr] of Object.entries(v as Record<string, ItemTranslation>)) {
+    if (!tr || typeof tr !== "object") continue;
+    out[lang] = { ...tr, key_points: textList(tr.key_points), use_cases: textList(tr.use_cases) };
+  }
+  return out;
+}
+
+/** Lists in the shape the pages expect, whatever an old or malformed card holds. */
+export function cleanSummary<T extends ItemSummary>(item: T): T {
+  return { ...item, tags: textList(item.tags), translations: cleanTranslations(item.translations) };
+}
+
+export function cleanDetail(item: ItemDetail): ItemDetail {
+  return {
+    ...cleanSummary(item),
+    key_points: textList(item.key_points),
+    use_cases: textList(item.use_cases),
+    entities: objects<Entity>(item.entities, "name"),
+    links: objects<Link>(item.links, "id"),
+    actions: objects<Action>(item.actions, "text"),
+    metadata: item.metadata && typeof item.metadata === "object" ? item.metadata : {},
+  };
+}
+
 export const api = {
   health: () => request<{ ok: boolean }>("/api/health"),
   items: (params: { q?: string; kind?: string; tag?: string; entity?: string; space?: Space; category?: string;
                     limit?: number; offset?: number; archived?: boolean }) =>
-    request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`),
-  item: (id: string) => request<ItemDetail>(`/api/items/${id}`),
+    request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`)
+      .then((r) => ({ ...r, items: r.items.map(cleanSummary) })),
+  item: (id: string) => request<ItemDetail>(`/api/items/${id}`).then(cleanDetail),
   patch: (id: string, body: Partial<ItemPatch>) =>
     request<{ ok: boolean; requeued?: boolean }>(`/api/items/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   createNote: (body: { content: string; title?: string; space: Space; category?: string | null; tags?: string[];

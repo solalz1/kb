@@ -42,7 +42,7 @@ def test_enrich_asks_for_english_tags_and_a_translation(monkeypatch):
         return {"title": "Classement Terre ou Eau", "summary": "Résumé.", "key_points": ["Un point"], "tags": ["#LLM Eval"],
                 "entities": [], "use_cases": [], "action_items": [], "genre": "thread", "language": "en",
                 "translation": {"title": "Land or Water ranking", "summary": "Summary.", "key_points": ["One point", ""],
-                                "use_cases": "not a list"}}
+                                "use_cases": '["Useful when a list comes back as JSON text"]'}}
 
     monkeypatch.setattr(llm, "call_tool", call_tool)
     out = llm.enrich(kind="tweet", title=None, author=None, source_url=None, published_at=None, content="x",
@@ -51,7 +51,8 @@ def test_enrich_asks_for_english_tags_and_a_translation(monkeypatch):
     assert "translation" in seen["schema"]["required"]
     assert out["tags"] == ["llm-eval"]
     assert out["translations"] == {"en": {"title": "Land or Water ranking", "summary": "Summary.",
-                                          "key_points": ["One point"]}}
+                                          "key_points": ["One point"],
+                                          "use_cases": ["Useful when a list comes back as JSON text"]}}
 
     monkeypatch.setattr(get_settings(), "kb_second_language", "none")
     seen.clear()
