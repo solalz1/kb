@@ -88,6 +88,7 @@ export default {
   // messages and errors written by the server
   "Ajouté à ta KB ✓": "Added to your KB ✓",
   "Déjà dans ta KB ✓": "Already in your KB ✓",
+  "Page reçue, je la relis ✓": "Page received, reading it again ✓",
   "Jeton invalide ou manquant": "Invalid or missing token",
   "Envoie une URL, un texte ou un fichier": "Send a URL, some text or a file",
   "Message vide": "Empty message",

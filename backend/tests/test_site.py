@@ -299,6 +299,26 @@ def test_add_a_link(site):
     expect(page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")).to_be_visible()
 
 
+def test_add_a_blocked_article_with_its_text(site, monkeypatch):
+    """A site that refuses the server (Medium): pasting the link then the article's text in Ajouter still saves it."""
+    from app import db
+    from app.extractors import ExtractionError
+
+    def blocked(url):
+        raise ExtractionError("medium.com refuse l'accès aux serveurs (403).")
+
+    monkeypatch.setattr(extractors, "extract_url", blocked)
+    page = site("/add")
+    article = "Cinq astuces pour écrire de meilleures instructions à Claude, une par paragraphe. " * 40
+    page.get_by_label("Lien ou note").fill(f"https://medium.com/ex-publication/cinq-astuces-1a2b3c4d5e6f\n\n{article}")
+    page.get_by_role("button", name="Ajouter à la KB").click()
+    expect(page.get_by_role("status")).to_contain_text("Ajouté à ta KB ✓")
+    drain()
+    row = db.fetchone("select status, kind, source_url, content from items")
+    assert row["status"] == "ready" and row["kind"] == "article"
+    assert row["source_url"].startswith("https://medium.com/ex-publication/cinq-astuces") and "meilleures instructions" in row["content"]
+
+
 def test_upload_a_file(site, tmp_path):
     page = site("/add")
     pdf = tmp_path / "notes.txt"

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .. import storage, urls
 from . import arxiv, av, document, github, image, note, pdf, twitter, web, youtube
@@ -21,7 +23,17 @@ def extract_item(item: dict) -> Extracted:
         data = storage.download(item["file_path"])
         ex = extract_file(data, item.get("file_name"), item.get("file_mime"))
     elif item.get("input_url"):
-        ex = extract_url(item["input_url"])
+        page = _phone_page(item)
+        try:
+            ex = extract_url(item["input_url"])
+        except Exception as exc:
+            if not page:
+                raise
+            # the site blocks the server (or is down for it), but the phone sent the page it shows
+            log.info("Le serveur n'a pas pu lire %s (%s) : texte envoyé par le téléphone", item["input_url"], exc)
+            return _from_page(item, page)
+        if page and _page_is_better(ex, page):
+            return _from_page(item, page, base=ex)
     elif item.get("input_text"):
         ex = note.extract(item["input_text"])
     else:
@@ -31,6 +43,37 @@ def extract_item(item: dict) -> Extracted:
     if item.get("input_url") and shared and urls.only_url(shared) is None and shared not in ex.content:
         ex.content = f"Extrait partagé :\n> {shared}\n\n{ex.content}"
     return ex
+
+
+def _phone_page(item: dict) -> str | None:
+    """The page's text as the phone showed it, when it was shared from Safari (pipeline.ingest keeps it aside)."""
+    meta = item.get("metadata") or {}
+    if isinstance(meta, str):
+        meta = json.loads(meta)
+    path = meta.get("page_path")
+    if not path:
+        return None
+    try:
+        return storage.download(path).decode("utf-8", errors="replace").strip() or None
+    except Exception:
+        log.warning("Texte de la page introuvable : %s", path, exc_info=True)
+        return None
+
+
+def _page_is_better(ex: Extracted, page: str) -> bool:
+    """An article the server only got a sliver of (a login wall, a paywall preview) while the phone had it all."""
+    return ex.kind == "article" and (bool(ex.metadata.get("thin_content"))
+                                     or (len(ex.content) < 3000 and len(page) > 3 * len(ex.content)))
+
+
+def _from_page(item: dict, page: str, base: Extracted | None = None) -> Extracted:
+    source = (base.source_url if base else None) or urls.classify(item["input_url"]).canonical
+    metadata = {k: v for k, v in (base.metadata if base else {}).items() if k not in ("thin_content", "hint")}
+    return Extracted(kind="article", title=base.title if base else None, content=page, source_url=source,
+                     author=base.author if base else None, site_name=(base.site_name if base else None)
+                     or urlsplit(source).netloc, published_at=base.published_at if base else None,
+                     language=base.language if base else None, thumbnail_url=base.thumbnail_url if base else None,
+                     metadata={**metadata, "via": "phone"})
 
 
 def extract_url(url: str) -> Extracted:

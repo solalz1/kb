@@ -186,7 +186,9 @@ async def ingest(request: Request):
         raise HTTPException(status_code=400, detail="Rien à ajouter : envoie une URL, un texte ou un fichier")
 
     dupes = sum(r["duplicate"] for r in results)
-    if len(results) == 1:
+    if len(results) == 1 and results[0].get("retried"):
+        message = "Page reçue, je la relis ✓"     # failed before; this time the phone sent the page
+    elif len(results) == 1:
         message = "Déjà dans ta KB ✓" if dupes else "Ajouté à ta KB ✓"
     else:
         message = f"{len(results) - dupes} élément(s) ajouté(s)" + (f", {dupes} déjà présent(s)" if dupes else "")
@@ -446,7 +448,10 @@ def delete_item(item_id: str):
     if not row:
         raise HTTPException(404, "Élément introuvable")
     notion.wake()
-    for path in (row.get("file_path"), (row.get("metadata") or {}).get("thumb_path")):
+    meta = row.get("metadata") or {}
+    for path in (row.get("file_path"), meta.get("thumb_path"), meta.get("page_path")):
+        if not path:
+            continue
         try:
             storage.delete(path)
         except Exception:

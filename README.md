@@ -75,6 +75,7 @@ The repository is public, your data is not.
 
 - **Older X threads**: the X API only searches the last 7 days. Share the **last** post of an older thread: everything before it is fetched.
 - **YouTube** often blocks cloud servers. If transcripts are missing, set a residential proxy (`YOUTUBE_PROXY_URL`).
+- **Sites that block servers** (Medium and some news sites answer 403 to cloud servers): the app tries Jina Reader, then the Wayback Machine. When those fail too, share the page from **Safari**: the Shortcut attaches the page's text as your phone shows it (member-only stories included if you're signed in), and the app uses that. A link shared again from Safari after a failure is read again.
 - **LinkedIn, private Instagram**: behind a login. Share a screenshot instead.
 - **Files over 50 MB**: the Supabase free-plan limit. For a long video, share the link.
 

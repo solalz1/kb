@@ -75,6 +75,7 @@ Le dépôt est public, tes données ne le sont pas.
 
 - **Vieux threads X** : l'API X ne cherche que sur les 7 derniers jours. Partage le **dernier** post d'un thread plus ancien : tout ce qui précède est récupéré.
 - **YouTube** bloque souvent les serveurs cloud. Si les transcriptions manquent, configure un proxy résidentiel (`YOUTUBE_PROXY_URL`).
+- **Sites qui bloquent les serveurs** (Medium et certains journaux répondent 403 aux serveurs cloud) : l'app essaie Jina Reader, puis la Wayback Machine. Si ça échoue aussi, partage la page depuis **Safari** : le Raccourci joint le texte de la page tel que ton téléphone l'affiche (articles réservés aux membres compris si tu es connecté), et l'app s'en sert. Un lien repartagé depuis Safari après un échec est relu.
 - **LinkedIn, Instagram privé** : derrière une connexion. Partage plutôt une capture d'écran.
 - **Fichiers de plus de 50 Mo** : la limite de l'offre gratuite de Supabase. Pour une longue vidéo, partage le lien.
 
