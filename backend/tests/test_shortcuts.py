@@ -101,7 +101,7 @@ def test_requests_match_the_api(shortcuts):
     add = _request(shortcuts["Add To KB"])
     assert add["WFURL"] == "https://kb.example.com/api/ingest" and add["WFURL"].removeprefix("https://kb.example.com") in routes
     assert add["WFHTTPMethod"] == "POST" and add["WFHTTPBodyType"] == "JSON"
-    assert set(_keys(add["WFJSONValues"])) == {"url", "text", "note", "category"}
+    assert set(_keys(add["WFJSONValues"])) == {"url", "text", "note", "category", "page_follows"}
 
     files = _request(shortcuts["Fichier vers ma KB"])
     assert files["WFHTTPBodyType"] == "Form"
@@ -151,3 +151,39 @@ def test_share_sheet_settings(shortcuts):
     modes = [a["WFWorkflowActionParameters"].get("WFControlFlowMode") for a in files["WFWorkflowActions"]
              if a["WFWorkflowActionIdentifier"].endswith("repeat.each")]
     assert modes == [0, 2]
+
+
+def test_add_fetches_the_page_from_the_phone_when_asked(build, shortcuts):
+    """A site that refuses servers: the API answers page_wanted, and only then the phone fetches the page and posts it
+    to /api/items/<id>/page. The share is saved and reported before, so this part can't lose it."""
+    from app.main import api
+
+    actions = shortcuts["Add To KB"]["WFWorkflowActions"]
+    ids = [a["WFWorkflowActionIdentifier"].removeprefix("is.workflow.actions.") for a in actions]
+    start = next(i for i, a in enumerate(actions) if ids[i] == "conditional"
+                 and a["WFWorkflowActionParameters"]["WFControlFlowMode"] == 0)
+    end = next(i for i, a in enumerate(actions) if ids[i] == "conditional"
+               and a["WFWorkflowActionParameters"]["WFControlFlowMode"] == 2)
+    assert ids.index("notification") < start < end == len(actions) - 1
+    assert ids[start + 1:end] == ["getvalueforkey", "downloadurl", "downloadurl"]
+
+    params = [a["WFWorkflowActionParameters"] for a in actions]
+    cond = params[start]
+    assert cond["WFCondition"] == build.HAS_ANY_VALUE and cond["GroupingIdentifier"] == params[end]["GroupingIdentifier"]
+    asked = cond["WFInput"]["Variable"]["Value"]["OutputUUID"]
+    assert next(p for p in params if p.get("UUID") == asked)["WFDictionaryKey"] == "page_wanted"
+
+    fetch, send = params[start + 2], params[start + 3]
+    shared_url = next(p for i, p in enumerate(params) if ids[i] == "getitemfromlist")["UUID"]
+    assert fetch["WFHTTPMethod"] == "GET" and list(fetch["WFURL"]["Value"]["attachmentsByRange"].values())[0][
+        "OutputUUID"] == shared_url
+    assert "iPhone" in _keys(fetch["WFHTTPHeaders"])["User-Agent"]["WFValue"]["Value"]["string"]
+    url = send["WFURL"]["Value"]
+    assert url["string"] == "https://kb.example.com/api/items/" + build.OBJECT + "/page"
+    assert list(url["attachmentsByRange"].values())[0]["OutputUUID"] == params[start + 1]["UUID"]
+    assert params[start + 1]["WFDictionaryKey"] == "id"
+    routes = {r.path for r in api.routes if "POST" in getattr(r, "methods", ())}
+    assert "/api/items/{item_id}/page" in routes
+    page = _keys(send["WFFormValues"])["page"]
+    assert page["WFItemType"] == 5 and page["WFValue"]["Value"]["Value"]["OutputUUID"] == fetch["UUID"]
+    assert _keys(send["WFHTTPHeaders"])["Authorization"]["WFValue"]["Value"]["string"] == "Bearer " + build.OBJECT

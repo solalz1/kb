@@ -48,6 +48,13 @@ action, "Text", never into the files) and adds the Shortcut. They reach your iPh
        - `category` = *Chosen Item* (step 5), if you added the list: `Veille` and `Perso` pick the space, the others a Perso category
 7. Add **Get Dictionary Value** → key `message` in *Contents of URL*.
 8. Add **Show Notification** → *Dictionary Value*.
+9. For sites that refuse servers (Medium…): add the field `page_follows` = `1` to the JSON of step 6, then
+   **Get Dictionary Value** → key `page_wanted` in *Contents of URL*, and **If** *that value* **has any value**:
+   - **Get Dictionary Value** → key `id` in *Contents of URL*;
+   - **Get Contents of URL** → *Item from List* (step 3), method **GET** (your phone fetches the page itself);
+   - **Get Contents of URL** → `https://kb.example.com/api/items/` *id* `/page`, method **POST**, the same
+     `Authorization` header, Request Body **Form** with a *File* field `page` = the page you just fetched.
+   - **End If**. The API only asks for this on sites that refuse it, so other shares don't wait.
 
 Test: in the X app, tap Share on a tweet → **Add to my KB** → a confirmation appears (the server's messages are in French: « Ajouté à ta KB ✓ »).
 
@@ -102,6 +109,8 @@ Test: "Hey Siri, Personal note", dictate "I don't answer emails after 8pm", pick
 
 - **X threads**: share the **last** tweet of a thread; everything before it is fetched. For a thread less than 7 days old, the first tweet works too.
 - **Selected text** in Safari: select the passage, then Share → **Add to my KB**. The excerpt is kept with the page.
+- **Sites that refuse servers** (Medium…): share as usual, from the site's app or Safari. The Shortcut has your phone
+  fetch the page and sends it. Member-only stories: the full text comes only from Safari, signed in.
 - **Quick idea**: run **Add to my KB** without sharing anything (from the Home Screen or Siri): it takes the clipboard. You can also dictate a note in the app.
 - To go faster, drop the "Why are you keeping this?" step. You can add the note later on the card.
 - **File it in Perso**: the generated Shortcuts ask "Où le ranger ?" (Veille, Perso or a Perso category). Without that list, type `#perso` in the "Why are you keeping this?" note (e.g. `#perso #ressource to reread before my 2027 goals`). The item goes to the Perso space, and a category hashtag (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`, or the English `#principle`, `#value`, `#lesson`, `#goal`, `#habit`, `#quote`) files it directly. These hashtags are removed from the note.

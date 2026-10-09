@@ -23,17 +23,7 @@ def extract_item(item: dict) -> Extracted:
         data = storage.download(item["file_path"])
         ex = extract_file(data, item.get("file_name"), item.get("file_mime"))
     elif item.get("input_url"):
-        page = _phone_page(item)
-        try:
-            ex = extract_url(item["input_url"])
-        except Exception as exc:
-            if not page:
-                raise
-            # the site blocks the server (or is down for it), but the phone sent the page it shows
-            log.info("Le serveur n'a pas pu lire %s (%s) : texte envoyé par le téléphone", item["input_url"], exc)
-            return _from_page(item, page)
-        if page and _page_is_better(ex, page):
-            return _from_page(item, page, base=ex)
+        ex = _phone_html(item) or _read_url(item)
     elif item.get("input_text"):
         ex = note.extract(item["input_text"])
     else:
@@ -45,12 +35,48 @@ def extract_item(item: dict) -> Extracted:
     return ex
 
 
+def _read_url(item: dict) -> Extracted:
+    """The server reads the link; the page's text sent from Safari rescues a site that refuses it."""
+    page = _phone_page(item)
+    try:
+        ex = extract_url(item["input_url"])
+    except Exception as exc:
+        if not page:
+            raise
+        # the site blocks the server (or is down for it), but the phone sent the page it shows
+        log.info("Le serveur n'a pas pu lire %s (%s) : texte envoyé par le téléphone", item["input_url"], exc)
+        return _from_page(item, page)
+    return _from_page(item, page, base=ex) if page and _page_is_better(ex, page) else ex
+
+
+def _meta(item: dict) -> dict:
+    meta = item.get("metadata") or {}
+    return json.loads(meta) if isinstance(meta, str) else meta
+
+
+def _phone_html(item: dict) -> Extracted | None:
+    """The page the phone fetched for a site that refuses the server (the Shortcut, POST /api/items/<id>/page), when
+    it holds an article: read like the server would have."""
+    path = _meta(item).get("page_html_path")
+    if not path:
+        return None
+    try:
+        html = storage.download(path)
+    except Exception:
+        log.warning("Page du téléphone introuvable : %s", path, exc_info=True)
+        return None
+    canonical = urls.classify(item["input_url"]).canonical
+    ex = web.extract_html(html, item["input_url"], canonical, jina=False)
+    if ex.metadata.get("thin_content") or web._blocked(ex.content):
+        log.info("Page du téléphone sans article pour %s : le serveur essaie lui-même", item["input_url"])
+        return None
+    ex.metadata["via"] = "phone"
+    return ex
+
+
 def _phone_page(item: dict) -> str | None:
     """The page's text as the phone showed it, when it was shared from Safari (pipeline.ingest keeps it aside)."""
-    meta = item.get("metadata") or {}
-    if isinstance(meta, str):
-        meta = json.loads(meta)
-    path = meta.get("page_path")
+    path = _meta(item).get("page_path")
     if not path:
         return None
     try:

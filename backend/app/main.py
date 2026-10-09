@@ -176,7 +176,8 @@ async def ingest(request: Request):
             body = body if isinstance(body, dict) else {}
             results.append(await run_in_threadpool(
                 pipeline.ingest, url=_str(body.get("url")), text=_str(body.get("text")), note=_str(body.get("note")),
-                space=_str(body.get("space")), category=_str(body.get("category")), title=_str(body.get("title"))))
+                space=_str(body.get("space")), category=_str(body.get("category")), title=_str(body.get("title")),
+                page_follows=str(body.get("page_follows") or "").lower() in ("1", "true", "yes", "oui")))
         else:
             raw = (await request.body()).decode("utf-8", errors="replace")
             results.append(await run_in_threadpool(pipeline.ingest, text=raw))
@@ -192,7 +193,28 @@ async def ingest(request: Request):
         message = "Déjà dans ta KB ✓" if dupes else "Ajouté à ta KB ✓"
     else:
         message = f"{len(results) - dupes} élément(s) ajouté(s)" + (f", {dupes} déjà présent(s)" if dupes else "")
-    return {"ok": True, "message": message, "items": results, "id": results[0]["id"]}
+    out = {"ok": True, "message": message, "items": results, "id": results[0]["id"]}
+    if len(results) == 1 and results[0].get("page_wanted"):
+        out["page_wanted"] = True      # the Shortcut then fetches the page from the phone: POST /api/items/<id>/page
+    return out
+
+
+@api.post("/api/items/{item_id}/page", dependencies=auth)
+async def item_page(item_id: str, request: Request):
+    """The page as the phone fetched it, for a site that refuses the server (multipart field `page`, or the raw body)."""
+    ctype = request.headers.get("content-type", "")
+    if "multipart/form-data" in ctype:
+        form = await request.form()
+        upload = form.get("page")
+        data = await upload.read() if isinstance(upload, UploadFile) else (_str(upload) or "").encode()
+    else:
+        data = await request.body()
+    try:
+        return await run_in_threadpool(pipeline.attach_page, item_id, data)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 class NoteIn(BaseModel):
@@ -449,7 +471,7 @@ def delete_item(item_id: str):
         raise HTTPException(404, "Élément introuvable")
     notion.wake()
     meta = row.get("metadata") or {}
-    for path in (row.get("file_path"), meta.get("thumb_path"), meta.get("page_path")):
+    for path in (row.get("file_path"), meta.get("thumb_path"), meta.get("page_path"), meta.get("page_html_path")):
         if not path:
             continue
         try:
