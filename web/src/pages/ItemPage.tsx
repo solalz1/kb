@@ -66,7 +66,7 @@ export default function ItemPage() {
 
   const m = item.metadata || {};
   const who = item.author || item.site_name || hostOf(item.source_url);
-  const thread: { id: string; url: string }[] = m.thread || [];
+  const thread: { id: string; url: string }[] = Array.isArray(m.thread) ? m.thread.filter((tw: unknown) => tw && typeof tw === "object") : [];
   const details = [
     item.published_at && t("publié le {date}", { date: fullDate(item.published_at) }),
     m.pages && (m.pages > 1 ? t("{n} pages", { n: m.pages }) : t("{n} page", { n: m.pages })),

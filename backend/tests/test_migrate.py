@@ -106,3 +106,25 @@ def test_health_reports_the_schema(clean_db, monkeypatch):
         body = client.get("/api/health", headers=AUTH).json()
     assert body["schema"] == "ok"
     assert body["ok"] is True
+
+
+def test_repairs_lists_saved_as_text(clean_db):
+    """A card's lists once came back as one "<item>…</item>" text: the item page crashed on them. Startup repairs
+    them, and leaves healthy rows alone."""
+    from app import db, migrate
+
+    broken = "\n<item>Les questions comptent.</item>\n<item>Trois débats d'experts.</item>\n</item>\n</invoke>"
+    db.execute("""insert into items (kind, title, status, key_points, use_cases, entities)
+                  values ('tweet', 'Cassée', 'ready', %s, %s, 'null'::jsonb),
+                         ('tweet', 'Saine', 'ready', '["Un point"]', '["Un usage"]', '[{"name": "X", "type": "product"}]')""",
+               (db.jsonb(broken), db.jsonb("- Utile pour réviser\n- Utile avant un examen\n</invoke>")))
+    migrate.run()
+    rows = {r["title"]: r for r in db.fetchall("select title, key_points, use_cases, entities from items")}
+    assert rows["Cassée"]["key_points"] == ["Les questions comptent.", "Trois débats d'experts."]
+    assert rows["Cassée"]["use_cases"] == ["Utile pour réviser", "Utile avant un examen"]
+    assert rows["Cassée"]["entities"] == []
+    assert rows["Saine"] == {"title": "Saine", "key_points": ["Un point"], "use_cases": ["Un usage"],
+                             "entities": [{"name": "X", "type": "product"}]}
+    migrate.run()
+    assert db.fetchone("select key_points from items where title = 'Cassée'")["key_points"] == [
+        "Les questions comptent.", "Trois débats d'experts."]

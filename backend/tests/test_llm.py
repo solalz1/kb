@@ -272,3 +272,48 @@ def test_thinking_setting_api(clean_db):
         assert c.get("/api/settings/thinking", headers=AUTH).json() == {"enabled": False}
         assert c.put("/api/settings/thinking", json={}, headers=AUTH).status_code == 422
         assert c.get("/api/settings/thinking").status_code == 401
+
+
+BROKEN_CARD = {
+    "title": "Apprendre en 48 h", "summary": "Un étudiant prépare un examen.",
+    "key_points": "\n<item>Les questions comptent.</item>\n<item>Trois débats d'experts.</item>\n</item>\n</invoke>",
+}
+GOOD_CARD = {
+    "title": "Apprendre en 48 h", "summary": "Un étudiant prépare un examen.", "key_points": ["Les questions comptent."],
+    "tags": ["Learning", "#notebooklm"], "entities": [{"name": "NotebookLM", "type": "product"}, {"type": "person"}],
+    "use_cases": ["Utile pour réviser"], "action_items": [], "genre": "thread", "language": "fr",
+    "translation": {"title": "Learn in 48 h", "summary": "A student prepares.", "key_points": "<item>Questions matter.</item>",
+                    "use_cases": ["Useful to revise"]},
+}
+
+
+def _enrich():
+    from app import llm
+
+    return llm.enrich(kind="tweet", title=None, author="@someone", source_url="https://x.com/someone/status/1",
+                      published_at=None, content="Un thread sur NotebookLM.", user_note=None, existing_tags=[])
+
+
+def test_a_card_with_lists_sent_as_text_is_asked_again(monkeypatch):
+    """Seen in production: every list of a card came back as one "<item>…</item>" text, and the app crashed on it."""
+    from app import llm
+
+    answers = [dict(BROKEN_CARD), dict(GOOD_CARD)]
+    monkeypatch.setattr(llm, "call_tool", lambda **kw: answers.pop(0))
+    out = _enrich()
+    assert answers == []                                            # asked a second time
+    assert out["key_points"] == ["Les questions comptent."] and out["tags"] == ["learning", "notebooklm"]
+    assert out["entities"] == [{"name": "NotebookLM", "type": "product"}]
+    assert out["translations"]["en"]["key_points"] == ["Questions matter."]
+
+
+def test_a_card_broken_twice_is_cleaned(monkeypatch):
+    from app import llm
+
+    monkeypatch.setattr(llm, "call_tool", lambda **kw: dict(BROKEN_CARD))
+    out = _enrich()
+    assert out["key_points"] == ["Les questions comptent.", "Trois débats d'experts."]
+    assert out["use_cases"] == [] and out["tags"] == [] and out["entities"] == [] and out["action_items"] == []
+    assert llm._text_list("- Utile pour réviser\n- Utile si examen\n</invoke>") == ["Utile pour réviser", "Utile si examen"]
+    assert llm._text_list(None) == [] and llm._text_list(["a", "", 3, {"x": 1}]) == ["a", "3"]
+    assert llm._text_list('["un", "deux"]') == ["un", "deux"] and llm._text_list("[pas du JSON") == ["[pas du JSON"]

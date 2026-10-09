@@ -94,6 +94,10 @@ digest sources and Claude by fakes in `tests/test_digest.py`. Every backend chan
 - FastAPI serves the frontend from `STATIC_DIR`; in dev, Vite proxies `/api` and `/mcp` to :8000.
 - Never hardcode a real domain or personal data: examples use `kb.example.com`; the real values live in env vars.
   Demo data in tests must be fictional.
+- The API doesn't enforce tool schemas: a card's lists once came back as one `<item>…</item>` text and the item page
+  crashed on it. `llm.enrich` cleans lists (`_text_list`) and asks again when they're malformed, the schema file repairs
+  stored rows at startup, the app cleans lists as they arrive (`cleanDetail` in `api.ts`), and `ErrorBoundary` keeps
+  a page that fails to render from blanking the whole app.
 - Perso notes are the user's own words: enrichment must never rewrite `content` for `kind = 'note'`, and the Notion
   copy and the export put the note text first, in full.
 

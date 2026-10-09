@@ -787,3 +787,7 @@ button.cal-day:hover { background: var(--tint); }
 .cost-edit { display: grid; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--tint); border-radius: var(--radius-s); }
 .cost-edit label { display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); }
 .cost-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* A page that failed to render (components/ErrorBoundary.tsx) */
+.crash { padding-top: 8px; }
+.crash .code { white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0 16px; }

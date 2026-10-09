@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import logging
+import re
 from datetime import date
 from functools import lru_cache
 from typing import Any, Iterator
@@ -365,7 +366,7 @@ def enrich(
     if second:
         properties["translation"] = TRANSLATION_SCHEMA
         required.append("translation")
-    out = call_tool(
+    request = dict(
         system=_enrich_system() + (_translation_rule(second) if second else "") + (_perso_rules() if perso else ""),
         content=prompt,
         tool_name="save_card",
@@ -373,11 +374,58 @@ def enrich(
         schema={**ENRICH_SCHEMA, "properties": properties, "required": required},
         max_tokens=6500 if second else 3500,
     )
-    out["tags"] = _normalize_tags(out.get("tags", []))
+    out = call_tool(**request)
+    if _malformed(out):
+        # the tool call went wrong (seen once: every list sent as one "<item>…</item>" string): one more try
+        log.warning("Fiche mal formée (%s), nouvel essai", ", ".join(_malformed(out)))
+        again = call_tool(**request)
+        if len(_malformed(again)) < len(_malformed(out)):
+            out = again
+    out["key_points"] = _text_list(out.get("key_points"))
+    out["use_cases"] = _text_list(out.get("use_cases"))
+    out["tags"] = _normalize_tags(_text_list(out.get("tags")))
+    out["entities"] = _dict_list(out.get("entities"), "name")
+    out["action_items"] = _dict_list(out.get("action_items"), "text")
     out["translations"] = {second: _clean_translation(out.pop("translation", None))} if second else {}
     if second and not out["translations"][second]:
         out["translations"] = {}
     return out
+
+
+_CARD_LISTS = ("key_points", "use_cases", "tags", "entities", "action_items")
+
+
+def _malformed(out: dict) -> list[str]:
+    """The list fields of a card that didn't come back as lists."""
+    return [k for k in _CARD_LISTS if not isinstance(out.get(k), list)]
+
+
+def _text_list(value: Any) -> list[str]:
+    """A list of strings from what the model sent. The API doesn't enforce the schema: a list may come back as one
+    string, as JSON, as "<item>…</item>" tags or one per line."""
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if isinstance(x, (str, int, float)) and str(x).strip()]
+    if not isinstance(value, str):
+        return []
+    if value.lstrip().startswith("["):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            return _text_list(parsed)
+    tagged = [m.strip() for m in re.findall(r"<item>(.*?)</item>", value, re.S) if m.strip()]
+    if tagged:
+        return tagged
+    lines = (re.sub(r"^\s*[-*•]\s*", "", line).strip() for line in value.splitlines())
+    return [line for line in lines if line and not re.fullmatch(r"</?\w+>", line)]
+
+
+def _dict_list(value: Any, key: str) -> list[dict]:
+    """Objects that have the field `key` (entities need a name, actions a text)."""
+    if not isinstance(value, list):
+        return []
+    return [x for x in value if isinstance(x, dict) and isinstance(x.get(key), str) and x[key].strip()]
 
 
 def _clean_translation(raw) -> dict:
@@ -386,9 +434,9 @@ def _clean_translation(raw) -> dict:
         return {}
     out = {k: str(raw[k]).strip() for k in ("title", "summary") if isinstance(raw.get(k), str) and raw[k].strip()}
     for k in ("key_points", "use_cases"):
-        if isinstance(raw.get(k), list):
-            out[k] = [str(x).strip() for x in raw[k] if str(x).strip()]
-    return out
+        if k in raw:
+            out[k] = _text_list(raw[k])
+    return {k: v for k, v in out.items() if v}
 
 
 def _normalize_tags(tags: list[str]) -> list[str]:

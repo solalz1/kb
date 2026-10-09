@@ -435,3 +435,34 @@ begin
     on conflict (id) do nothing;
   end if;
 end $$;
+
+-- -----------------------------------------------------------------------------
+-- Repairs (idempotent: they only touch rows still broken)
+-- -----------------------------------------------------------------------------
+-- A tool call once sent a card's lists as one text ("<item>…</item><item>…</item>") instead of a JSON list, and the
+-- app's item page crashed on it. Split such texts back into lists: by <item> tags, else one entry per line.
+update public.items i
+   set key_points = coalesce(
+         (select jsonb_agg(btrim(m[1])) from regexp_matches(i.key_points #>> '{}', '<item>(.*?)</item>', 'g') as m
+           where btrim(m[1]) <> ''),
+         (select jsonb_agg(l.line) from (
+            select btrim(regexp_replace(x, '^\s*[-*•]\s*', '')) as line
+              from regexp_split_to_table(i.key_points #>> '{}', E'\n') as x) l
+           where l.line <> '' and l.line !~ '^</?\w+>$'),
+         '[]'::jsonb)
+ where jsonb_typeof(i.key_points) = 'string';
+
+update public.items i
+   set use_cases = coalesce(
+         (select jsonb_agg(btrim(m[1])) from regexp_matches(i.use_cases #>> '{}', '<item>(.*?)</item>', 'g') as m
+           where btrim(m[1]) <> ''),
+         (select jsonb_agg(l.line) from (
+            select btrim(regexp_replace(x, '^\s*[-*•]\s*', '')) as line
+              from regexp_split_to_table(i.use_cases #>> '{}', E'\n') as x) l
+           where l.line <> '' and l.line !~ '^</?\w+>$'),
+         '[]'::jsonb)
+ where jsonb_typeof(i.use_cases) = 'string';
+
+update public.items set key_points = '[]'::jsonb where jsonb_typeof(key_points) not in ('array', 'string');
+update public.items set use_cases = '[]'::jsonb where jsonb_typeof(use_cases) not in ('array', 'string');
+update public.items set entities = '[]'::jsonb where jsonb_typeof(entities) <> 'array';

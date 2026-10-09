@@ -73,9 +73,10 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     contexts, problems = [], []
 
     def open_page(path: str = "/", viewport: dict = PHONE, lang: str = "fr", signed_in: bool = True,
-                  expected_status: int | None = None, touch: bool = False) -> Page:
+                  expected_status: int | None = None, touch: bool = False, expected_errors: tuple = ()) -> Page:
         """`expected_status`: an HTTP error the test causes on purpose (the browser logs it as a console error).
-        `touch`: a touch screen, as on an iPhone (see _swipe)."""
+        `touch`: a touch screen, as on an iPhone (see _swipe).
+        `expected_errors`: console errors the test causes on purpose (a page made to crash), by a piece of their text."""
         ctx = browser.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
                                   has_touch=touch)
         # first visit only: switching the language in the app (which reloads it) must stick
@@ -87,7 +88,8 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
         page = ctx.new_page()
         page.on("pageerror", lambda e: problems.append(f"{page.url}: {e}"))
         page.on("console", lambda m: problems.append(f"{page.url}: {m.text}") if m.type == "error" and not (
-            expected_status and f"status of {expected_status}" in m.text) else None)
+            expected_status and f"status of {expected_status}" in m.text) and not any(
+            e in m.text for e in expected_errors) else None)
         page.on("response", lambda r: problems.append(f"{r.status} {r.url}") if r.status >= 500 else None)
         page.goto(path)
         return page
@@ -395,6 +397,50 @@ def test_swipe_to_pin_archive_and_delete(site):
     page.locator(".tabbar").get_by_role("link", name="Perso").click()
     expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
     _wait_for(lambda: not _exists(second), page)
+
+
+def test_a_card_whose_lists_were_saved_as_text(site):
+    """Seen in production: a tweet whose key points were stored as one "<item>…</item>" text. Its page crashed and left
+    the whole app blank, even after going back. It now opens like any other."""
+    from app import db
+
+    broken = "\n<item>Les questions comptent plus que le volume.</item>\n<item>Trois débats d'experts.</item>\n</item>\n</invoke>"
+    row = db.fetchone(
+        """insert into items (kind, title, status, summary, key_points, use_cases, translations)
+           values ('tweet', 'Apprendre un domaine en 48 h', 'ready', 'Un étudiant prépare un examen.', %s, %s, %s)
+           returning id""",
+        (db.jsonb(broken), db.jsonb("- Utile pour réviser\n- Utile avant un examen"),
+         db.jsonb({"en": {"title": "Learn a field in 48 h", "key_points": "<item>Questions matter.</item>"}})))
+    page = site("/", touch=True)
+    page.locator(f"a[href='/item/{row['id']}']").click()
+    expect(page.get_by_role("heading", name="Apprendre un domaine en 48 h")).to_be_visible()
+    points = page.locator("section", has=page.get_by_role("heading", name="Points clés")).locator("li")
+    expect(points).to_have_text(["Les questions comptent plus que le volume.", "Trois débats d'experts."])
+    expect(page.locator("section", has=page.get_by_role("heading", name="Utile pour")).locator("li")).to_have_count(2)
+    page.go_back()
+    expect(page.locator(f"a[href='/item/{row['id']}']")).to_be_visible()
+
+
+def test_a_page_that_crashes_shows_a_way_back(site):
+    """Whatever breaks a page, the app around it stays up: a message, a way back, and the next page works."""
+    page = site("/", touch=True, expected_errors=("React error #31", "Page crash"))
+    ids = _seed(page)
+    page.reload()
+
+    def odd(route):
+        body = route.fetch().json()
+        route.fulfill(json={**body, "title": {"fr": "un titre rangé comme un objet"}})
+
+    page.route(f"**/api/items/{ids['article']}", odd)
+    page.locator(f"a[href='/item/{ids['article']}']").click()
+    expect(page.get_by_role("heading", name="Cette page n'a pas pu s'afficher")).to_be_visible()
+    expect(page.get_by_role("navigation").last).to_be_visible()             # the tab bar is still there
+    page.get_by_role("button", name="Revenir en arrière").click()
+    expect(page.locator(f"a[href='/item/{ids['principle']}']")).to_have_count(0)  # Veille: the article only
+    expect(page.locator(f"a[href='/item/{ids['article']}']")).to_be_visible()
+    page.unroute(f"**/api/items/{ids['article']}")
+    page.locator(f"a[href='/item/{ids['article']}']").click()
+    expect(page.get_by_role("button", name="Archiver")).to_be_visible()
 
 
 def test_mouse_clicks_still_open_cards(site):

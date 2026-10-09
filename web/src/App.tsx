@@ -1,7 +1,8 @@
 import { BookOpen, CalendarDays, ListChecks, MessageSquare, Newspaper, Plus, Settings as Cog, Sprout } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ApiError, api, auth } from "./api";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { lang, setLang, t } from "./i18n";
 import Add from "./pages/Add";
 import Ask from "./pages/Ask";
@@ -95,6 +96,7 @@ function Login({ onDone }: { onDone: () => void }) {
 
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(auth.token));
+  const location = useLocation();
   const [pending, setPending] = useState(0);
 
   useEffect(() => {
@@ -130,6 +132,7 @@ export default function App() {
       </nav>
 
       <main>
+        <ErrorBoundary resetKey={location.key}>
         <Routes>
           <Route path="/" element={<Feed key="main" space="main" pending={pending} />} />
           <Route path="/perso" element={<Feed key="perso" space="perso" />} />
@@ -147,6 +150,7 @@ export default function App() {
           <Route path="/settings" element={<Settings onLogout={() => { auth.token = ""; setAuthed(false); }} />} />
           <Route path="*" element={<Feed key="main" space="main" pending={pending} />} />
         </Routes>
+        </ErrorBoundary>
       </main>
 
       <nav className="tabbar" aria-label="Navigation">

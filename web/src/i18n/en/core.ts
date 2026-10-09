@@ -113,4 +113,9 @@ export default {
     "Answer from my knowledge base using the KB connector (search_kb, several phrasings if needed, then get_item to "
     + "check). For each piece of information cite the item and its source link, and flag anything that doesn't come "
     + "from my KB.\n\nQuestion: {text}",
+  "Cette page n'a pas pu s'afficher": "This page couldn't be shown",
+  "Le reste de l'app marche toujours. Reviens en arrière, ou recharge la page.":
+    "The rest of the app still works. Go back, or reload the page.",
+  "Revenir en arrière": "Go back",
+  "Recharger": "Reload",
 } as Record<string, string>;
