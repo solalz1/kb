@@ -13,6 +13,7 @@ from .test_e2e import AUTH
 from .test_extractors import ARTICLE_HTML
 
 URL = "https://medium.com/ex-publication/5-tricks-for-claude-1a2b3c4d5e6f"
+BROWSER_GET = web._browser_get          # the real one (conftest swaps it for a fake in every test)
 BOT_CHECK = "<html><title>Just a moment...</title><body>Enable JavaScript and cookies to continue</body></html>"
 PAGE_TEXT = ("5 tricks for Claude\nMember-only story\n" + "Write the instructions once and let Claude reuse them. " * 60)
 
@@ -177,7 +178,7 @@ def test_the_phone_fetches_pages_the_server_cannot(client, monkeypatch):
     monkeypatch.setattr(extractors, "extract_url", server_must_not_try)
     r = client.post("/api/ingest", json={"url": URL, "note": "pour mes prompts", "page_follows": "1"}, headers=AUTH)
     body = r.json()
-    assert body["page_wanted"] is True and body["message"] == "Ajouté à ta KB ✓"
+    assert body["page_wanted"] is True and body["page_url"] == URL and body["message"] == "Ajouté à ta KB ✓"
     item_id = body["id"]
     assert drain() == 0                                   # waiting for the page, not hitting the 403
 
@@ -206,8 +207,9 @@ def test_a_failed_link_shared_again_is_read_from_the_phone(client, monkeypatch):
     drain()
     assert db.fetchone("select status from items where id = %s", (item_id,))["status"] == "error"
 
-    again = client.post("/api/ingest", json={"url": URL, "page_follows": "1"}, headers=AUTH).json()
-    assert again["id"] == item_id and again["page_wanted"] is True
+    # shared from the Medium app with a broken Get URLs: only the text, which holds the link
+    again = client.post("/api/ingest", json={"url": "", "text": URL, "page_follows": "1"}, headers=AUTH).json()
+    assert again["id"] == item_id and again["page_wanted"] is True and again["page_url"] == URL
     _page_upload(client, item_id, ARTICLE_HTML.encode())
     drain()
     assert db.fetchone("select status from items where id = %s", (item_id,))["status"] == "ready"
@@ -234,3 +236,48 @@ def test_page_upload_errors(client):
     raw = client.post(f"/api/items/{item_id}/page", content=ARTICLE_HTML.encode(),
                       headers={**AUTH, "Content-Type": "text/html"})
     assert raw.json() == {"ok": True, "status": "pending"}
+
+
+def test_read_as_a_browser_before_anything_else(monkeypatch, clean_db):
+    """A 403 often answers Python's TLS fingerprint, not the address: the same request as a browser gets the page."""
+    asked = _fake_web(monkeypatch, {URL: (403, BOT_CHECK)})
+    monkeypatch.setattr(web, "_browser_get", lambda url: ARTICLE_HTML.encode() if url == URL else None)
+    ex = web.extract(URL, URL)
+    assert ex.metadata["via"] == "browser" and ex.title == "Les agents RAG en production"
+    assert not any(u.startswith("https://r.jina.ai/") for u in asked)            # no need for Jina
+
+    monkeypatch.setattr(web, "_browser_get", lambda url: BOT_CHECK.encode())    # a bot check doesn't count
+    _fake_web(monkeypatch, {URL: (403, BOT_CHECK), "https://r.jina.ai/": (200, {"data": {"content": PAGE_TEXT}})})
+    assert web.extract(URL, URL).metadata == {"via": "jina"}
+
+
+def test_the_error_says_the_phone_page_had_no_article(client, monkeypatch):
+    from app import db
+
+    monkeypatch.setattr(extractors, "extract_url", _blocked)
+    item_id = client.post("/api/ingest", json={"url": URL, "page_follows": "1"}, headers=AUTH).json()["id"]
+    _page_upload(client, item_id, BOT_CHECK.encode())
+    drain()
+    row = db.fetchone("select status, error from items where id = %s", (item_id,))
+    assert row["status"] == "error" and row["error"].startswith("medium.com refuse l'accès aux serveurs (403).")
+    assert "La page envoyée par ton téléphone est bien arrivée, mais sans l'article" in row["error"]
+
+
+def test_browser_profiles_are_tried_in_turn(monkeypatch):
+    from types import SimpleNamespace
+
+    from curl_cffi import requests as browser
+
+    tried = []
+
+    def get(url, impersonate, **kw):
+        tried.append(impersonate)
+        if impersonate == "chrome":
+            return SimpleNamespace(status_code=403, headers={"content-type": "text/html"}, content=BOT_CHECK.encode())
+        return SimpleNamespace(status_code=200, headers={"content-type": "text/html; charset=utf-8"},
+                               content=ARTICLE_HTML.encode())
+
+    monkeypatch.setattr(browser, "get", get)
+    assert BROWSER_GET(URL) == ARTICLE_HTML.encode() and tried == ["chrome", "safari"]
+    monkeypatch.setattr(browser, "get", lambda url, impersonate, **kw: (_ for _ in ()).throw(OSError("réseau")))
+    assert BROWSER_GET(URL) is None

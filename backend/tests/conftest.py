@@ -78,6 +78,14 @@ def billing_apis(monkeypatch):
     costs._cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def no_browser_fetch(monkeypatch):
+    """Reading a page "as a browser" (curl_cffi) never leaves the tests: a test fakes its answer when it needs one."""
+    from app.extractors import web
+
+    monkeypatch.setattr(web, "_browser_get", lambda url: None)
+
+
 @pytest.fixture
 def fake_llm(monkeypatch):
     """Remplace tous les appels à Claude par des réponses déterministes."""

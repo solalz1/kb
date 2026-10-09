@@ -165,8 +165,8 @@ def ingest(
     if url:
         info = urls.classify(url)
         clause, params = urls.dedupe_filter(info)
-        existing = db.fetchone(f"select id, status, user_note, space, metadata from items where {clause} limit 1",
-                               params)
+        existing = db.fetchone(
+            f"select id, status, user_note, space, metadata, input_url from items where {clause} limit 1", params)
         retried = False
         if existing and page and existing["status"] == "error":
             # shared again from Safari after the server couldn't read it: this time the phone sends the page
@@ -187,7 +187,8 @@ def ingest(
             if retried:
                 out["retried"] = True
             elif page_follows and not page and existing["status"] == "error" and info.kind == "web":
-                out["page_wanted"] = True          # failed before: the phone sends the page, which requeues it
+                # failed before: the phone fetches the page (at this address) and sends it, which requeues the item
+                out.update(page_wanted=True, page_url=existing["input_url"] or url)
             return out
         item_id = str(uuid.uuid4())
         if page:
@@ -203,7 +204,7 @@ def ingest(
         )
         _wake()
         out = {"id": str(row["id"]), "status": row["status"], "duplicate": False}
-        return {**out, "page_wanted": True} if wanted else out
+        return {**out, "page_wanted": True, "page_url": url} if wanted else out
 
     if text:
         return create_note(content=text, title=title, space=space, category=category, why=note)

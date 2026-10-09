@@ -165,7 +165,7 @@ def test_add_fetches_the_page_from_the_phone_when_asked(build, shortcuts):
     end = next(i for i, a in enumerate(actions) if ids[i] == "conditional"
                and a["WFWorkflowActionParameters"]["WFControlFlowMode"] == 2)
     assert ids.index("notification") < start < end == len(actions) - 1
-    assert ids[start + 1:end] == ["getvalueforkey", "downloadurl", "downloadurl"]
+    assert ids[start + 1:end] == ["getvalueforkey", "getvalueforkey", "downloadurl", "downloadurl"]
 
     params = [a["WFWorkflowActionParameters"] for a in actions]
     cond = params[start]
@@ -173,10 +173,10 @@ def test_add_fetches_the_page_from_the_phone_when_asked(build, shortcuts):
     asked = cond["WFInput"]["Variable"]["Value"]["OutputUUID"]
     assert next(p for p in params if p.get("UUID") == asked)["WFDictionaryKey"] == "page_wanted"
 
-    fetch, send = params[start + 2], params[start + 3]
-    shared_url = next(p for i, p in enumerate(params) if ids[i] == "getitemfromlist")["UUID"]
+    address, fetch, send = params[start + 2], params[start + 3], params[start + 4]
+    assert address["WFDictionaryKey"] == "page_url"          # the address the server resolved, not Get URLs
     assert fetch["WFHTTPMethod"] == "GET" and list(fetch["WFURL"]["Value"]["attachmentsByRange"].values())[0][
-        "OutputUUID"] == shared_url
+        "OutputUUID"] == address["UUID"]
     assert "iPhone" in _keys(fetch["WFHTTPHeaders"])["User-Agent"]["WFValue"]["Value"]["string"]
     url = send["WFURL"]["Value"]
     assert url["string"] == "https://kb.example.com/api/items/" + build.OBJECT + "/page"

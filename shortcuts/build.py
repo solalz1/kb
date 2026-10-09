@@ -170,7 +170,10 @@ def add_to_kb(base: str) -> dict:
     group = b.if_has_value(wanted)
     item = b.add("getvalueforkey", "Dictionary Value", custom_name="Élément", WFGetDictionaryValueType="Value",
                  WFDictionaryKey="id", WFInput=attachment(response))
-    page = b.add("downloadurl", "Contents of URL", custom_name="Page", WFURL=text(first), WFHTTPMethod="GET",
+    # the address the server resolved (from the link or the shared text), so this never depends on Get URLs
+    address = b.add("getvalueforkey", "Dictionary Value", custom_name="Adresse", WFGetDictionaryValueType="Value",
+                    WFDictionaryKey="page_url", WFInput=attachment(response))
+    page = b.add("downloadurl", "Contents of URL", custom_name="Page", WFURL=text(address), WFHTTPMethod="GET",
                  ShowHeaders=True, WFHTTPHeaders=fields(field("User-Agent", PHONE_UA),
                                                         field("Accept-Language", "fr-FR,fr;q=0.9,en;q=0.8")))
     b.add("downloadurl", "Contents of URL", WFURL=text(f"{base}/api/items/", item, "/page"), WFHTTPMethod="POST",
