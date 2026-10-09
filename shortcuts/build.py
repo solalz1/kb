@@ -33,6 +33,10 @@ GLYPHS = {"bookmark": 59670, "paperclip": 59794, "microphone": 59780}
 CATEGORIES = ["Principe", "Valeur", "Leçon", "Objectif", "Habitude", "Réflexion", "Journal", "Citation", "Ressource"]
 # "Où le ranger ?": sent as `category`; the API reads Veille / Perso as a space and the rest as a Perso category
 PLACES = ["Veille", "Perso", *CATEGORIES]
+HAS_ANY_VALUE = 100                    # WFCondition of an If: "has any value"
+# Pages fetched from the phone (sites that refuse servers) ask as Safari on an iPhone would
+PHONE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "Version/18.0 Mobile/15E148 Safari/604.1")
 
 
 def new_uuid() -> str:
@@ -95,6 +99,16 @@ class Builder:
         self.questions.append({"ActionIndex": len(self.actions) - 1, "Category": "Parameter",
                                "ParameterKey": parameter, "Text": question, "DefaultValue": default})
 
+    def if_has_value(self, ref: dict) -> str:
+        """Start an If block on "<ref> has any value"; close it with end_if(<the returned group>)."""
+        group = new_uuid()
+        self.add("conditional", with_uuid=False, GroupingIdentifier=group, WFControlFlowMode=0,
+                 WFCondition=HAS_ANY_VALUE, WFInput={"Type": "Variable", "Variable": attachment(ref)})
+        return group
+
+    def end_if(self, group: str) -> None:
+        self.add("conditional", GroupingIdentifier=group, WFControlFlowMode=2)
+
     def choose(self, prompt: str, items: list[str]) -> dict:
         """A List action followed by Choose from List: one tap instead of typing."""
         options = self.add("list", "List", WFItems=[{"WFItemType": TEXT, "WFValue": text(i)} for i in items])
@@ -132,7 +146,8 @@ def headers(token: dict) -> dict:
 
 
 def add_to_kb(base: str) -> dict:
-    """Share sheet, links and text: POST /api/ingest as JSON."""
+    """Share sheet, links and text: POST /api/ingest as JSON. For a site that refuses servers (Medium…), the API answers
+    `page_wanted`: the phone then fetches the page itself and sends it to POST /api/items/<id>/page."""
     b = Builder("Add To KB")
     token = b.token()
     urls = b.add("detect.link", "URLs", WFInput=attachment(SHORTCUT_INPUT))
@@ -143,10 +158,23 @@ def add_to_kb(base: str) -> dict:
     response = b.add("downloadurl", "Contents of URL", WFURL=f"{base}/api/ingest", WFHTTPMethod="POST",
                      ShowHeaders=True, WFHTTPHeaders=headers(token), WFHTTPBodyType="JSON",
                      WFJSONValues=fields(field("url", first), field("text", shared), field("note", why),
-                                         field("category", where)))
+                                         field("category", where), field("page_follows", "1")))
     message = b.add("getvalueforkey", "Dictionary Value", WFGetDictionaryValueType="Value",
                     WFDictionaryKey="message", WFInput=attachment(response))
     b.add("notification", WFNotificationActionBody=text(message))
+    # the share is saved and reported above; the rest only helps with sites that refuse the server
+    wanted = b.add("getvalueforkey", "Dictionary Value", custom_name="Page demandée", WFGetDictionaryValueType="Value",
+                   WFDictionaryKey="page_wanted", WFInput=attachment(response))
+    group = b.if_has_value(wanted)
+    item = b.add("getvalueforkey", "Dictionary Value", custom_name="Élément", WFGetDictionaryValueType="Value",
+                 WFDictionaryKey="id", WFInput=attachment(response))
+    page = b.add("downloadurl", "Contents of URL", custom_name="Page", WFURL=text(first), WFHTTPMethod="GET",
+                 ShowHeaders=True, WFHTTPHeaders=fields(field("User-Agent", PHONE_UA),
+                                                        field("Accept-Language", "fr-FR,fr;q=0.9,en;q=0.8")))
+    b.add("downloadurl", "Contents of URL", WFURL=text(f"{base}/api/items/", item, "/page"), WFHTTPMethod="POST",
+          ShowHeaders=True, WFHTTPHeaders=headers(token), WFHTTPBodyType="Form",
+          WFFormValues=fields(field("page", page, item_type=FILE)))
+    b.end_if(group)
     return b.build(color="red", glyph="bookmark", types=["ActionExtension"],
                    inputs=["WFURLContentItem", "WFSafariWebPageContentItem", "WFStringContentItem",
                            "WFRichTextContentItem"],

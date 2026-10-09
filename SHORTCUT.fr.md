@@ -50,6 +50,14 @@ App **Raccourcis** → **+** → nomme-le `Ajouter à ma KB`.
        - `category` = *Élément choisi* (étape 5), si tu as ajouté la liste : `Veille` et `Perso` choisissent l'espace, les autres une catégorie Perso
 7. Ajoute **Obtenir la valeur du dictionnaire** → clé `message` dans *Contenu de l'URL*.
 8. Ajoute **Afficher la notification** → *Valeur du dictionnaire*.
+9. Pour les sites qui refusent les serveurs (Medium…) : ajoute le champ `page_follows` = `1` au JSON de l'étape 6, puis
+   **Obtenir la valeur du dictionnaire** → clé `page_wanted` dans *Contenu de l'URL*, et **Si** *cette valeur*
+   **a une valeur quelconque** :
+   - **Obtenir la valeur du dictionnaire** → clé `id` dans *Contenu de l'URL* ;
+   - **Obtenir le contenu de l'URL** → *Élément de la liste* (étape 3), méthode **GET** (ton téléphone lit la page lui-même) ;
+   - **Obtenir le contenu de l'URL** → `https://kb.example.com/api/items/` *id* `/page`, méthode **POST**, même
+     en-tête `Authorization`, corps **Formulaire** avec un champ *Fichier* `page` = la page que tu viens d'obtenir.
+   - **Fin du si**. L'API ne le demande que pour les sites qui la refusent : les autres partages n'attendent pas.
 
 Test : dans l'app X, touche Partager sur un tweet → **Ajouter à ma KB** → « Ajouté à ta KB ✓ ».
 
@@ -104,6 +112,9 @@ Test : « Dis Siri, Note perso », dicte « Je ne réponds plus aux mails après
 
 - **Threads X** : partage le **dernier** tweet d'un thread. Tout ce qui précède est récupéré. Pour un thread de moins de 7 jours, le premier tweet suffit aussi.
 - **Texte sélectionné** dans Safari : sélectionne le passage, puis Partager → **Ajouter à ma KB**. L'extrait est gardé avec la page.
+- **Sites qui refusent les serveurs** (Medium…) : partage normalement, depuis l'app du site ou Safari. Le Raccourci
+  fait lire la page par ton téléphone et l'envoie. Articles réservés aux membres : le texte complet ne vient que de
+  Safari, connecté.
 - **Idée au vol** : lance **Ajouter à ma KB** sans rien partager (depuis l'écran d'accueil ou Siri) : il prend le contenu du presse-papiers. Tu peux aussi dicter une note dans l'app.
 - Pour aller plus vite, supprime l'étape « Pourquoi tu gardes ça ? ». Tu pourras ajouter la note plus tard dans la fiche.
 - **Ranger dans Perso** : les Raccourcis générés demandent « Où le ranger ? » (Veille, Perso ou une catégorie Perso). Sans cette liste, écris `#perso` dans la note « Pourquoi tu gardes ça ? » (ex. `#perso #ressource à relire avant mes objectifs 2027`). L'élément va dans l'espace Perso, et un hashtag de catégorie (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`) le range directement. Ces hashtags sont retirés de la note.

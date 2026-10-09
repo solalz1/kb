@@ -21,15 +21,53 @@ MAX_HTML_BYTES = 15 * 1024 * 1024
 MAX_FILE_BYTES = 200 * 1024 * 1024
 THIN = 400
 BLOCKED = (401, 403, 451, 999)          # the site refuses the server (bot protection, datacenter IPs, region)
+# Sites known to refuse servers: the Shortcut fetches their pages from the phone instead (see pipeline.ingest).
+# Others are learned the first time they answer one of BLOCKED.
+KNOWN_BLOCKERS = ("medium.com",)
+BLOCKERS_SETTING = "blocked_hosts"
 # what a bot check or a block page says instead of the article
 BLOCK_PAGE = re.compile(r"just a moment|enable javascript and cookies|attention required|verify you are human|"
                         r"access denied|are you a robot|checking your browser", re.I)
+
+
+def _host(url: str) -> str:
+    host = urlsplit(url).netloc.lower().split("@")[-1].split(":")[0]
+    return host.removeprefix("www.")
+
+
+def blocks_servers(url: str) -> bool:
+    """Whether this site refuses the server: a known one (and its subdomains), or one that already did."""
+    host = _host(url)
+    if any(host == h or host.endswith("." + h) for h in KNOWN_BLOCKERS):
+        return True
+    from .. import db
+
+    try:
+        row = db.fetchone("select value from kb_settings where key = %s", (BLOCKERS_SETTING,))
+    except Exception:  # noqa: BLE001 — without the list, the server just tries first
+        return False
+    return bool(row) and host in (row["value"] or {})
+
+
+def _remember_blocker(url: str, status: int) -> None:
+    from datetime import datetime, timezone
+
+    from .. import db
+
+    try:
+        db.execute(
+            """insert into kb_settings (key, value) values (%s, %s)
+               on conflict (key) do update set value = kb_settings.value || excluded.value, updated_at = now()""",
+            (BLOCKERS_SETTING, db.jsonb({_host(url): {"status": status, "at": datetime.now(timezone.utc).isoformat()}})))
+    except Exception:  # noqa: BLE001
+        log.warning("Site bloquant non enregistré : %s", url, exc_info=True)
 
 
 def extract(url: str, canonical: str) -> Extracted:
     try:
         with http_client(timeout=60) as c, c.stream("GET", url) as r:
             if r.status_code in BLOCKED:
+                _remember_blocker(url, r.status_code)
                 return _fallback(url, canonical, status=r.status_code)
             if r.status_code == 404:
                 raise ExtractionError("Page introuvable (404)")
@@ -171,6 +209,6 @@ def _fallback(url: str, canonical: str, *, status: int | None = None, reason: st
     if status:
         raise ExtractionError(
             f"{host} refuse l'accès aux serveurs ({status}), et ni Jina Reader ni les archives du web n'ont la page. "
-            "Ouvre-la dans Safari et partage-la de là : le Raccourci envoie alors le texte affiché sur ton téléphone. "
+            "Partage-la de nouveau avec le Raccourci : il la lira depuis ton téléphone. "
             "Ou colle le lien suivi du texte de l'article dans Ajouter.")
     raise RuntimeError(f"Page inaccessible : {reason}")

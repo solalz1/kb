@@ -13,6 +13,7 @@ from . import db, embeddings, llm, notion, storage, urls
 from .chunking import chunk_text
 from .config import get_settings
 from .extractors import ExtractionError, Extracted, extract_item
+from .extractors.web import blocks_servers as web_blocks_servers
 from .taxonomy import (KIND_LABELS, category_from_word, category_label, normalize_category, normalize_space,
                        space_from_word)
 
@@ -23,6 +24,8 @@ __all__ = ["KIND_LABELS", "clean_tags", "ingest", "create_note", "process", "fai
 # A shared text this long that comes with a link is the page itself (the Safari share sheet attaches the page's text),
 # not a snippet: it's kept aside and read when the server can't read the page (see extractors.extract_item).
 PAGE_TEXT_MIN = 2000
+# How long an item waits for the page the phone fetches (POST /api/items/<id>/page) before the server tries itself.
+PAGE_WAIT_SECONDS = 60
 
 INGEST_KIND = {"tweet": "tweet", "youtube": "youtube", "paper": "paper", "repo": "repo", "media": "video", "web": "article"}
 # Types dont le titre d'origine est fiable (sinon on prend celui proposé par Claude)
@@ -111,7 +114,10 @@ def ingest(
     space: str | None = None,
     category: str | None = None,
     title: str | None = None,
+    page_follows: bool = False,
 ) -> dict:
+    """`page_follows`: the client (the Shortcut) can fetch the page from the phone. For a site that refuses the server,
+    the answer then says `page_wanted`, and the item waits a little for POST /api/items/<id>/page."""
     url = (url or "").strip() or None
     text = (text or "").strip() or None
     note = (note or "").strip() or None
@@ -178,19 +184,26 @@ def ingest(
                 db.execute("update items set space = 'perso', category = coalesce(%s, category) where id = %s",
                            (category, existing["id"]))
             out = {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
-            return {**out, "retried": True} if retried else out
+            if retried:
+                out["retried"] = True
+            elif page_follows and not page and existing["status"] == "error" and info.kind == "web":
+                out["page_wanted"] = True          # failed before: the phone sends the page, which requeues it
+            return out
         item_id = str(uuid.uuid4())
         if page:
             metadata["page_path"] = _save_page(item_id, page)
+        wanted = page_follows and not page and info.kind == "web" and web_blocks_servers(url)
         row = db.fetchone(
             """insert into items (id, input_url, input_text, user_note, source_url, kind, title, space, category,
-                                  metadata)
-               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id, status""",
+                                  metadata, next_attempt_at)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       case when %s then now() + make_interval(secs => %s) end) returning id, status""",
             (item_id, url, text, note, info.canonical, INGEST_KIND.get(info.kind), title, space, category,
-             db.jsonb(metadata)),
+             db.jsonb(metadata), wanted, PAGE_WAIT_SECONDS),
         )
         _wake()
-        return {"id": str(row["id"]), "status": row["status"], "duplicate": False}
+        out = {"id": str(row["id"]), "status": row["status"], "duplicate": False}
+        return {**out, "page_wanted": True} if wanted else out
 
     if text:
         return create_note(content=text, title=title, space=space, category=category, why=note)
@@ -239,6 +252,36 @@ def create_note(
 
 def _save_page(item_id: str, page: str) -> str:
     return storage.upload(f"pages/{item_id}.txt", page[:500_000].encode("utf-8"), "text/plain; charset=utf-8")
+
+
+MAX_PAGE_BYTES = 15 * 1024 * 1024
+
+
+def attach_page(item_id: str, html: bytes) -> dict:
+    """The page as the phone fetched it (a site that refuses the server): kept, and the item is read (again) now."""
+    try:
+        uuid.UUID(item_id)
+    except ValueError:
+        raise LookupError("Élément introuvable") from None
+    if not html:
+        raise ValueError("Page vide")
+    if len(html) > MAX_PAGE_BYTES:
+        raise ValueError("Page trop volumineuse")
+    row = db.fetchone("select status, metadata from items where id = %s", (item_id,))
+    if not row:
+        raise LookupError("Élément introuvable")
+    path = storage.upload(f"pages/{item_id}.html", html, "text/html")
+    meta = {**(db.loads(row["metadata"]) or {}), "page_html_path": path}
+    # pending: start now instead of waiting; processing or failed: start again with the page (a run in progress sees
+    # its item changed and drops its result); ready: read again only if the server got next to nothing
+    redo = row["status"] in ("pending", "processing", "error") or bool(meta.get("thin_content"))
+    if redo:
+        db.execute("""update items set metadata = %s, status = 'pending', attempts = 0, error = null,
+                            next_attempt_at = null, locked_at = null where id = %s""", (db.jsonb(meta), item_id))
+        _wake()
+    else:
+        db.execute("update items set metadata = %s where id = %s", (db.jsonb(meta), item_id))
+    return {"ok": True, "status": "pending" if redo else row["status"]}
 
 
 def _wake() -> None:
