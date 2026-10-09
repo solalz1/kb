@@ -1,12 +1,15 @@
-"""Pages web : articles (trafilatura, Jina Reader en secours) et aiguillage par type de contenu."""
+"""Pages web : articles (trafilatura ; Jina Reader puis la Wayback Machine quand le site refuse le serveur) et
+aiguillage par type de contenu."""
 
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
 import trafilatura
 
 from ..config import get_settings
@@ -17,31 +20,32 @@ log = logging.getLogger(__name__)
 MAX_HTML_BYTES = 15 * 1024 * 1024
 MAX_FILE_BYTES = 200 * 1024 * 1024
 THIN = 400
+BLOCKED = (401, 403, 451, 999)          # the site refuses the server (bot protection, datacenter IPs, region)
+# what a bot check or a block page says instead of the article
+BLOCK_PAGE = re.compile(r"just a moment|enable javascript and cookies|attention required|verify you are human|"
+                        r"access denied|are you a robot|checking your browser", re.I)
 
 
 def extract(url: str, canonical: str) -> Extracted:
-    with http_client(timeout=60) as c:
-        try:
-            with c.stream("GET", url) as r:
-                if r.status_code in (401, 403, 451) or r.status_code == 999:
-                    return _jina_or_fail(url, canonical, f"accès refusé ({r.status_code})")
-                if r.status_code == 404:
-                    raise ExtractionError("Page introuvable (404)")
-                r.raise_for_status()
-                ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
-                final_url = str(r.url)
-                limit = MAX_HTML_BYTES if "html" in ctype or not ctype else MAX_FILE_BYTES
-                data = bytearray()
-                for chunk in r.iter_bytes():
-                    data.extend(chunk)
-                    if len(data) > limit:
-                        raise ExtractionError("Fichier trop volumineux")
-                data = bytes(data)
-        except ExtractionError:
-            raise
-        except Exception as exc:
-            log.warning("Téléchargement direct impossible (%s), essai via Jina Reader", exc)
-            return _jina_or_fail(url, canonical, str(exc))
+    try:
+        with http_client(timeout=60) as c, c.stream("GET", url) as r:
+            if r.status_code in BLOCKED:
+                return _fallback(url, canonical, status=r.status_code)
+            if r.status_code == 404:
+                raise ExtractionError("Page introuvable (404)")
+            r.raise_for_status()
+            ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
+            final_url = str(r.url)
+            limit = MAX_HTML_BYTES if "html" in ctype or not ctype else MAX_FILE_BYTES
+            data = bytearray()
+            for chunk in r.iter_bytes():
+                data.extend(chunk)
+                if len(data) > limit:
+                    raise ExtractionError("Fichier trop volumineux")
+            data = bytes(data)
+    except httpx.HTTPError as exc:
+        log.warning("Téléchargement direct impossible (%s), essai via Jina Reader et la Wayback Machine", exc)
+        return _fallback(url, canonical, reason=str(exc))
 
     filename = Path(urlsplit(final_url).path).name or "fichier"
     if ctype == "application/pdf" or data[:5] == b"%PDF-":
@@ -73,8 +77,9 @@ def extract(url: str, canonical: str) -> Extracted:
     return ex
 
 
-def extract_html(html: str | bytes, url: str, canonical: str) -> Extracted:
-    """trafilatura accepte aussi des bytes et détecte l'encodage lui-même."""
+def extract_html(html: str | bytes, url: str, canonical: str, *, jina: bool = True) -> Extracted:
+    """trafilatura accepte aussi des bytes et détecte l'encodage lui-même. `jina` : relire une page trop maigre via
+    Jina Reader."""
     doc = trafilatura.bare_extraction(html, url=url, with_metadata=True, include_tables=True, include_comments=False)
     text = trafilatura.extract(
         html, url=url, output_format="markdown", include_tables=True, include_comments=False, include_links=False
@@ -83,11 +88,11 @@ def extract_html(html: str | bytes, url: str, canonical: str) -> Extracted:
     description = getattr(doc, "description", None) if doc else None
     host = urlsplit(canonical).netloc
 
-    if len(text) < THIN:
-        jina = _jina(url)
-        if jina and len(jina.get("content", "")) > len(text):
-            text = jina["content"]
-            title = title or jina.get("title")
+    if len(text) < THIN and jina:
+        read = _jina(url)
+        if read and len(read.get("content", "")) > len(text) and not _blocked(read["content"]):
+            text = read["content"]
+            title = title or read.get("title")
     if len(text) < THIN and description and description not in text:
         text = (text + "\n\n" + description).strip()
 
@@ -127,9 +132,45 @@ def _jina(url: str) -> dict | None:
         return None
 
 
-def _jina_or_fail(url: str, canonical: str, reason: str) -> Extracted:
-    j = _jina(url)
-    if j and len(j["content"]) > 100:
-        return Extracted(kind="article", title=j.get("title"), content=j["content"], source_url=canonical,
+def _blocked(text: str) -> bool:
+    """A bot check or a block page rather than the article."""
+    return len(text) < 3000 and bool(BLOCK_PAGE.search(text))
+
+
+def _wayback(url: str, canonical: str) -> Extracted | None:
+    """The latest copy of the page in the Internet Archive's Wayback Machine, if it has one."""
+    try:
+        with http_client(timeout=30) as c:
+            r = c.get("https://archive.org/wayback/available", params={"url": url})
+            snap = ((r.json().get("archived_snapshots") or {}).get("closest") or {}) if r.status_code == 200 else {}
+            if not snap.get("available") or not snap.get("timestamp"):
+                return None
+            page = c.get(f"https://web.archive.org/web/{snap['timestamp']}id_/{url}")   # id_ : the page as archived
+        if page.status_code >= 400:
+            return None
+        ex = extract_html(page.content, url, canonical, jina=False)
+    except Exception:
+        log.warning("Wayback Machine indisponible", exc_info=True)
+        return None
+    if ex.metadata.get("thin_content") or _blocked(ex.content):
+        return None
+    ex.metadata.update({"via": "wayback", "archived_at": snap["timestamp"]})
+    return ex
+
+
+def _fallback(url: str, canonical: str, *, status: int | None = None, reason: str = "") -> Extracted:
+    """The server couldn't read the page itself: Jina Reader, then the Wayback Machine."""
+    read = _jina(url)
+    if read and len(read["content"]) > 100 and not _blocked(read["content"]):
+        return Extracted(kind="article", title=read.get("title"), content=read["content"], source_url=canonical,
                          site_name=urlsplit(canonical).netloc, metadata={"via": "jina"})
+    archived = _wayback(url, canonical)
+    if archived:
+        return archived
+    host = urlsplit(canonical).netloc
+    if status:
+        raise ExtractionError(
+            f"{host} refuse l'accès aux serveurs ({status}), et ni Jina Reader ni les archives du web n'ont la page. "
+            "Ouvre-la dans Safari et partage-la de là : le Raccourci envoie alors le texte affiché sur ton téléphone. "
+            "Ou colle le lien suivi du texte de l'article dans Ajouter.")
     raise RuntimeError(f"Page inaccessible : {reason}")

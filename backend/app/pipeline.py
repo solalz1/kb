@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 
 __all__ = ["KIND_LABELS", "clean_tags", "ingest", "create_note", "process", "fail", "reembed_card"]
 
+# A shared text this long that comes with a link is the page itself (the Safari share sheet attaches the page's text),
+# not a snippet: it's kept aside and read when the server can't read the page (see extractors.extract_item).
+PAGE_TEXT_MIN = 2000
+
 INGEST_KIND = {"tweet": "tweet", "youtube": "youtube", "paper": "paper", "repo": "repo", "media": "video", "web": "article"}
 # Types dont le titre d'origine est fiable (sinon on prend celui proposé par Claude)
 KEEP_SOURCE_TITLE = {"article", "youtube", "video", "audio", "paper", "repo", "pdf"}
@@ -30,13 +34,16 @@ KEEP_SOURCE_TITLE = {"article", "youtube", "video", "audio", "paper", "repo", "p
 # ---------------------------------------------------------------------------
 
 def _primary_url(text: str | None) -> str | None:
-    """Une URL accompagnée d'un court texte (partage depuis une app) compte comme un lien."""
+    """Une URL accompagnée d'un court texte (partage depuis une app) compte comme un lien. Un lien seul sur la
+    première ligne suivi d'un long texte aussi : c'est un article collé avec son lien (site qui bloque le serveur)."""
     if not text:
         return None
     found = urls.find_urls(text)
     if len(found) == 1 and len(text.replace(found[0], "").strip()) < 200:
         return found[0]
-    return None
+    first, _, rest = text.strip().partition("\n")
+    link = urls.only_url(first)
+    return link if link and len(rest.strip()) > PAGE_TEXT_MIN else None
 
 
 def _safe_filename(name: str) -> str:
@@ -126,8 +133,10 @@ def ingest(
 
     if not url and not file and space != "perso":
         url = _primary_url(text)
-    if text and url and (text.strip() == url or len(text) > 2000):
-        # le partage d'une page Safari peut joindre tout le texte de la page : seul un court extrait est utile
+    page = None
+    if text and url and (text.strip() == url or len(text) > PAGE_TEXT_MIN):
+        # the Safari share sheet can attach the whole text of the page: kept aside, used if the site blocks the server
+        page = text if len(text) > PAGE_TEXT_MIN else None
         text = None
     metadata = {"manual_title": True} if title else {}
 
@@ -150,7 +159,17 @@ def ingest(
     if url:
         info = urls.classify(url)
         clause, params = urls.dedupe_filter(info)
-        existing = db.fetchone(f"select id, status, user_note, space from items where {clause} limit 1", params)
+        existing = db.fetchone(f"select id, status, user_note, space, metadata from items where {clause} limit 1",
+                               params)
+        retried = False
+        if existing and page and existing["status"] == "error":
+            # shared again from Safari after the server couldn't read it: this time the phone sends the page
+            meta = {**(db.loads(existing["metadata"]) or {}), "page_path": _save_page(str(existing["id"]), page)}
+            db.execute("""update items set metadata = %s, status = 'pending', attempts = 0, error = null,
+                                next_attempt_at = null, locked_at = null where id = %s""",
+                       (db.jsonb(meta), existing["id"]))
+            existing["status"], retried = "pending", True
+            _wake()
         if existing:
             if note and note not in (existing["user_note"] or ""):
                 merged = f"{existing['user_note']}\n{note}" if existing["user_note"] else note
@@ -158,11 +177,17 @@ def ingest(
             if space == "perso" and existing["space"] != "perso":   # repartagé exprès vers Perso : on le déplace
                 db.execute("update items set space = 'perso', category = coalesce(%s, category) where id = %s",
                            (category, existing["id"]))
-            return {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
+            out = {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
+            return {**out, "retried": True} if retried else out
+        item_id = str(uuid.uuid4())
+        if page:
+            metadata["page_path"] = _save_page(item_id, page)
         row = db.fetchone(
-            """insert into items (input_url, input_text, user_note, source_url, kind, title, space, category, metadata)
-               values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning id, status""",
-            (url, text, note, info.canonical, INGEST_KIND.get(info.kind), title, space, category, db.jsonb(metadata)),
+            """insert into items (id, input_url, input_text, user_note, source_url, kind, title, space, category,
+                                  metadata)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id, status""",
+            (item_id, url, text, note, info.canonical, INGEST_KIND.get(info.kind), title, space, category,
+             db.jsonb(metadata)),
         )
         _wake()
         return {"id": str(row["id"]), "status": row["status"], "duplicate": False}
@@ -210,6 +235,10 @@ def create_note(
     )
     _wake()
     return {"id": str(row["id"]), "status": row["status"], "duplicate": False}
+
+
+def _save_page(item_id: str, page: str) -> str:
+    return storage.upload(f"pages/{item_id}.txt", page[:500_000].encode("utf-8"), "text/plain; charset=utf-8")
 
 
 def _wake() -> None:
@@ -440,7 +469,8 @@ def link_item(item_id: str, fields: dict) -> None:
 def fail(item: dict, exc: Exception) -> None:
     s = get_settings()
     permanent = isinstance(exc, ExtractionError) or item.get("attempts", 0) >= s.max_attempts
-    message = f"{type(exc).__name__}: {exc}"[:1000]
+    # an ExtractionError is written for the user (what happened, what to do); anything else keeps its type for debugging
+    message = (str(exc) if isinstance(exc, ExtractionError) else f"{type(exc).__name__}: {exc}")[:1000]
     # sans effet si l'élément a été réécrit ou relancé pendant le traitement (il est déjà de nouveau en file)
     still_ours = "status = 'processing' and locked_at is not distinct from %s"
     if permanent:

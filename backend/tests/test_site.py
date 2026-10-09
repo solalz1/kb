@@ -299,6 +299,26 @@ def test_add_a_link(site):
     expect(page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")).to_be_visible()
 
 
+def test_add_a_blocked_article_with_its_text(site, monkeypatch):
+    """A site that refuses the server (Medium): pasting the link then the article's text in Ajouter still saves it."""
+    from app import db
+    from app.extractors import ExtractionError
+
+    def blocked(url):
+        raise ExtractionError("medium.com refuse l'accès aux serveurs (403).")
+
+    monkeypatch.setattr(extractors, "extract_url", blocked)
+    page = site("/add")
+    article = "Cinq astuces pour écrire de meilleures instructions à Claude, une par paragraphe. " * 40
+    page.get_by_label("Lien ou note").fill(f"https://medium.com/ex-publication/cinq-astuces-1a2b3c4d5e6f\n\n{article}")
+    page.get_by_role("button", name="Ajouter à la KB").click()
+    expect(page.get_by_role("status")).to_contain_text("Ajouté à ta KB ✓")
+    drain()
+    row = db.fetchone("select status, kind, source_url, content from items")
+    assert row["status"] == "ready" and row["kind"] == "article"
+    assert row["source_url"].startswith("https://medium.com/ex-publication/cinq-astuces") and "meilleures instructions" in row["content"]
+
+
 def test_upload_a_file(site, tmp_path):
     page = site("/add")
     pdf = tmp_path / "notes.txt"
@@ -606,8 +626,10 @@ def test_thinking_can_be_turned_off_in_settings(site):
 def test_generate_button_on_the_digest(site):
     from app import db
 
+    # today as the page sees it (Paris), not the database's UTC date: they differ between 22:00 and midnight UTC
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()
     db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
-                  values ('daily', current_date, current_date, 'ready', 'Une journée.', '{"entries": []}')""")
+                  values ('daily', %s, %s, 'ready', 'Une journée.', '{"entries": []}')""", (today, today))
     page = site("/digest")
     button = page.locator(".digest-bar").get_by_role("button", name="Générer maintenant")
     expect(button).to_be_visible()
