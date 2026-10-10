@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { EDGE, edgeSwipe } from "../motion";
 
 /** One action revealed behind a card. */
 export type SwipeAction = {
@@ -13,6 +14,8 @@ export type SwipeSide = "start" | "end" | null;
 
 type Props = {
   children: ReactNode;
+  /** a stable id, for lists whose cards glide to their new place (motion.ts useFlip) */
+  flipId?: string;
   /** Revealed by swiping right. A long swipe runs it. */
   start?: SwipeAction;
   /** Revealed by swiping left, left to right. A long swipe runs the last one (the one at the edge). */
@@ -31,7 +34,7 @@ const BEYOND = 56;      // …and always well past the open buttons
  * Swipe a card left or right to reveal actions, as in Mail on iPhone. Touch and pen only: with a mouse the card
  * stays a plain link (its page has the same actions). Vertical moves are left to the browser (touch-action: pan-y).
  */
-export function SwipeRow({ children, start, end = [], open, onOpenChange }: Props) {
+export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange }: Props) {
   const row = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ id: number; x: number; y: number; base: number; mode: "pending" | "swipe" | "scroll" } | null>(null);
   const swiped = useRef(false);            // swallow the click that ends a swipe
@@ -82,7 +85,11 @@ export function SwipeRow({ children, start, end = [], open, onOpenChange }: Prop
     return Math.max(-w, Math.min(w, v));
   };
 
+  const ranAt = useRef(0);
   const run = (action: SwipeAction, side: "start" | "end") => {
+    // one action per gesture: the click a finger's lift sends may land on the button that grew under it
+    if (Date.now() - ranAt.current < 600) return;
+    ranAt.current = Date.now();
     if (side === "end") {
       // the card slides away before the list drops it (or comes back if the action failed)
       leavingRef.current = true;
@@ -104,6 +111,7 @@ export function SwipeRow({ children, start, end = [], open, onOpenChange }: Prop
   const onPointerDown = (e: React.PointerEvent) => {
     swiped.current = false;
     if (e.pointerType === "mouse" || leavingRef.current) return;
+    if (e.clientX <= EDGE && edgeSwipe()) return;      // the screen's left edge takes the page back (Gestures.tsx)
     gesture.current = { id: e.pointerId, x: e.clientX, y: e.clientY, base: offsetRef.current, mode: "pending" };
   };
 
@@ -160,7 +168,7 @@ export function SwipeRow({ children, start, end = [], open, onOpenChange }: Prop
   const shown = (side: "start" | "end") => open === side || (side === "start" ? offset > 0 : offset < 0);
 
   return (
-    <div ref={row} className={`swipe${dragging ? " dragging" : ""}${leaving ? " leaving" : ""}`}
+    <div ref={row} className={`swipe${dragging ? " dragging" : ""}${leaving ? " leaving" : ""}`} data-flip={flipId}
          onPointerDown={onPointerDown} onPointerMove={onPointerMove}
          onPointerUp={(e) => finish(e, false)} onPointerCancel={(e) => finish(e, true)}
          onClickCapture={onClickCapture}>

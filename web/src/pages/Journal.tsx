@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { api, type JournalEntry } from "../api";
+import { useQuery } from "../cache";
+import { Lines } from "../components/Skeleton";
 import { lang, locale, t } from "../i18n";
 import { IconBack, IconEdit, IconNext, IconPrev, IconSpinner, IconTrash } from "../icons";
 import { useDesktop } from "../layout";
+import { Link, useNavigate } from "../nav";
+import { forgetItem, keys } from "../queries";
 
 /** "2026-10-07" for a local date (never toISOString: that would be the UTC day). */
 const keyOf = (d: Date) =>
@@ -42,8 +46,6 @@ export default function Journal() {
   const [todayKey] = useState(() => keyOf(new Date()));
   const selected = isDayKey(params.day) ? params.day : todayKey;
   const [month, setMonth] = useState(() => { const d = parseKey(selected); return new Date(d.getFullYear(), d.getMonth(), 1); });
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [entries, setEntries] = useState<JournalEntry[] | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,29 +53,13 @@ export default function Journal() {
   const [wholeMonth, setWholeMonth] = useState(false);
   const monthKey = keyOf(month).slice(0, 7);
 
-  // Only the latest request of each kind may update the page: clicking through days or months quickly must not let
-  // a slow, older answer replace the one for the day on screen.
-  const monthReq = useRef(0);
-  const dayReq = useRef(0);
-  const loadMonth = useCallback(() => {
-    const n = ++monthReq.current;
-    api.journalMonth(monthKey)
-      .then((m) => { if (n === monthReq.current) setCounts(m.days); })
-      .catch((e) => { if (n === monthReq.current) setError(e.message); });
-  }, [monthKey]);
-  const loadDay = useCallback(() => {
-    const n = ++dayReq.current;
-    api.journalDay(selected)
-      .then((d) => { if (n === dayReq.current) setEntries(d.entries); })
-      .catch((e) => { if (n === dayReq.current) setError(e.message); });
-  }, [selected]);
-
-  // after a change, reload what is on screen now (the user may have moved to another day meanwhile)
-  const latest = useRef({ loadDay, loadMonth });
-  latest.current = { loadDay, loadMonth };
-
-  useEffect(() => { loadMonth(); }, [loadMonth]);
-  useEffect(() => { setEntries(null); setEditing(null); setError(""); loadDay(); }, [loadDay]);
+  // Each day and month is cached on its own: the page shows the one on screen, whatever answers arrive late; after a
+  // change, what is on screen reloads by itself.
+  const monthQuery = useQuery(keys.journalMonth(monthKey), () => api.journalMonth(monthKey), { keep: true });
+  const counts = monthQuery.data?.days ?? {};
+  const dayQuery = useQuery(keys.journalDay(selected), () => api.journalDay(selected));
+  const entries = dayQuery.data?.entries ?? null;
+  useEffect(() => { setEditing(null); setError(""); }, [selected]);
   // following a link to another month's day shows that month
   useEffect(() => {
     const d = parseKey(selected);
@@ -90,7 +76,7 @@ export default function Journal() {
     if (at < 0) return weeks;
     return weeks.slice(Math.max(0, at - 1), Math.max(0, at - 1) + 2);
   }, [weeks, desktop, wholeMonth, selected]);
-  const pick = (key: string) => navigate(key === todayKey ? "/journal" : `/journal/${key}`);
+  const pick = (key: string) => navigate(key === todayKey ? "/journal" : `/journal/${key}`, { viewTransition: false });
   const shiftMonth = (delta: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + delta, 1));
   const goToday = () => { setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); pick(todayKey); };
 
@@ -99,8 +85,7 @@ export default function Journal() {
     setError("");
     try {
       await fn();
-      latest.current.loadDay();
-      latest.current.loadMonth();
+      await Promise.all([dayQuery.refresh(), monthQuery.refresh()]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -126,7 +111,7 @@ export default function Journal() {
 
   const remove = (entry: JournalEntry) => {
     if (busy || !window.confirm(t("Supprimer cette note du journal ?"))) return;
-    run(() => api.remove(entry.id));
+    run(() => api.remove(entry.id).then(() => forgetItem(entry.id)));
   };
 
   const day = parseKey(selected);
@@ -186,7 +171,7 @@ export default function Journal() {
           </div>
 
           {entries === null ? (
-            <div className="status-line"><IconSpinner /> {t("Chargement…")}</div>
+            dayQuery.error ? null : <Lines n={2} widths={["90%", "60%"]} />
           ) : entries.length > 0 && (
             <ol className="entries">
               {entries.map((e) => (
@@ -234,7 +219,7 @@ export default function Journal() {
               <span className="hint kbd-hint desk-only">{t("⌘ + Entrée pour enregistrer")}</span>
             </div>
           </form>
-          {error && <div className="error-box">{error}</div>}
+          {(error || dayQuery.error || monthQuery.error) && <div className="error-box">{error || dayQuery.error || monthQuery.error}</div>}
         </section>
       </div>
     </div>

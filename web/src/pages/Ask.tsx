@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { api, streamChat, type ChatMode, type ModelOption, type SourceCard } from "../api";
+import { useSearchParams } from "react-router-dom";
+import { api, streamChat, type ChatMode, type ItemDetail, type SourceCard } from "../api";
+import { cache, useQuery } from "../cache";
 import { claudePrompt, openInClaude } from "../claude";
 import { localized, t, tServer } from "../i18n";
 import { IconNext, IconReset, IconSend, IconSpinner } from "../icons";
 import { useDesktop } from "../layout";
+import { Link } from "../nav";
+import { keys } from "../queries";
 import { renderAnswer } from "../markdown";
 import { headLabel } from "../perso";
 
@@ -69,16 +72,10 @@ export default function Ask() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [model, setModel] = useState(readModel());
-
-  useEffect(() => {
-    api.models().then((list) => {
-      setModels(list);
-      // the remembered choice stays only while it's still offered
-      setModel((cur) => (list.some((m) => m.id === cur) ? cur : list.find((m) => m.default)?.id ?? ""));
-    }).catch(() => {});
-  }, []);
+  const models = useQuery(keys.models, api.models, { maxAge: 10 * 60_000 }).data ?? [];
+  const [picked, setModel] = useState(readModel());
+  // the remembered choice stays only while it's still offered
+  const model = !models.length || models.some((m) => m.id === picked) ? picked : models.find((m) => m.default)?.id ?? "";
   const modelInfo = models.find((m) => m.id === model);
   const pickModel = (id: string) => { setModel(id); saveModel(id); };
   const abort = useRef<AbortController | null>(null);
@@ -89,7 +86,10 @@ export default function Ask() {
 
   useEffect(() => {
     const about = params.get("about");
-    if (about) api.item(about).then((it) => setInput(t("À propos de « {title} » : ", { title: localized(it).title ?? "" }))).catch(() => {});
+    if (!about) return;
+    const known = cache.peek<ItemDetail>(keys.item(about));
+    (known ? Promise.resolve(known) : api.item(about, false))
+      .then((it) => setInput(t("À propos de « {title} » : ", { title: localized(it).title ?? "" }))).catch(() => {});
   }, [params]);
 
   useEffect(() => {

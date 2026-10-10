@@ -1,44 +1,63 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Folder, type ItemDetail, type Space } from "../api";
+import { useParams } from "react-router-dom";
+import { api, type ItemDetail, type Space } from "../api";
+import { cache, useQuery } from "../cache";
 import { openInClaude } from "../claude";
 import { Embed } from "../components/Embed";
+import { Lines, PageSkeleton } from "../components/Skeleton";
 import { IconBack, IconDownload, IconExternal, IconMore, IconPin, IconSpinner } from "../icons";
 import { fullDate, genreLabel, hostOf, sourceLabel } from "../kinds";
 import { localized, locale, t, tServer } from "../i18n";
 import { useDesktop } from "../layout";
 import { renderMarkdown } from "../markdown";
+import { Link, useNavigate } from "../nav";
 import { CATEGORIES, headLabel, isEditableNote, spaceHome } from "../perso";
+import { dropItem, forgetItem, keys, patchItem, summaryOf } from "../queries";
 
-const PREVIEW = 1400;
-const shortDate = (iso: string) => new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "long" });     // characters of the full content shown before "show everything"
+const PREVIEW = 1400;     // characters of the full content shown before "show everything"
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "long" });
+
+/** The card as a list knows it, while the whole item loads: the page opens with its title and summary at once. */
+const fromSummary = (id: string): ItemDetail | undefined => {
+  const s = summaryOf(id);
+  return s && {
+    content: null, key_points: [], entities: [], use_cases: [], genre: null, metadata: {}, author_url: null, file_url: null,
+    file_name: null, input_url: null, links: [], actions: [], language: null, ...s,
+  };
+};
 
 export default function ItemPage() {
   const { id = "" } = useParams();
   const nav = useNavigate();
   const desktop = useDesktop();
-  const [item, setItem] = useState<ItemDetail | null>(null);
-  const [error, setError] = useState("");
+  // each visit counts once as a view; refreshes in the background don't
+  const viewed = useRef("");
+  // while it is being deleted the page stops asking for it (it would get a 404) and keeps showing what it had
+  const [removing, setRemoving] = useState<ItemDetail | null>(null);
+  const pendingNow = ["pending", "processing"].includes(cache.peek<ItemDetail>(keys.item(id))?.status ?? "");
+  const query = useQuery<ItemDetail>(removing ? null : keys.item(id), () => {
+    const view = viewed.current !== id;
+    viewed.current = id;
+    return api.item(id, view);
+  }, { maxAge: 0, poll: pendingNow ? 3000 : 0 });
+  const partial = !query.data && !removing;
+  const item = removing ?? query.data ?? fromSummary(id) ?? null;
+  const error = query.error;
   const [note, setNote] = useState("");
   const [savedNote, setSavedNote] = useState(false);
   const [tagInput, setTagInput] = useState<string | null>(null);
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const folders = useQuery(keys.folders, api.folders).data?.folders ?? [];
   const [menu, setMenu] = useState(false);
   const [allContent, setAllContent] = useState(false);
+  const [failed, setFailed] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const load = () =>
-    api.item(id).then((it) => { setItem(it); setNote(it.user_note ?? ""); setError(""); }).catch((e) => setError(e.message));
-
-  useEffect(() => { load(); setAllContent(false); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { api.folders().then((r) => setFolders(r.folders)).catch(() => {}); }, []);
+  useEffect(() => { setAllContent(false); setFailed(""); setRemoving(null); }, [id]);
+  // the "why" field follows the item, but never overwrites what is being typed
+  const serverNote = item?.user_note ?? "";
+  useEffect(() => { setNote(serverNote); }, [id, serverNote]);
 
   const pending = item && (item.status === "pending" || item.status === "processing");
-  useEffect(() => {
-    if (!pending) return;
-    const timer = setInterval(load, 3000);
-    return () => clearInterval(timer);
-  }, [pending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!menu) return;
@@ -47,12 +66,14 @@ export default function ItemPage() {
     return () => document.removeEventListener("pointerdown", close);
   }, [menu]);
 
-  if (error) return <div className="page"><div className="error-box">{error}</div></div>;
-  if (!item) return <div className="page"><div className="status-line"><IconSpinner /> {t("Chargement…")}</div></div>;
+  if (error && !item) return <div className="page"><div className="error-box">{error}</div></div>;
+  if (!item) return <div className="page item-page"><div className="item-main"><PageSkeleton /></div></div>;
 
+  /** Shown at once, then sent; if the API refuses, the page comes back to what it holds. */
   const update = async (body: Parameters<typeof api.patch>[1]) => {
-    await api.patch(item.id, body);
-    setItem({ ...item, ...body } as ItemDetail);
+    patchItem(item.id, body as Partial<ItemDetail>);
+    setFailed("");
+    try { await api.patch(item.id, body); } catch (e) { setFailed((e as Error).message); }
   };
   const saveNote = async () => {
     if (note.trim() === (item.user_note ?? "")) return;
@@ -68,18 +89,30 @@ export default function ItemPage() {
   };
   const removeTag = (tag: string) => update({ tags: item.tags.filter((x) => x !== tag) });
   const toggleAction = async (aid: number, done: boolean) => {
-    await api.setAction(aid, done);
-    setItem({ ...item, actions: item.actions.map((a) => (a.id === aid ? { ...a, done } : a)) });
+    cache.update<ItemDetail>(keys.item(item.id), (it) => ({ ...it, actions: it.actions.map((a) => (a.id === aid ? { ...a, done } : a)) }));
+    try { await api.setAction(aid, done); } catch (e) { setFailed((e as Error).message); }
   };
   const remove = async () => {
     if (!window.confirm(t("Supprimer définitivement cet élément de ta KB ?"))) return;
-    await api.remove(item.id);
-    nav(spaceHome(item.space), { replace: true });
+    setRemoving(item);
+    try {
+      await api.remove(item.id);
+      nav(spaceHome(item.space), { replace: true });
+      forgetItem(item.id);
+    } catch (e) {
+      setRemoving(null);
+      setFailed((e as Error).message);
+    }
   };
-  const reprocess = async () => { setMenu(false); await api.reprocess(item.id); load(); };
+  const reprocess = async () => {
+    setMenu(false);
+    patchItem(item.id, { status: "pending", error: null });
+    try { await api.reprocess(item.id); } catch (e) { setFailed((e as Error).message); }
+  };
   const moveTo = async (space: Space) => {
-    await api.patch(item.id, { space });
-    setItem({ ...item, space, category: space === "main" ? null : item.category });   // Veille: no category
+    dropItem(item.id);         // out of the lists of the space it leaves; they reload with it where it now is
+    patchItem(item.id, { space, category: space === "main" ? null : item.category });   // Veille: no category
+    try { await api.patch(item.id, { space }); } catch (e) { setFailed((e as Error).message); }
   };
   const fileIn = (folderId: string) => update({ folder_id: folderId || null });
 
@@ -142,6 +175,7 @@ export default function ItemPage() {
         <h1 className="item-title">{shown.title || item.source_url || t("Sans titre")}</h1>
 
         {pending && <div className="status-line"><IconSpinner /> {t("Lecture, résumé et indexation en cours…")}</div>}
+        {(failed || (error && item)) && <div className="error-box">{failed || error}</div>}
         {item.status === "error" && (
           <div className="error-box">{item.error}
             <div style={{ marginTop: 8 }}><button className="btn xs" onClick={reprocess}>{t("Réessayer")}</button></div>
@@ -185,6 +219,7 @@ export default function ItemPage() {
       </div>
 
       <div className="item-more">
+        {partial && <section className="sec"><Lines n={4} widths={["100%", "96%", "88%", "52%"]} /></section>}
         {writtenNote && shown.summary && (
           <section className="sec"><h2>{t("En bref")}</h2><p className="item-summary" style={{ margin: 0 }}>{shown.summary}</p></section>
         )}

@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api, type Digest as DigestT, type DigestEntry, type DigestKind, type DigestProject, type DigestSummary } from "../api";
+import { useParams, useSearchParams } from "react-router-dom";
+import { api, type Digest as DigestT, type DigestEntry, type DigestKind, type DigestProject } from "../api";
+import { cache, useQuery } from "../cache";
 import { openInClaude } from "../claude";
+import { PageSkeleton } from "../components/Skeleton";
 import { locale, t } from "../i18n";
 import { IconClose, IconDown, IconSpinner } from "../icons";
 import { useDesktop } from "../layout";
+import { Link, useNavigate } from "../nav";
+import { keys } from "../queries";
 
 // Same order as backend/app/digest/render.py: from the most general to the most technical.
 const SECTIONS: [string, string][] = [
@@ -54,50 +58,40 @@ export default function Digest() {
   const nav = useNavigate();
   const desktop = useDesktop();
   const kind: DigestKind = params.get("kind") === "weekly" ? "weekly" : "daily";
-  const [digest, setDigest] = useState<DigestT | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [history, setHistory] = useState<DigestSummary[]>([]);
+  const key = id ? keys.digest(Number(id)) : keys.latestDigest(kind);
+  const now = cache.peek<DigestT | null>(key);
+  // while a digest (or extra projects) is being written, poll
+  const writing = now?.status === "generating" || Boolean(now?.data.projects_pending);
+  const query = useQuery<DigestT | null>(key, () => (id ? api.digest(Number(id)) : api.latestDigest(kind)), { poll: writing ? 3000 : 0 });
+  const digest = query.data ?? null;
+  const loading = query.loading;
+  const [failed, setError] = useState("");
+  const error = failed || query.error;
+  const historyQuery = useQuery(keys.digests, () => api.digests());
+  const history = historyQuery.data ?? [];
   const [votes, setVotes] = useState<Votes>({});
   const [kept, setKept] = useState<Record<string, string>>({});
   const [toast, setToast] = useState("");
-  const req = useRef(0);
   const inFlight = useRef(new Set<string>());
 
-  const apply = (d: DigestT | null) => {
-    setDigest(d);
+  // votes as the server has them, each time the digest arrives
+  useEffect(() => {
     const v: Votes = {}, k: Record<string, string> = {};
-    d?.feedback.forEach((f) => { v[`${f.target}:${f.entry_key}`] = f.vote; if (f.item_id) k[`${f.target}:${f.entry_key}`] = f.item_id; });
+    digest?.feedback.forEach((f) => { v[`${f.target}:${f.entry_key}`] = f.vote; if (f.item_id) k[`${f.target}:${f.entry_key}`] = f.item_id; });
     setVotes(v);
     setKept(k);
-  };
-
-  const load = async () => {
-    const n = ++req.current;
-    try {
-      const d = id ? await api.digest(Number(id)) : await api.latestDigest(kind);
-      if (n !== req.current) return;
-      apply(d);
-      setError("");
-    } catch (e) {
-      if (n === req.current) setError((e as Error).message);
-    } finally {
-      if (n === req.current) setLoading(false);
-    }
-  };
-
-  useEffect(() => { setLoading(true); load(); }, [id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { api.digests().then(setHistory).catch(() => {}); }, [digest?.id, digest?.status]);
-
-  // while a digest (or extra projects) is being written, poll — always with the current id/kind
-  const loadRef = useRef(load);
-  loadRef.current = load;
+  }, [digest]);
   const busy = digest?.status === "generating" || Boolean(digest?.data.projects_pending);
+  const load = query.refresh;
+  // the list of past digests follows the one on screen (one being written becomes ready)
+  const refreshHistory = historyQuery.refresh;
+  useEffect(() => { if (digest) refreshHistory(); }, [digest?.id, digest?.status, refreshHistory]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the other period, fetched ahead: switching between Aujourd'hui and Semaine is then instant
   useEffect(() => {
-    if (!busy) return;
-    const timer = setInterval(() => loadRef.current(), 3000);
-    return () => clearInterval(timer);
-  }, [busy]);
+    if (id) return;
+    const other: DigestKind = kind === "weekly" ? "daily" : "weekly";
+    cache.prefetch(keys.latestDigest(other), () => api.latestDigest(other));
+  }, [id, kind]);
 
   const flash = (text: string) => { setToast(text); setTimeout(() => setToast(""), 3500); };
   const shownKind: DigestKind = digest?.kind ?? kind;
@@ -148,7 +142,7 @@ export default function Digest() {
     if (!digest) return;
     try {
       await api.moreProjects(digest.id);
-      setDigest({ ...digest, data: { ...digest.data, projects_pending: true } });
+      cache.update<DigestT | null>(key, (d) => d && { ...d, data: { ...d.data, projects_pending: true } });
     } catch (e) { flash((e as Error).message); }
   };
 
@@ -190,7 +184,7 @@ export default function Digest() {
 
       <div className="digest-main column">
         {error && <div className="error-box">{error}</div>}
-        {loading && <div className="status-line"><IconSpinner /> {t("Chargement…")}</div>}
+        {loading && <PageSkeleton />}
 
         {!loading && !digest && !error && (
           <div className="empty">

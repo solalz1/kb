@@ -1,4 +1,5 @@
 // Client de l'API KB. Le jeton est saisi une fois (Réglages) et gardé sur l'appareil.
+import { cache } from "./cache";
 import { lang, t } from "./i18n";
 
 export type Kind =
@@ -274,6 +275,9 @@ function write(key: string, value: string) {
   try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch { /* stockage indisponible */ }
 }
 
+/** Forget the token on this device: the app goes back to its sign-in page (App listens). */
+export const signOut = () => { auth.token = ""; window.dispatchEvent(new Event("kb:unauthorized")); };
+
 export const auth = {
   get token() { return read(TOKEN_KEY); },
   set token(v: string) { write(TOKEN_KEY, v.trim()); },
@@ -285,25 +289,32 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+/** Every call but a GET changes something: the cache is checked again once it's done (cache.ts). */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${auth.token}`);
-  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${auth.base}${path}`, { ...init, headers });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail ?? detail; } catch { /* corps non JSON */ }
-    if (res.status === 401) window.dispatchEvent(new Event("kb:unauthorized"));
-    throw new ApiError(res.status, t(String(detail)));
+  const change = init.method && init.method !== "GET" ? cache.changeStarted() : 0;
+  try {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${auth.token}`);
+    if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+    const res = await fetch(`${auth.base}${path}`, { ...init, headers });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail ?? detail; } catch { /* corps non JSON */ }
+      if (res.status === 401) window.dispatchEvent(new Event("kb:unauthorized"));
+      throw new ApiError(res.status, t(String(detail)));
+    }
+    return await (res.json() as Promise<T>);
+  } finally {
+    if (change) cache.changeDone(change);
   }
-  return res.json() as Promise<T>;
 }
 
 export type IngestResult = { ok: boolean; message: string; id: string; items: { id: string; duplicate: boolean }[] };
 
 /** Files go through XMLHttpRequest, the only way to follow the upload: a 25 MB PDF can take a minute. */
 function upload(form: FormData, onProgress: (fraction: number) => void): Promise<IngestResult> {
-  return new Promise((resolve, reject) => {
+  const change = cache.changeStarted();
+  return new Promise<IngestResult>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${auth.base}/api/ingest`);
     xhr.setRequestHeader("Authorization", `Bearer ${auth.token}`);
@@ -317,8 +328,9 @@ function upload(form: FormData, onProgress: (fraction: number) => void): Promise
     };
     xhr.onerror = () => reject(new ApiError(0, t("Envoi interrompu : vérifie ta connexion et garde l'app ouverte pendant l'envoi.")));
     xhr.ontimeout = xhr.onerror;
+    xhr.onabort = xhr.onerror;
     xhr.send(form);
-  });
+  }).finally(() => cache.changeDone(change));
 }
 
 const qs = (params: Record<string, string | number | boolean | undefined | null>) => {
@@ -390,7 +402,8 @@ export const api = {
                     folder?: string; limit?: number; offset?: number; archived?: boolean }) =>
     request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`)
       .then((r) => ({ ...r, items: r.items.map(cleanSummary) })),
-  item: (id: string) => request<ItemDetail>(`/api/items/${id}`).then(cleanDetail),
+  /** `view`: counts as the user opening it (once per visit; a refresh in the background doesn't). */
+  item: (id: string, view = true) => request<ItemDetail>(`/api/items/${id}${view ? "" : "?view=false"}`).then(cleanDetail),
   patch: (id: string, body: Partial<ItemPatch>) =>
     request<{ ok: boolean; requeued?: boolean }>(`/api/items/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   createNote: (body: { content: string; title?: string; space: Space; category?: string | null; tags?: string[];

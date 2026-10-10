@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, type CostService, type Costs as CostsT } from "../api";
+import { cache, useQuery } from "../cache";
 import { lang, locale, t } from "../i18n";
 import { IconEdit, IconSpinner } from "../icons";
 import { ago, fullDate } from "../kinds";
+import { keys } from "../queries";
+import { Lines } from "./Skeleton";
 
 /** US dollars, as the services bill them ("$US" in French, like the Claude Console); tiny amounts don't read as zero. */
 export const dollars = (n: number) =>
@@ -13,14 +16,12 @@ const compact = (n: number) => n.toLocaleString(locale, { notation: "compact", m
 
 /** Settings → Costs: what the KB spent this month and in all, service by service, and what is left. */
 export function Costs() {
-  const [data, setData] = useState<CostsT | null>(null);
-  const [error, setError] = useState("");
+  const query = useQuery(keys.costs, api.costs);
+  const data = query.data;
   const [open, setOpen] = useState("");
 
-  useEffect(() => { api.costs().then(setData).catch((e) => setError(e.message)); }, []);
-
-  if (error) return <div className="error-box">{error}</div>;
-  if (!data) return <div className="status-line"><IconSpinner /> {t("Chargement…")}</div>;
+  if (!data && query.error) return <div className="error-box">{query.error}</div>;
+  if (!data) return <Lines n={3} widths={["50%", "100%", "100%"]} />;
 
   return (
     <>
@@ -31,7 +32,7 @@ export function Costs() {
       <ul className="cost-list">
         {data.services.map((s) => (
           <CostRow key={s.id} s={s} open={open === s.id} onToggle={() => setOpen(open === s.id ? "" : s.id)}
-                   onSaved={(next) => { setData(next); setOpen(""); }} />
+                   onSaved={(next) => { cache.set(keys.costs, next); setOpen(""); }} />
         ))}
       </ul>
       <p className="hint">

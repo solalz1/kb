@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api, type Interests as InterestsT, type Watch } from "../api";
+import { useQuery } from "../cache";
 import { dollars } from "../components/Costs";
+import { PageSkeleton } from "../components/Skeleton";
 import { t } from "../i18n";
 import { IconBack, IconClose, IconSpinner } from "../icons";
 import { ago } from "../kinds";
+import { Link } from "../nav";
+import { keys } from "../queries";
 
 const ORIGIN: Record<Watch["origin"], string> = {
   manual: t("ajouté par toi"), auto: t("appris de ta KB"), default: t("par défaut"), suggested: t("suggéré par l'agent"),
@@ -20,17 +23,21 @@ const hostOf = (url: string | null) => { try { return url ? new URL(url).hostnam
 
 /** What the digest agent understood of the user's tastes, and the people and feeds it follows. */
 export default function Interests() {
-  const [data, setData] = useState<InterestsT | null>(null);
+  const query = useQuery(keys.interests, api.interests);
+  const data = query.data ?? null;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const [failed, setError] = useState("");
+  const error = failed || query.error;
   const [handle, setHandle] = useState("");
   const [name, setName] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
   const [xUser, setXUser] = useState("");
 
-  const load = () => api.interests().then((d) => { setData(d); setText(d.text); }).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, []);
+  // the text box follows what the server holds, never overwriting what is being typed
+  const serverText = data?.text ?? "";
+  useEffect(() => { setText(serverText); }, [serverText]);
+  const load = query.refresh;
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -39,7 +46,7 @@ export default function Interests() {
   };
 
   if (!data) {
-    return <div className="page">{error ? <div className="error-box">{error}</div> : <div className="status-line"><IconSpinner /> {t("Chargement…")}</div>}</div>;
+    return <div className="page">{error ? <div className="error-box">{error}</div> : <PageSkeleton />}</div>;
   }
 
   const prof = data.profile;

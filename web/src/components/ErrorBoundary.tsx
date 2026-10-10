@@ -1,8 +1,10 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { cache } from "../cache";
 import { t } from "../i18n";
 
 /** A page that fails to render shows what happened and a way out, instead of leaving the whole app blank.
- *  `resetKey` (the URL) clears the error when the user goes somewhere else. */
+ *  `resetKey` (the URL) clears the error when the user goes somewhere else. What the app had cached is forgotten:
+ *  the page may have crashed on it, and the next try must load it afresh. */
 export class ErrorBoundary extends Component<{ resetKey?: string; children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
 
@@ -12,6 +14,7 @@ export class ErrorBoundary extends Component<{ resetKey?: string; children: Reac
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Page crash:", error, info.componentStack);
+    cache.clear();
   }
 
   componentDidUpdate(prev: { resetKey?: string }) {

@@ -1,21 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Outlet, ScrollRestoration, useLocation } from "react-router-dom";
 import { ApiError, api, auth } from "./api";
+import { cache, useQuery } from "./cache";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { EdgeSwipeBack, PullToRefresh, settleSwipe } from "./components/Gestures";
 import { LangSwitch } from "./components/LangSwitch";
 import { t } from "./i18n";
 import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconPlus, IconSettings, IconTodo } from "./icons";
-import Add from "./pages/Add";
-import Ask from "./pages/Ask";
-import Digest from "./pages/Digest";
-import Feed from "./pages/Feed";
-import Folders from "./pages/Folders";
-import Interests from "./pages/Interests";
-import ItemPage from "./pages/ItemPage";
-import Journal from "./pages/Journal";
-import NoteEditor from "./pages/NoteEditor";
-import Settings from "./pages/Settings";
-import Todo from "./pages/Todo";
+import { scrollKey, tabOf } from "./motion";
+import { Link, NavLink, useNavigate } from "./nav";
+import { keys, prefetchTabs } from "./queries";
 
 // The sidebar (desktop). "Ajouter" is the primary button above it; on phones it is the + in the middle of the tab bar,
 // the folders and À faire are icons at the top of Veille, and the journal an icon at the top of Perso.
@@ -29,17 +23,7 @@ const NAV = [
   { to: "/todo", label: t("À faire"), Icon: IconTodo },
 ];
 const TABS = [NAV[0], NAV[1], { to: "/add", label: t("Ajouter"), Icon: IconPlus }, NAV[4], NAV[5]];
-
-/** The tab a page belongs to. An item page or a note belongs to the tab it was opened from; Réglages to none. */
-function tabOf(path: string, previous: string): string {
-  if (path === "/" || path.startsWith("/todo") || path.startsWith("/folders")) return "/";
-  if (path.startsWith("/perso") || path.startsWith("/journal")) return "/perso";
-  if (path.startsWith("/digest")) return "/digest";
-  if (path.startsWith("/ask")) return "/ask";
-  if (path.startsWith("/add")) return "/add";
-  if (path.startsWith("/item/") || path.startsWith("/note/")) return previous;
-  return "";
-}
+const RAIL_STEP = 50;     // px between two sidebar links (44 + the 6 px gap): the selection slides by that much
 
 const hostOf = (base: string) => { try { return new URL(base).host; } catch { return base; } };
 
@@ -57,6 +41,7 @@ function Login({ onDone }: { onDone: () => void }) {
     auth.token = token;
     try {
       await api.stats();
+      cache.clear();
       onDone();
     } catch (err) {
       auth.token = "";
@@ -97,42 +82,77 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** The app around every page: the sidebar or the tab bar, gestures, scroll positions, and the page (routes in main.tsx). */
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(auth.token));
   const location = useLocation();
-  const [pending, setPending] = useState(0);
+  const navigate = useNavigate();
   const tab = useRef("/");
   tab.current = tabOf(location.pathname, tab.current);
   const opened = /^\/(item|note)\//.test(location.pathname);    // an item or a note: lit where it was opened from
+  const stats = useQuery(authed ? keys.stats : null, api.stats, { maxAge: 20_000, poll: 60_000 });
+  const pending = stats.data?.open_actions ?? 0;
 
+  // a token the server refuses, or signing out in Settings
   useEffect(() => {
-    const out = () => { auth.token = ""; setAuthed(false); };
+    const out = () => { auth.token = ""; cache.clear(); setAuthed(false); };
     window.addEventListener("kb:unauthorized", out);
     return () => window.removeEventListener("kb:unauthorized", out);
   }, []);
 
+  // once the first page is up, the other tabs are fetched ahead, so that opening them shows them at once
   useEffect(() => {
     if (!authed) return;
-    const tick = () => api.stats().then((s) => setPending(s.open_actions)).catch(() => {});
-    tick();
-    const timer = setInterval(tick, 60_000);
-    return () => clearInterval(timer);
-  }, [authed, location.pathname === "/todo"]);
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    const timer = window.setTimeout(() => (idle ? idle(prefetchTabs) : prefetchTabs()), 1200);
+    return () => clearTimeout(timer);
+  }, [authed]);
+
+  // back to the app after a while (it stayed open in the background): what's on screen refreshes quietly
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.hidden) hiddenAt = Date.now();
+      else if (hiddenAt && Date.now() - hiddenAt > 60_000) cache.staleAll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  // a page swiped away from the left edge: the one that comes back sits in place
+  useLayoutEffect(() => { settleSwipe(); }, [location.key]);
+  const back = useCallback(() => navigate(-1), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
-  const logout = () => { auth.token = ""; setAuthed(false); };
+
+  // the tab bar's lens sits on the current tab; tapping the tab you're on brings its page back to the top
+  const lens = TABS.findIndex((x) => x.to === tab.current && x.to !== "/add");
+  const here = NAV.findIndex(({ to }) => (to === "/" ? location.pathname === "/"
+    : location.pathname === to || location.pathname.startsWith(`${to}/`)));
+  const railLens = here >= 0 ? here : opened ? NAV.findIndex(({ to }) => to === tab.current) : -1;
+  const onTab = (e: React.MouseEvent, to: string) => {
+    if (location.pathname === to && !location.search) {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   return (
     <div className="shell">
+      <ScrollRestoration getKey={scrollKey} />
       <nav className="rail" aria-label="Navigation">
         <Link className="brand" to="/"><b>KB</b><small>{t("second cerveau")}</small></Link>
         <Link className="add-btn" to="/add"><IconPlus size={18} /> {t("Ajouter")}</Link>
-        {NAV.map(({ to, label, Icon, end }) => (
-          <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav${isActive || (opened && tab.current === to) ? " active" : ""}`}>
-            <Icon size={20} /> <span className="label">{label}</span>
-            {to === "/todo" && pending > 0 && <span className="badge">{pending}</span>}
-          </NavLink>
-        ))}
+        <div className="rail-links" style={{ "--i": Math.max(0, railLens), "--step": `${RAIL_STEP}px` } as React.CSSProperties}>
+          <span className={`rail-lens${railLens < 0 ? " off" : ""}`} aria-hidden="true" />
+          {NAV.map(({ to, label, Icon, end }) => (
+            <NavLink key={to} to={to} end={end} onClick={(e) => onTab(e, to)}
+                     className={({ isActive }) => `nav${isActive || (opened && tab.current === to) ? " active" : ""}`}>
+              <Icon size={20} /> <span className="label">{label}</span>
+              {to === "/todo" && pending > 0 && <span className="badge">{pending}</span>}
+            </NavLink>
+          ))}
+        </div>
         <div className="spacer" />
         <NavLink to="/settings" className={({ isActive }) => `nav settings${isActive ? " active" : ""}`}>
           <IconSettings size={20} /> <span className="label">{t("Réglages")}</span>
@@ -141,36 +161,20 @@ export default function App() {
 
       <main className="main">
         <ErrorBoundary resetKey={location.key}>
-          <Routes>
-            <Route path="/" element={<Feed key="main" space="main" pending={pending} />} />
-            <Route path="/perso" element={<Feed key="perso" space="perso" />} />
-            <Route path="/folders" element={<Folders />} />
-            <Route path="/folders/:folderId" element={<Feed key="folder" />} />
-            <Route path="/journal" element={<Journal />} />
-            <Route path="/journal/:day" element={<Journal />} />
-            <Route path="/note/new" element={<NoteEditor key="new" />} />
-            <Route path="/note/:id/edit" element={<NoteEditor key="edit" />} />
-            <Route path="/item/:id" element={<ItemPage />} />
-            <Route path="/ask" element={<Ask />} />
-            <Route path="/digest" element={<Digest />} />
-            <Route path="/digest/interets" element={<Interests />} />
-            <Route path="/digest/:id" element={<Digest />} />
-            <Route path="/add" element={<Add />} />
-            <Route path="/todo" element={<Todo onChange={setPending} />} />
-            <Route path="/settings" element={<Settings onLogout={logout} />} />
-            <Route path="/settings/:section" element={<Settings onLogout={logout} />} />
-            <Route path="*" element={<Feed key="main" space="main" pending={pending} />} />
-          </Routes>
+          <Outlet />
         </ErrorBoundary>
       </main>
 
-      <nav className="tabbar" aria-label="Navigation">
+      <nav className="tabbar" aria-label="Navigation" style={{ "--i": Math.max(0, lens) } as React.CSSProperties}>
+        <span className={`tab-lens${lens < 0 ? " off" : ""}`} aria-hidden="true" />
         {TABS.map(({ to, label, Icon }) => to === "/add"
           ? <Link key={to} to={to} className={`add${tab.current === to ? " active" : ""}`} aria-label={label}
-                  aria-current={tab.current === to ? "page" : undefined}><span><Icon size={26} stroke={2.25} /></span></Link>
-          : <Link key={to} to={to} className={tab.current === to ? "active" : undefined}
+                  aria-current={tab.current === to ? "page" : undefined}><span><Icon size={24} stroke={2.25} /></span></Link>
+          : <Link key={to} to={to} className={tab.current === to ? "active" : undefined} onClick={(e) => onTab(e, to)}
                   aria-current={tab.current === to ? "page" : undefined}><Icon size={24} />{label}</Link>)}
       </nav>
+      <PullToRefresh />
+      <EdgeSwipeBack onBack={back} />
     </div>
   );
 }
