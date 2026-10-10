@@ -195,7 +195,8 @@ async def ingest(request: Request):
         message = f"{len(results) - dupes} élément(s) ajouté(s)" + (f", {dupes} déjà présent(s)" if dupes else "")
     out = {"ok": True, "message": message, "items": results, "id": results[0]["id"]}
     if len(results) == 1 and results[0].get("page_wanted"):
-        out["page_wanted"] = True      # the Shortcut then fetches the page from the phone: POST /api/items/<id>/page
+        # the Shortcut then fetches page_url from the phone and sends it: POST /api/items/<id>/page
+        out.update(page_wanted=True, page_url=results[0]["page_url"])
     return out
 
 

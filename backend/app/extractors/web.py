@@ -196,8 +196,47 @@ def _wayback(url: str, canonical: str) -> Extracted | None:
     return ex
 
 
+BROWSER_PROFILES = ("chrome", "safari")      # curl_cffi impersonation targets, tried in order
+
+
+def _browser_get(url: str) -> bytes | None:
+    """The page fetched with a browser's TLS and HTTP/2 fingerprint (curl_cffi). Bot protections such as Cloudflare
+    often refuse Python's own fingerprint with a 403 while serving the same page to a browser."""
+    try:
+        from curl_cffi import requests as browser
+    except ImportError:
+        return None
+    for profile in BROWSER_PROFILES:
+        try:
+            r = browser.get(url, impersonate=profile, timeout=30, allow_redirects=True,
+                            headers={"Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8"})
+        except Exception:  # noqa: BLE001
+            log.warning("Lecture « navigateur » (%s) impossible : %s", profile, url, exc_info=True)
+            continue
+        ctype = (r.headers.get("content-type") or "").lower()
+        if r.status_code == 200 and ("html" in ctype or not ctype):
+            return r.content
+        log.info("Lecture « navigateur » (%s) : %s pour %s", profile, r.status_code, url)
+    return None
+
+
+def _as_browser(url: str, canonical: str) -> Extracted | None:
+    html = _browser_get(url)
+    if not html:
+        return None
+    ex = extract_html(html, url, canonical, jina=False)
+    if ex.metadata.get("thin_content") or _blocked(ex.content):
+        return None
+    ex.metadata["via"] = "browser"
+    return ex
+
+
 def _fallback(url: str, canonical: str, *, status: int | None = None, reason: str = "") -> Extracted:
-    """The server couldn't read the page itself: Jina Reader, then the Wayback Machine."""
+    """The server couldn't read the page itself: again as a browser, then Jina Reader, then the Wayback Machine."""
+    if status:
+        as_browser = _as_browser(url, canonical)
+        if as_browser:
+            return as_browser
     read = _jina(url)
     if read and len(read["content"]) > 100 and not _blocked(read["content"]):
         return Extracted(kind="article", title=read.get("title"), content=read["content"], source_url=canonical,
@@ -208,7 +247,8 @@ def _fallback(url: str, canonical: str, *, status: int | None = None, reason: st
     host = urlsplit(canonical).netloc
     if status:
         raise ExtractionError(
-            f"{host} refuse l'accès aux serveurs ({status}), et ni Jina Reader ni les archives du web n'ont la page. "
+            f"{host} refuse l'accès aux serveurs ({status}), même lu comme un navigateur, et ni Jina Reader ni les "
+            "archives du web n'ont la page. "
             "Partage-la de nouveau avec le Raccourci : il la lira depuis ton téléphone. "
             "Ou colle le lien suivi du texte de l'article dans Ajouter.")
     raise RuntimeError(f"Page inaccessible : {reason}")

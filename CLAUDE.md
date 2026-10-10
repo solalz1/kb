@@ -98,13 +98,14 @@ digest sources and Claude by fakes in `tests/test_digest.py`. Every backend chan
   crashed on it. `llm.enrich` cleans lists (`_text_list`) and asks again when they're malformed, the schema file repairs
   stored rows at startup, the app cleans lists as they arrive (`cleanDetail` in `api.ts`), and `ErrorBoundary` keeps
   a page that fails to render from blanking the whole app.
-- Some sites refuse servers (Medium: 403 to datacenter IPs). `web.extract` falls back to Jina Reader, then the Wayback
-  Machine (bot-check pages are rejected), then raises an `ExtractionError` that says what to do. A Safari share
+- Some sites refuse servers (Medium: 403). `web.extract` falls back to the same request with a browser's TLS
+  fingerprint (`curl_cffi`, `_browser_get`; faked in every test by the autouse `no_browser_fetch`), then Jina Reader,
+  then the Wayback Machine (bot-check pages are rejected), then raises an `ExtractionError` that says what to do. A Safari share
   attaches the page's text (> `PAGE_TEXT_MIN` chars): `pipeline.ingest` keeps it in storage (`metadata.page_path`)
   and `extract_item` uses it when the server can't read the page or only got a sliver of it. For hosts that refuse
   servers (`web.KNOWN_BLOCKERS`, plus any that answered 403: `kb_settings.blocked_hosts`), the Shortcut sends
-  `page_follows`, the API answers `page_wanted`, the item waits `PAGE_WAIT_SECONDS`, and the phone posts the page
-  it fetched to `/api/items/<id>/page` (`metadata.page_html_path`, read first by `extract_item`).
+  `page_follows`, the API answers `page_wanted` and `page_url`, the item waits `PAGE_WAIT_SECONDS`, and the phone
+  posts the page it fetched to `/api/items/<id>/page` (`metadata.page_html_path`, read first by `extract_item`).
 - Perso notes are the user's own words: enrichment must never rewrite `content` for `kind = 'note'`, and the Notion
   copy and the export put the note text first, in full.
 

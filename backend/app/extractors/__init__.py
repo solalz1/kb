@@ -23,7 +23,14 @@ def extract_item(item: dict) -> Extracted:
         data = storage.download(item["file_path"])
         ex = extract_file(data, item.get("file_name"), item.get("file_mime"))
     elif item.get("input_url"):
-        ex = _phone_html(item) or _read_url(item)
+        fetched, received = _phone_html(item)
+        try:
+            ex = fetched or _read_url(item)
+        except ExtractionError as exc:
+            if received:
+                raise ExtractionError(f"{exc} (La page envoyée par ton téléphone est bien arrivée, mais sans "
+                                      "l'article : sans doute une page de vérification anti-robot.)") from exc
+            raise
     elif item.get("input_text"):
         ex = note.extract(item["input_text"])
     else:
@@ -54,24 +61,24 @@ def _meta(item: dict) -> dict:
     return json.loads(meta) if isinstance(meta, str) else meta
 
 
-def _phone_html(item: dict) -> Extracted | None:
-    """The page the phone fetched for a site that refuses the server (the Shortcut, POST /api/items/<id>/page), when
-    it holds an article: read like the server would have."""
+def _phone_html(item: dict) -> tuple[Extracted | None, bool]:
+    """The page the phone fetched for a site that refuses the server (the Shortcut, POST /api/items/<id>/page), read
+    like the server would have: (the article if it holds one, whether a page arrived at all)."""
     path = _meta(item).get("page_html_path")
     if not path:
-        return None
+        return None, False
     try:
         html = storage.download(path)
     except Exception:
         log.warning("Page du téléphone introuvable : %s", path, exc_info=True)
-        return None
+        return None, False
     canonical = urls.classify(item["input_url"]).canonical
     ex = web.extract_html(html, item["input_url"], canonical, jina=False)
     if ex.metadata.get("thin_content") or web._blocked(ex.content):
         log.info("Page du téléphone sans article pour %s : le serveur essaie lui-même", item["input_url"])
-        return None
+        return None, True
     ex.metadata["via"] = "phone"
-    return ex
+    return ex, True
 
 
 def _phone_page(item: dict) -> str | None:
