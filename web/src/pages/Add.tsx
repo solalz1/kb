@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type Folder, type Space } from "../api";
+import { useSearchParams } from "react-router-dom";
+import { api, type Space } from "../api";
+import { useQuery } from "../cache";
 import { t, tServer } from "../i18n";
 import { IconClip, IconSpinner } from "../icons";
+import { Link, useNavigate } from "../nav";
 import { CATEGORIES } from "../perso";
+import { keys } from "../queries";
 
 export default function Add() {
   const [params] = useSearchParams();
@@ -13,7 +16,7 @@ export default function Add() {
   const [space, setSpace] = useState<Space>(params.get("space") === "perso" ? "perso" : "main");
   const [category, setCategory] = useState("");
   const [folder, setFolder] = useState(params.get("folder") || "");
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const folders = useQuery(keys.folders, api.folders).data?.folders ?? [];
   const [files, setFiles] = useState<File[]>([]);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -22,7 +25,6 @@ export default function Add() {
   const [done, setDone] = useState<{ message: string; id: string } | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { api.folders().then((r) => setFolders(r.folders)).catch(() => {}); }, []);
   useEffect(() => {
     if (!done) return;
     const timer = setTimeout(() => setDone(null), 5000);

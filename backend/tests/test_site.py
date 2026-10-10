@@ -122,8 +122,18 @@ def _seed(client_page: Page) -> dict:
     return {"article": article["body"]["id"], "principle": principle["body"]["id"], "journal": journal["body"]["id"]}
 
 
+def _settled(page: Page):
+    """Waits for the page to stop moving (a page change sliding, cards gliding to their new place): as on an iPhone,
+    a finger lands on what it sees."""
+    page.wait_for_function("""() => !document.documentElement.matches(':active-view-transition')
+      && document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity)""")
+
+
 def _swipe(page: Page, target, dx: float, steps: int = 14):
-    """A finger dragged horizontally across `target` (real touch events, so the page sees pointerType "touch")."""
+    """A finger dragged horizontally across `target` (real touch events, so the page sees pointerType "touch"), once
+    the lists have caught up with the last change (they may reorder) and stopped moving."""
+    page.wait_for_load_state("networkidle")
+    _settled(page)
     target.wait_for(state="visible")                    # bounding_box() is None until the row is laid out
     box = target.bounding_box()
     x = box["x"] + (box["width"] - 24 if dx < 0 else 24)
@@ -740,3 +750,163 @@ def test_feed_type_filters_group_kinds(site):
     page.get_by_role("button", name="Papiers & PDF").click()
     expect(page.locator(".fiche h3")).to_have_count(2)
     expect(page.locator(".feed-main")).not_to_contain_text("Un tweet")
+
+
+_COUNT_TRANSITIONS = """() => {
+  window.__transitions = 0;
+  const start = document.startViewTransition.bind(document);
+  document.startViewTransition = (cb) => { window.__transitions++; return start(cb); };
+}"""
+_WATCH_SKELETONS = """() => {
+  window.__skeleton = false;
+  new MutationObserver(() => { if (document.querySelector('.sk-card, .sk-page')) window.__skeleton = true; })
+    .observe(document.body, { childList: true, subtree: true });
+}"""
+
+
+def test_pages_come_back_from_memory_and_slide(site):
+    """Like an app, not a website: a page you come back to is there at once (from memory, where you left it), pages
+    slide in and out, and reloading starts afresh."""
+    from app import db
+
+    for i in range(14):
+        db.execute("insert into items (kind, title, summary, status) values ('article', %s, 'Un résumé.', 'ready')",
+                   (f"Lecture {i:02d}",))
+    page = site("/", touch=True)
+    expect(page.locator(".fiche")).to_have_count(14)
+    page.evaluate(_COUNT_TRANSITIONS)
+
+    # open a card: the page slides in, its title shown at once from the card the feed already had
+    page.evaluate("window.scrollTo(0, 900)")
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 600
+    page.locator(".fiche", has_text="Lecture 05").click()
+    expect(page.locator(".item-title")).to_have_text("Lecture 05")
+    assert page.evaluate("document.documentElement.dataset.nav") == "push"
+    assert page.evaluate("window.scrollY") == 0
+
+    # back: no skeleton, no wait, the feed where it was
+    _settled(page)
+    page.evaluate(_WATCH_SKELETONS)
+    page.go_back()
+    expect(page.locator(".fiche", has_text="Lecture 05")).to_be_visible()
+    assert page.evaluate("document.documentElement.dataset.nav") == "back"
+    page.wait_for_function(f"() => Math.abs(window.scrollY - {scrolled}) < 4")
+    assert page.evaluate("window.__skeleton") is False
+    assert page.evaluate("window.__transitions") == 2
+
+    # another tab: a cross-fade, its lens slides under Perso; the tab you're on brings its page back to the top
+    _settled(page)
+    page.locator(".tabbar").get_by_role("link", name="Perso").click()
+    expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.dataset.nav") == "tab"
+    assert page.locator(".tabbar").evaluate("el => el.style.getPropertyValue('--i')") == "1"
+    _settled(page)
+    page.locator(".tabbar").get_by_role("link", name="Veille").click()
+    page.wait_for_function(f"() => Math.abs(window.scrollY - {scrolled}) < 4")      # Veille's own place, kept
+    _settled(page)
+    page.locator(".tabbar").get_by_role("link", name="Veille").click()
+    page.wait_for_function("() => window.scrollY === 0")
+
+    # a change shows at once and the lists catch up: pinned from its page, first in the feed when back
+    page.locator(".fiche", has_text="Lecture 09").click()
+    expect(page.locator(".item-title")).to_have_text("Lecture 09")
+    page.get_by_role("button", name="Plus d'actions").click()
+    page.get_by_role("menuitem", name="Épingler").click()
+    expect(page.locator(".item-meta .pin")).to_be_visible()
+    _settled(page)
+    page.go_back()
+    expect(page.locator(".fiche h3").first).to_have_text("Lecture 09")
+
+    # reloading empties the memory: everything is asked for again
+    asked = []
+    page.on("request", lambda r: asked.append(r.url) if "/api/items?" in r.url else None)
+    page.reload()
+    expect(page.locator(".fiche")).to_have_count(14)
+    assert asked
+
+    # back while the page is still sliding in: the animation is cut short, nothing breaks
+    page.locator(".fiche").first.click()
+    page.wait_for_url(re.compile(r"/item/"))
+    page.go_back()
+    expect(page.locator(".fiche")).to_have_count(14)
+    _settled(page)
+
+
+def test_installed_app_gestures(site):
+    """In the app installed on an iPhone (no browser bar): pulling the page down from its top reloads it, and a finger
+    from the left edge of the screen takes a page back."""
+    page = site("/", touch=True)
+    _seed(page)
+    page.context.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true });")
+    page.reload()
+    expect(page.locator(".fiche")).to_have_count(1)
+    cdp = page.context.new_cdp_session(page)
+
+    def drag(x0, y0, dx, dy, steps=14):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x0, "y": y0}]})
+        for i in range(1, steps + 1):
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove",
+                                                  "touchPoints": [{"x": x0 + dx * i / steps, "y": y0 + dy * i / steps}]})
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+
+    # a short pull springs back; a long one reloads
+    page.evaluate("window.__stayed = true")
+    drag(200, 300, 0, 60)
+    page.wait_for_timeout(500)
+    assert page.evaluate("window.__stayed") is True
+    assert page.locator(".main").evaluate("el => el.style.transform") == ""
+    with page.expect_event("load"):
+        drag(200, 300, 0, 260)
+    expect(page.locator(".fiche")).to_have_count(1)
+    assert page.evaluate("window.__stayed") is None
+
+    # from the left edge, a finger drags the item page away, back to the feed
+    page.locator(".fiche").first.click()
+    expect(page.locator(".item-title")).to_be_visible()
+    _settled(page)
+    drag(6, 420, 260, 4)
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    assert page.locator(".main").evaluate("el => el.style.transform") == ""
+    # the same drag starting away from the edge is a card's swipe, not a way back
+    page.locator(".fiche").first.click()
+    expect(page.locator(".item-title")).to_be_visible()
+    _settled(page)
+    drag(120, 420, 200, 4)
+    page.wait_for_timeout(500)
+    expect(page.locator(".item-title")).to_be_visible()
+
+
+def test_ticked_actions_stay_in_place_and_a_deleted_item_goes(site):
+    """An action ticked on À faire stays under "Fait" (and can be unticked) while the badges update; an item deleted
+    from its own page leaves the feed without the page asking for it again."""
+    page = site("/", touch=True)
+    ids = _seed(page)
+    page.reload()
+    badge = page.locator(".page-head .badge")
+    expect(badge).to_have_text(re.compile(r"^[1-9]\d*$"))
+    open_actions = int(badge.inner_text())
+    page.locator(".page-head").get_by_role("link", name=re.compile("À faire")).click()
+    expect(page.locator(".todo-item")).to_have_count(open_actions)
+    page.locator(".todo-item input").first.click()        # one tap (the list moves under it: no retrying check())
+    done = page.locator(".todo-group", has=page.get_by_role("heading", name="Fait", exact=True))
+    expect(done.locator(".todo-item")).to_have_count(1)
+    page.wait_for_load_state("networkidle")
+    expect(done.locator(".todo-item")).to_have_count(1)          # still there once the list is refreshed
+    done.get_by_role("checkbox").click()
+    expect(done).to_have_count(0)
+    expect(page.locator(".todo-item:not(.done)")).to_have_count(open_actions)
+    page.locator(".todo-item input").first.click()
+    expect(done.locator(".todo-item")).to_have_count(1)
+    page.wait_for_load_state("networkidle")
+    page.locator(".page").get_by_role("link", name="Veille").click()
+    expect(badge).to_have_text(str(open_actions - 1))
+
+    page.goto(f"/item/{ids['article']}")
+    expect(page.locator(".item-title")).to_have_text("Mesurer un agent sur de vraies tâches")
+    page.get_by_role("button", name="Plus d'actions").click()
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("menuitem", name="Supprimer").click()
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    expect(page.locator(f"a[href='/item/{ids['article']}']")).to_have_count(0)
+    assert not _exists(ids["article"])

@@ -92,6 +92,10 @@ def test_full_flow(client, fake_llm):
     assert detail["actions"][0]["text"] == "Tester l'outil mentionné"
     assert detail["view_count"] == 1
     assert any(l["id"] for l in detail["links"])                # liens automatiques calculés
+    # the app refreshing an open page in the background isn't another visit
+    again = client.get(f"/api/items/{rag['id']}", params={"view": "false"}, headers=AUTH).json()
+    assert again["view_count"] == 1 and again["links"] == detail["links"]
+    assert client.get(f"/api/items/{rag['id']}", headers=AUTH).json()["view_count"] == 2
 
     # --- recherche hybride ---
     found = client.get("/api/items", params={"q": "fidélité des réponses retrieval"}, headers=AUTH).json()

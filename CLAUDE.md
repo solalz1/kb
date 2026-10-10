@@ -74,6 +74,27 @@ update both.
   by more than CSS.
   Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
   each with an undo toast; a deletion waits 5 s before it reaches the API.
+  - **Data comes from an in-memory cache** (`cache.ts`, keys and fetchers in `queries.ts`): `useQuery(key, fetcher)`
+    shows what is cached at once and refreshes it in the background (stale-while-revalidate); nothing is persisted, so
+    a reload starts afresh. Every non-GET call in `api.ts` marks the whole cache stale (`changeStarted`/`changeDone`);
+    answers to requests that started before a change are dropped when something is already shown, so optimistic
+    updates (`patchItem`, `dropItem`) never flicker back; a change still running after 8 s stops holding refreshes
+    back. While deleting something a page shows, pass its `useQuery` a null key (ItemPage `removing`, Feed `leaving`)
+    so the refresh doesn't ask for it again (a 404 fails the browser tests); a key forgotten while shown is loaded
+    again. The cache keeps at most 160 values (30 whole items), never evicting what is on screen. The other tabs are
+    prefetched once the app is idle; an item page opens with its card from the lists (`summaryOf`), and
+    `GET /api/items/{id}?view=false` refreshes it without counting a visit.
+  - **Moving between pages**: a data router (`createBrowserRouter` in `main.tsx`, every page a route under `App`'s
+    `<Outlet/>`; descendant `<Routes>` would drop view transitions). Import `Link`, `NavLink` and `useNavigate` from
+    `nav.tsx`, which turn on view transitions; `motion.ts` sets `html[data-nav]` (push, back, tab, fade, none) and
+    `styles.css` animates `::view-transition-*` accordingly (the tab bar and sidebar keep their own
+    `view-transition-name`). `<ScrollRestoration getKey={scrollKey}>` keeps each tab's scroll position. Lists animate
+    reorders with `useFlip`. Loading states are skeletons (`components/Skeleton.tsx`), never "Chargement…".
+  - **Liquid Glass**: the tab bar is a floating glass capsule whose lens slides to the current tab (`--i`), the desktop
+    sidebar a floating glass pane; toasts, menus and the composer are glass too (`--glass*` tokens). Hover styles live
+    in `@media (hover: hover)`; pressed controls scale down with a spring.
+  - **Installed app gestures** (`components/Gestures.tsx`, standalone + touch only): pull down from the top to reload,
+    swipe from the left edge (`EDGE`) to go back; `SwipeRow` ignores touches starting in that edge.
 
 ## Commands
 
@@ -115,6 +136,9 @@ digest sources and Claude by fakes in `tests/test_digest.py`. Every backend chan
   servers (`web.KNOWN_BLOCKERS`, plus any that answered 403: `kb_settings.blocked_hosts`), the Shortcut sends
   `page_follows`, the API answers `page_wanted` and `page_url`, the item waits `PAGE_WAIT_SECONDS`, and the phone
   posts the page it fetched to `/api/items/<id>/page` (`metadata.page_html_path`, read first by `extract_item`).
+- Browser tests and motion: pages slide for ~0.4 s and lists glide after a refresh. Raw touch gestures (`_swipe`, CDP
+  touch events) must wait for `_settled(page)` (no view transition or finite animation running), and a test that
+  matches a heading by name may match the card it just tapped on the previous page: prefer `.item-title`.
 - Perso notes are the user's own words: enrichment must never rewrite `content` for `kind = 'note'`, and the Notion
   copy and the export put the note text first, in full.
 

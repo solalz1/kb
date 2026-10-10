@@ -1,22 +1,25 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { api, type Folder } from "../api";
+import { api } from "../api";
+import { cache, useQuery } from "../cache";
+import { Lines } from "../components/Skeleton";
 import { t } from "../i18n";
 import { IconBack, IconFolder, IconPlus, IconSpark, IconSpinner } from "../icons";
+import { Link } from "../nav";
+import { keys } from "../queries";
 
 /** Every folder with what's in it, a way to add one, and Claude to file what isn't filed by hand. */
 export default function Folders() {
-  const [folders, setFolders] = useState<Folder[] | null>(null);
-  const [unfiled, setUnfiled] = useState(0);
-  const [error, setError] = useState("");
+  const query = useQuery(keys.folders, api.folders);
+  const folders = query.data?.folders ?? null;
+  const unfiled = query.data?.unfiled ?? 0;
+  const [failed, setError] = useState("");
+  const error = failed || query.error;
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
 
-  const apply = (r: { folders: Folder[]; unfiled: number }) => { setFolders(r.folders); setUnfiled(r.unfiled); };
-  useEffect(() => { api.folders().then(apply).catch((e) => setError(e.message)); }, []);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 4000);
@@ -30,7 +33,7 @@ export default function Folders() {
     try {
       await api.createFolder({ name, description: description || undefined });
       setName(""); setDescription(""); setAdding(false);
-      apply(await api.folders());
+      await query.refresh();
       setNotice(t("Dossier créé. « Ranger automatiquement » y range ce qui lui correspond."));
     } catch (err) { setError((err as Error).message); } finally { setBusy(""); }
   };
@@ -40,7 +43,7 @@ export default function Folders() {
     setError("");
     try {
       const r = await api.sortFolders();
-      apply(r);
+      cache.set(keys.folders, { folders: r.folders, unfiled: r.unfiled });
       setNotice(t("{n} éléments rangés", { n: r.filed }));
     } catch (err) { setError((err as Error).message); } finally { setBusy(""); }
   };
@@ -81,7 +84,7 @@ export default function Folders() {
       )}
 
       {error && <div className="error-box">{error}</div>}
-      {folders === null && !error && <div className="status-line"><IconSpinner /> {t("Chargement…")}</div>}
+      {folders === null && !error && <div className="folder-list folders-grid" aria-busy="true">{[0, 1, 2].map((i) => <div key={i} className="folder-card"><Lines n={2} widths={["40%", "80%"]} /></div>)}</div>}
 
       {folders && (
         <div className="folder-list folders-grid">

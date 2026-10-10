@@ -1,26 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, useState } from "react";
 import { api, type TodoAction } from "../api";
+import { useQuery } from "../cache";
+import { Lines } from "../components/Skeleton";
 import { t } from "../i18n";
 import { IconBack } from "../icons";
+import { Link } from "../nav";
+import { keys } from "../queries";
 
 const GROUPS: Record<string, string> = {
   try: t("À tester"), read: t("À lire"), watch: t("À regarder"), follow: t("À suivre"), buy: t("À acheter"), do: t("À faire"),
 };
 
-/** `onChange`: the number of open actions, for the badges. */
-export default function Todo({ onChange }: { onChange?: (open: number) => void }) {
-  const [actions, setActions] = useState<TodoAction[]>([]);
+/** What saved items suggest doing. Ticking one updates the badges by itself: the change refreshes the counts. */
+export default function Todo() {
   const [showDone, setShowDone] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => { api.actions(showDone).then((a) => { setActions(a); setLoaded(true); }); }, [showDone]);
+  const query = useQuery(keys.actions(showDone), () => api.actions(showDone), { keep: true });
+  // what was ticked or unticked on this visit stays where it is (under "Fait"), so it can be unticked again,
+  // even once the list from the server leaves done actions out
+  const [ticked, setTicked] = useState<ReadonlyMap<number, TodoAction>>(new Map());
+  const [error, setError] = useState("");
+  const actions = useMemo(() => {
+    const list = query.data ?? [];
+    const ids = new Set(list.map((a) => a.id));
+    return [...list.map((a) => ticked.get(a.id) ?? a), ...[...ticked.values()].filter((a) => !ids.has(a.id))];
+  }, [query.data, ticked]);
+  const loaded = Boolean(query.data);
 
   const toggle = async (a: TodoAction) => {
-    await api.setAction(a.id, !a.done);
-    const next = actions.map((x) => (x.id === a.id ? { ...x, done: !x.done } : x));
-    setActions(next);
-    if (!showDone) onChange?.(next.filter((x) => !x.done).length);
+    const next = { ...a, done: !a.done };
+    setTicked((m) => new Map(m).set(a.id, next));
+    setError("");
+    try {
+      await api.setAction(a.id, next.done);
+    } catch (e) {
+      setTicked((m) => new Map(m).set(a.id, a));
+      setError((e as Error).message);
+    }
   };
 
   const groups = useMemo(() => {
@@ -56,6 +71,8 @@ export default function Todo({ onChange }: { onChange?: (open: number) => void }
         <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> {t("Afficher aussi ce qui est fait")}
       </label>
 
+      {!loaded && <Lines n={4} widths={["70%", "84%", "60%", "76%"]} />}
+      {error && <div className="error-box">{error}</div>}
       {loaded && actions.length === 0 && (
         <div className="empty"><p>{t("Rien en attente. Les actions apparaissent ici quand un élément sauvegardé en suggère.")}</p></div>
       )}

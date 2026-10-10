@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { api, type ItemDetail, type Space } from "../api";
+import { cache } from "../cache";
+import { PageSkeleton } from "../components/Skeleton";
 import { t } from "../i18n";
 import { IconBack, IconLock, IconSpinner } from "../icons";
+import { useNavigate } from "../nav";
 import { CATEGORIES, categoryOf, isEditableNote, spaceHome } from "../perso";
+import { keys } from "../queries";
 
 const DRAFT_KEY = "kb_note_draft";
 
@@ -37,9 +41,11 @@ export default function NoteEditor() {
   const [error, setError] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
 
+  // the note as its page just had it, or else as the server has it now (without counting a visit)
   useEffect(() => {
     if (!id) return;
-    api.item(id).then((it) => {
+    const cached = cache.fresh(keys.item(id), 10_000) ? cache.peek<ItemDetail>(keys.item(id)) : undefined;
+    (cached ? Promise.resolve(cached) : api.item(id, false)).then((it) => {
       if (!isEditableNote(it)) { setError(t("Seules les notes écrites se modifient ici. Pour un lien ou un fichier, change le titre, la note ou les tags depuis sa fiche.")); return; }
       setOriginal(it);
       setForm({ title: it.title ?? "", content: it.content ?? it.input_text ?? "", space: it.space, category: it.category ?? "", tags: "" });
@@ -93,7 +99,7 @@ export default function NoteEditor() {
   };
 
   if (editing && !original && !error) {
-    return <div className="page"><div className="status-line"><IconSpinner /> {t("Chargement…")}</div></div>;
+    return <div className="page"><PageSkeleton /></div>;
   }
 
   return (

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { api, auth, type NotionStatus } from "../api";
+import { useParams } from "react-router-dom";
+import { api, auth, signOut } from "../api";
+import { cache, useQuery } from "../cache";
 import { claudePrefs } from "../claude";
 import { Costs, dollars } from "../components/Costs";
 import { LangSwitch } from "../components/LangSwitch";
@@ -8,6 +9,8 @@ import { lang, t } from "../i18n";
 import { IconBack, IconNext } from "../icons";
 import { ago, KINDS } from "../kinds";
 import { useDesktop } from "../layout";
+import { Link } from "../nav";
+import { keys } from "../queries";
 
 type Stats = Awaited<ReturnType<typeof api.stats>>;
 
@@ -18,13 +21,13 @@ const SECTIONS: [string, string][] = [
 const LANG_NAMES: Record<string, string> = { fr: "Français", en: "English" };
 
 /** Desktop: every section on one page, with a strip of links to them. Phone: grouped rows, each opening its section. */
-export default function Settings({ onLogout }: { onLogout: () => void }) {
+export default function Settings() {
+  const onLogout = signOut;
   const { section } = useParams();
   const desktop = useDesktop();
-  const [stats, setStats] = useState<Stats | null>(null);
+  const stats = useQuery(keys.stats, api.stats).data ?? null;
   const origin = auth.base || window.location.origin;
 
-  useEffect(() => { api.stats().then(setStats).catch(() => {}); }, []);
   useEffect(() => {
     if (desktop && section) document.getElementById(section)?.scrollIntoView({ block: "start" });
   }, [desktop, section]);
@@ -82,19 +85,10 @@ function StatTiles({ stats, all = false }: { stats: Stats; all?: boolean }) {
 }
 
 function PhoneSettings({ stats, origin, onLogout }: { stats: Stats | null; origin: string; onLogout: () => void }) {
-  const [thinking, setThinking] = useState<boolean | null>(null);
+  const [thinking, toggleThinking] = useThinking();
   const [desktopApp, setDesktopApp] = useState(claudePrefs.desktop);
-  const [month, setMonth] = useState<number | null>(null);
-  const [notion, setNotion] = useState<NotionStatus | null>(null);
-  useEffect(() => {
-    api.thinking().then((r) => setThinking(r.enabled)).catch(() => {});
-    api.costs().then((c) => setMonth(c.month)).catch(() => {});
-    api.notion().then(setNotion).catch(() => {});
-  }, []);
-  const toggleThinking = async (enabled: boolean) => {
-    setThinking(enabled);
-    try { setThinking((await api.setThinking(enabled)).enabled); } catch { setThinking(!enabled); }
-  };
+  const month = useQuery(keys.costs, api.costs).data?.month ?? null;
+  const notion = useQuery(keys.notion, api.notion).data ?? null;
   const notionLine = !notion ? "" : !notion.configured ? t("Pas encore activée")
     : `${notion.pending ? t("{n} en attente", { n: notion.pending }) : t("Tout est à jour")}${notion.last_sync_at ? ` · ${t("synchro {when}", { when: ago(notion.last_sync_at) })}` : ""}`;
   const rows: [string, string, string][] = [
@@ -168,15 +162,20 @@ function SectionBody({ id, origin, onLogout }: { id: string; origin: string; onL
   }
 }
 
-function Thinking() {
-  const [thinking, setThinking] = useState<boolean | null>(null);
+/** Whether Claude thinks before answering, and a switch for it (shown at once, then saved). */
+function useThinking(): [boolean | null, (enabled: boolean) => Promise<void>, string] {
+  const thinking = useQuery(keys.thinking, api.thinking).data?.enabled ?? null;
   const [error, setError] = useState("");
-  useEffect(() => { api.thinking().then((r) => setThinking(r.enabled)).catch(() => {}); }, []);
   const toggle = async (enabled: boolean) => {
-    setThinking(enabled);
+    cache.set(keys.thinking, { enabled });
     setError("");
-    try { setThinking((await api.setThinking(enabled)).enabled); } catch (e) { setThinking(!enabled); setError((e as Error).message); }
+    try { cache.set(keys.thinking, await api.setThinking(enabled)); } catch (e) { setError((e as Error).message); }
   };
+  return [thinking, toggle, error];
+}
+
+function Thinking() {
+  const [thinking, toggle, error] = useThinking();
   return (
     <>
       <label className="check-row">
@@ -239,10 +238,10 @@ function LangPicker({ value, options, onChange, disabled }: { value: string; opt
 }
 
 function Notion() {
-  const [notion, setNotion] = useState<NotionStatus | null>(null);
+  const query = useQuery(keys.notion, api.notion);
+  const notion = query.data ?? null;
   const [syncing, setSyncing] = useState(false);
-  const load = () => api.notion().then(setNotion).catch(() => {});
-  useEffect(() => { load(); }, []);
+  const load = query.refresh;
   const syncNow = async () => {
     setSyncing(true);
     try { await api.notionSync(); await new Promise((r) => setTimeout(r, 2500)); await load(); } finally { setSyncing(false); }
@@ -268,7 +267,7 @@ function Notion() {
         <div className="inline-row">
           <span>{t("Langue de la copie")}</span>
           <LangPicker value={notion.language ?? "fr"} options={notion.languages!} disabled={syncing}
-                      onChange={async (l) => { if (l !== notion.language && window.confirm(t("Recopier ta KB dans une nouvelle base Notion en {language} ? L'ancienne base reste dans Notion, tu pourras la supprimer.", { language: LANG_NAMES[l] ?? l }))) setNotion(await api.notionLanguage(l)); }} />
+                      onChange={async (l) => { if (l !== notion.language && window.confirm(t("Recopier ta KB dans une nouvelle base Notion en {language} ? L'ancienne base reste dans Notion, tu pourras la supprimer.", { language: LANG_NAMES[l] ?? l }))) cache.set(keys.notion, await api.notionLanguage(l)); }} />
         </div>
       )}
       <p className="hint">{t("Chaque élément a sa page dans une base Notion, mise à jour à chaque modification. Modifie tes notes dans l'app : les retouches faites dans Notion sont écrasées.")}</p>

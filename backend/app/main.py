@@ -447,12 +447,16 @@ def _links(item_id: str) -> list[dict]:
 
 
 @api.get("/api/items/{item_id}", dependencies=auth)
-def get_item(item_id: str):
-    it = db.fetchone(
-        """update items set view_count = view_count + 1, last_viewed_at = now() where id = %s
-           returning *, id::text as id""",
-        (item_id,),
-    )
+def get_item(item_id: str, view: bool = True):
+    """`view=false`: the app refreshing a page already open, which isn't one more visit."""
+    if view:
+        it = db.fetchone(
+            """update items set view_count = view_count + 1, last_viewed_at = now() where id = %s
+               returning *, id::text as id""",
+            (item_id,),
+        )
+    else:
+        it = db.fetchone("select *, id::text as id from items where id = %s", (item_id,))
     if not it:
         raise HTTPException(404, "Élément introuvable")
     meta = it.get("metadata") or {}

@@ -15,7 +15,7 @@ Share anything from your iPhone or Mac (a tweet or thread, an article, a YouTube
 - **Morning tech digest** (optional): Hacker News, Hugging Face papers, rising GitHub repos, blogs and the people you follow on X, ranked by what you save. On Mondays, the week in review and project ideas.
 - **In Claude**: a connector (MCP) lets Claude search and read your KB on web, desktop, mobile and Claude Code.
 - **Never locked in**: optional live copy in Notion, and a full Markdown export (Obsidian-ready) with your original files.
-- **Made for the phone**: an installable app, in English or French, with swipe gestures to pin, archive or delete. It shows what each service costs you, month by month.
+- **Made for the phone**: an installable app that feels like one, in English or French. Pages slide in and out, the ones you come back to are there at once (pull down to reload), the bars are Apple's Liquid Glass, a swipe from the screen's edge goes back and swipes on a card pin, archive or delete it. It shows what each service costs you, month by month.
 
 ## What you need
 

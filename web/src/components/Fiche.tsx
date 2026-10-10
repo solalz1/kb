@@ -1,8 +1,8 @@
-import { Link } from "react-router-dom";
 import type { ItemSummary } from "../api";
 import { localized, t } from "../i18n";
 import { IconPin, IconSpinner } from "../icons";
 import { ago, agoShort, duration, fullDate, hostOf, kindLabel } from "../kinds";
+import { Link } from "../nav";
 import { headLabel } from "../perso";
 
 /** A card of the feed. On phones a card with a picture keeps its "why" and drops its summary and tags. */

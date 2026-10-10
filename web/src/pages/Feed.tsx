@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { api, type Folder, type ItemSummary, type Space } from "../api";
+import { cache, useQuery } from "../cache";
 import { Fiche, ResurfaceCard, ResurfaceNote } from "../components/Fiche";
+import { CardsSkeleton } from "../components/Skeleton";
 import { SwipeRow, type SwipeAction, type SwipeSide } from "../components/Swipe";
 import { t } from "../i18n";
 import { IconArchive, IconBack, IconCalendar, IconClose, IconEdit, IconFolder, IconPin, IconSearch, IconSettings, IconTodo, IconTrash } from "../icons";
 import { KIND_FILTERS, kindsOf } from "../kinds";
 import { useDesktop } from "../layout";
+import { useFlip } from "../motion";
+import { Link, useNavigate } from "../nav";
 import { CATEGORIES, categoryOf } from "../perso";
+import { dropItem, fetchItems, fetchMore, forgetItem, keys, patchItem, type ItemsPage, type ItemsQuery } from "../queries";
 
-const PAGE = 30;
 const UNDO_MS = 5000;     // how long the undo button stays, and how long a deletion waits before it happens
 
 type Toast = { id: number; message: string; undo?: () => void };
 
-/** Veille, Perso, or one folder (`/folders/:folderId`, any space). `pending`: open actions, as a badge on the phone. */
-export default function Feed({ space, pending = 0 }: { space?: Space; pending?: number }) {
+/** Veille, Perso, or one folder (`/folders/:folderId`, any space). Everything comes from the cache (cache.ts): coming
+ *  back to the feed shows it at once, where it was. */
+export default function Feed({ space }: { space?: Space }) {
   const { folderId } = useParams();
   const nav = useNavigate();
   const desktop = useDesktop();
@@ -29,25 +34,14 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
   const archived = params.get("archived") === "1";
   const [q, setQ] = useState(params.get("q") || "");
   const [query, setQuery] = useState(q);
-  const [items, setItems] = useState<ItemSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [week, setWeek] = useState<number | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [resurface, setResurface] = useState<ItemSummary[]>([]);
-  const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
-  const [entities, setEntities] = useState<{ name: string; count: number }[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [archivedCount, setArchivedCount] = useState(0);
-  const [folder, setFolder] = useState<Folder | null>(null);
+  const [actionError, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [opened, setOpened] = useState<{ id: string; side: SwipeSide } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const reqId = useRef(0);
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());     // deleted, waiting for the undo to pass
+  const [more, setMore] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
+  const listBox = useRef<HTMLDivElement>(null);
 
   // search as you type, after a short pause
   useEffect(() => {
@@ -64,40 +58,42 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const load = async (offset = 0) => {
-    const id = ++reqId.current;
-    if (offset === 0) setLoading(true);
-    try {
-      const res = await api.items({ q: query || undefined, kind: kind ? kindsOf(kind) : undefined, tag: tag || undefined,
-                                    entity: entity || undefined, category: category || undefined, space,
-                                    folder: folderId, archived: archived || undefined, limit: PAGE, offset });
-      if (id !== reqId.current) return;
-      setItems((prev) => (offset ? [...prev, ...res.items] : res.items));
-      setTotal(res.total);
-      setSearching(res.search);
-      setError("");
-    } catch (e) {
-      if (id === reqId.current) setError((e as Error).message);
-    } finally {
-      if (id === reqId.current) setLoading(false);
-    }
+  const filters: ItemsQuery = {
+    q: query || undefined, kind: kind ? kindsOf(kind) : undefined, tag: tag || undefined, entity: entity || undefined,
+    category: category || undefined, space, folder: folderId, archived: archived || undefined,
   };
+  const listKey = keys.items(filters);
+  useEffect(() => { setError(""); }, [listKey]);       // an action that failed belongs to the list it was on
+  const listNow = cache.peek<ItemsPage>(listKey);
+  const busyItems = !listNow?.search && listNow?.items.some((i) => i.status === "pending" || i.status === "processing");
+  // a folder being deleted: its list stays as it is, not asked for again (it would get a 404)
+  const [leaving, setLeaving] = useState(false);
+  const list = useQuery<ItemsPage>(leaving ? null : listKey, () => fetchItems(filters), { keep: true, poll: busyItems ? 4000 : 0 });
+  const items = useMemo(() => (list.data?.items ?? []).filter((i) => !hidden.has(i.id)), [list.data, hidden]);
+  const total = Math.max(0, (list.data?.total ?? 0) - ((list.data?.items.length ?? 0) - items.length));
+  const searching = Boolean(list.data?.search);
+  const cold = useRef(!list.data).current;       // nothing cached when the page opened: the list rises in when it comes
+  const error = actionError || list.error;
+  useFlip(listBox, items);
 
-  useEffect(() => { load(0); }, [query, kind, tag, entity, category, archived, folderId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (folderId === "none") return;
-    if (inFolder) {
-      api.folders().then((r) => setFolder(r.folders.find((f) => f.id === folderId) ?? null)).catch(() => {});
-      return;
-    }
-    api.resurface(space).then(setResurface).catch(() => {});
-    api.tags(space).then((list) => setTags(list.slice(0, 24))).catch(() => {});
-    api.entities(space).then((list) => setEntities(list.slice(0, 16))).catch(() => {});
-    api.stats().then((s) => setWeek(s.this_week)).catch(() => {});
-    if (perso) api.categories().then((c) => setCounts(Object.fromEntries(c.map((x) => [x.id, x.count])))).catch(() => {});
-    api.items({ space, archived: true, limit: 1 }).then((r) => setArchivedCount(r.total)).catch(() => {});
-  }, [space, perso, inFolder, folderId]);
+  const aside = !inFolder && !archived;
+  const resurfaceQuery = useQuery(aside ? keys.resurface(space) : null, () => api.resurface(space), { maxAge: 10 * 60_000 });
+  const resurface = useMemo(() => (resurfaceQuery.data ?? []).filter((i) => !hidden.has(i.id)), [resurfaceQuery.data, hidden]);
+  // On a first visit, the cards wait for "À redécouvrir" above them, so that it doesn't push them down as it arrives.
+  const stripComing = cold && aside && !query && !kind && !tag && !entity && !category && resurfaceQuery.loading;
+  const loading = list.loading || stripComing;
+  const tags = (useQuery(aside ? keys.tags(space) : null, () => api.tags(space), { maxAge: 2 * 60_000 }).data ?? []).slice(0, 24);
+  const entities = (useQuery(aside ? keys.entities(space) : null, () => api.entities(space), { maxAge: 2 * 60_000 }).data ?? []).slice(0, 16);
+  const stats = useQuery(keys.stats, api.stats).data;
+  const week = aside ? stats?.this_week ?? null : null;
+  const pending = stats?.open_actions ?? 0;          // open actions: a badge on the phone's À faire icon
+  const categories = useQuery(aside && perso ? keys.categories : null, api.categories).data;
+  const counts = useMemo(() => Object.fromEntries((categories ?? []).map((x) => [x.id, x.count])) as Record<string, number>, [categories]);
+  const archivedKey = keys.archivedCount(space);
+  const archivedCount = useQuery(aside ? archivedKey : null,
+                                 () => api.items({ space, archived: true, limit: 1 }).then((r) => r.total)).data ?? 0;
+  const folders = useQuery(inFolder && folderId !== "none" ? keys.folders : null, api.folders).data;
+  const folder: Folder | null = folders?.folders.find((f) => f.id === folderId) ?? null;
 
   // ---- swipe actions: pin, archive, delete, each with an undo ----
 
@@ -106,61 +102,51 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
     const timer = setTimeout(() => setToast((cur) => (cur?.id === toast.id ? null : cur)), UNDO_MS);
     return () => clearTimeout(timer);
   }, [toast]);
-  const notify = (message: string, undo?: () => void) => setToast({ id: Date.now(), message, undo });
-
-  const patchLocal = (id: string, patch: Partial<ItemSummary>) =>
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
-  const takeOut = (it: ItemSummary) => {
-    const index = itemsRef.current.findIndex((i) => i.id === it.id);
-    setItems((prev) => prev.filter((i) => i.id !== it.id));
-    setTotal((n) => Math.max(0, n - 1));
-    return () => {
-      setItems((prev) => (prev.some((i) => i.id === it.id) ? prev
-        : [...prev.slice(0, Math.max(0, index)), it, ...prev.slice(Math.max(0, index))]));
-      setTotal((n) => n + 1);
-    };
-  };
+  const notify = (message: string, undo?: () => void) => { setError(""); setToast({ id: Date.now(), message, undo }); };
+  const countArchived = (delta: number) => cache.update<number>(archivedKey, (n) => Math.max(0, n + delta));
 
   const togglePin = async (it: ItemSummary) => {
     const pinned = !it.pinned;
-    patchLocal(it.id, { pinned });
+    patchItem(it.id, { pinned });
     try {
       await api.patch(it.id, { pinned });
       notify(pinned ? t("Épinglé") : t("Désépinglé"), () => {
-        patchLocal(it.id, { pinned: !pinned });
+        patchItem(it.id, { pinned: !pinned });
         api.patch(it.id, { pinned: !pinned }).catch((e) => setError((e as Error).message));
       });
     } catch (e) {
-      patchLocal(it.id, { pinned: !pinned });
+      patchItem(it.id, { pinned: !pinned });
       setError((e as Error).message);
     }
   };
 
   const setArchived = async (it: ItemSummary, value: boolean) => {
-    const putBack = takeOut(it);
-    setArchivedCount((n) => Math.max(0, n + (value ? 1 : -1)));
+    const putBack = dropItem(it.id, listKey);
+    countArchived(value ? 1 : -1);
     try {
       await api.patch(it.id, { archived: value });
       notify(value ? t("Archivé") : t("Sorti des archives"), () => {
         putBack();
-        setArchivedCount((n) => Math.max(0, n + (value ? -1 : 1)));
+        countArchived(value ? -1 : 1);
         api.patch(it.id, { archived: !value }).catch((e) => setError((e as Error).message));
       });
     } catch (e) {
       putBack();
-      setArchivedCount((n) => Math.max(0, n + (value ? -1 : 1)));
+      countArchived(value ? -1 : 1);
       setError((e as Error).message);
     }
   };
 
   // A deletion can't be undone on the server: it waits UNDO_MS, and happens at once if the page goes away.
   const pendingDeletes = useRef(new Map<string, number>());
+  const showAgain = (id: string) => setHidden((h) => { const n = new Set(h); n.delete(id); return n; });
   const commitDelete = useCallback((id: string) => {
     const timer = pendingDeletes.current.get(id);
     if (timer === undefined) return;
     clearTimeout(timer);
     pendingDeletes.current.delete(id);
-    api.remove(id).catch((e) => setError((e as Error).message));
+    dropItem(id);
+    api.remove(id).then(() => forgetItem(id)).catch((e) => setError((e as Error).message)).finally(() => showAgain(id));
   }, []);
   useEffect(() => {
     const flush = () => [...pendingDeletes.current.keys()].forEach(commitDelete);
@@ -169,15 +155,20 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
   }, [commitDelete]);
 
   const remove = (it: ItemSummary) => {
-    const putBack = takeOut(it);
-    if (it.archived || archived) setArchivedCount((n) => Math.max(0, n - 1));
+    setHidden((h) => new Set(h).add(it.id));
+    if (it.archived || archived) countArchived(-1);
     pendingDeletes.current.set(it.id, window.setTimeout(() => commitDelete(it.id), UNDO_MS));
     notify(t("Supprimé"), () => {
       clearTimeout(pendingDeletes.current.get(it.id));
       pendingDeletes.current.delete(it.id);
-      putBack();
-      if (it.archived || archived) setArchivedCount((n) => n + 1);
+      showAgain(it.id);
+      if (it.archived || archived) countArchived(1);
     });
+  };
+
+  const loadMore = async () => {
+    setMore(true);
+    try { await fetchMore(filters); } catch (e) { setError((e as Error).message); } finally { setMore(false); }
   };
 
   const actionsFor = (it: ItemSummary): { start?: SwipeAction; end: SwipeAction[] } => {
@@ -192,14 +183,6 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
       end: [del, { id: "archive", label: t("Archiver"), icon: <IconArchive size={19} />, tone: "ink", run: () => setArchived(it, true) }],
     };
   };
-
-  // while items are being processed, refresh
-  const hasPending = items.some((i) => i.status === "pending" || i.status === "processing");
-  useEffect(() => {
-    if (!hasPending || searching) return;
-    const timer = setInterval(() => load(0), 4000);
-    return () => clearInterval(timer);
-  }, [hasPending, searching]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -237,8 +220,11 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
           <>
             <Link className="back" to="/folders"><IconBack size={18} /> {t("Dossiers")}</Link>
             {editing && folder ? (
-              <FolderEditor folder={folder} onDone={(f) => { setEditing(false); if (f) setFolder(f); }}
-                            onDeleted={() => nav("/folders", { replace: true })} />
+              <FolderEditor folder={folder} onDone={(f) => {
+                setEditing(false);
+                if (f) cache.update<{ folders: Folder[] }>(keys.folders, (r) => ({ ...r, folders: r.folders.map((x) => (x.id === f.id ? { ...x, ...f } : x)) }));
+              }}
+                            onDeleting={setLeaving} onDeleted={() => nav("/folders", { replace: true })} />
             ) : (
               <>
                 <header className="page-head">
@@ -377,11 +363,12 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
           )
         )}
 
-        {items.length > 0 && (
-          <div className="feed-list">
+        {loading && <CardsSkeleton />}
+        {items.length > 0 && !stripComing && (
+          <div className={`feed-list${list.previous ? " refreshing" : ""}${cold ? " appear" : ""}`} ref={listBox}>
             <span className={`feed-count${searching || archived ? "" : " phone-only"}`}>{countLabel}</span>
             {items.map((it) => (
-              <SwipeRow key={it.id} {...actionsFor(it)} open={opened?.id === it.id ? opened.side : null}
+              <SwipeRow key={it.id} flipId={it.id} {...actionsFor(it)} open={opened?.id === it.id ? opened.side : null}
                         onOpenChange={(side) => setOpened(side ? { id: it.id, side } : (cur) => (cur?.id === it.id ? null : cur))}>
                 <Fiche item={it} />
               </SwipeRow>
@@ -390,7 +377,7 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
         )}
 
         {!searching && items.length < total && (
-          <div style={{ textAlign: "center" }}><button className="btn small" onClick={() => load(items.length)}>{t("Afficher plus")}</button></div>
+          <div style={{ textAlign: "center" }}><button className="btn small" onClick={loadMore} disabled={more}>{t("Afficher plus")}</button></div>
         )}
 
         {!archived && !inFolder && archivedCount > 0 && !loading && (
@@ -402,7 +389,7 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
         )}
 
         {toast && (
-          <div className="toast" role="status">
+          <div className="toast" role="status" key={toast.id}>
             <span>{toast.message}</span>
             {toast.undo && <button type="button" className="toast-undo" onClick={() => { toast.undo?.(); setToast(null); }}>{t("Annuler|undo")}</button>}
           </div>
@@ -445,8 +432,8 @@ export default function Feed({ space, pending = 0 }: { space?: Space; pending?: 
 }
 
 /** Rename a folder, say what goes in it (Claude files by it), or delete it. */
-export function FolderEditor({ folder, onDone, onDeleted }: {
-  folder: Folder; onDone: (f?: Folder) => void; onDeleted: () => void;
+export function FolderEditor({ folder, onDone, onDeleting, onDeleted }: {
+  folder: Folder; onDone: (f?: Folder) => void; onDeleting: (on: boolean) => void; onDeleted: () => void;
 }) {
   const [name, setName] = useState(folder.name);
   const [description, setDescription] = useState(folder.description ?? "");
@@ -464,7 +451,8 @@ export function FolderEditor({ folder, onDone, onDeleted }: {
   const remove = async () => {
     if (!window.confirm(t("Supprimer le dossier « {name} » ? Ses éléments restent dans ta KB, sans dossier.", { name: folder.name }))) return;
     setBusy(true);
-    try { await api.deleteFolder(folder.id); onDeleted(); } catch (err) { setError((err as Error).message); setBusy(false); }
+    onDeleting(true);
+    try { await api.deleteFolder(folder.id); onDeleted(); } catch (err) { onDeleting(false); setError((err as Error).message); setBusy(false); }
   };
 
   return (
