@@ -21,6 +21,21 @@ import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/geist-mono";
 import "./styles.css";
 
+// A page change that interrupts another (back while a page is still sliding in) skips the first one's animation:
+// expected, not an error. Its promises reject with an AbortError that nobody else catches.
+if (typeof document.startViewTransition === "function") {
+  const start = document.startViewTransition.bind(document);
+  document.startViewTransition = ((update?: Parameters<typeof start>[0]) => {
+    const transition = start(update);
+    for (const p of [transition.ready, transition.updateCallbackDone, transition.finished]) p.catch(() => {});
+    return transition;
+  }) as typeof document.startViewTransition;
+}
+window.addEventListener("unhandledrejection", (e) => {
+  const reason = e.reason as { name?: string; message?: string } | null;
+  if (reason?.name === "AbortError" && /transition/i.test(reason.message ?? "")) e.preventDefault();
+});
+
 // Safari's and Chrome's own back gestures already animate the page: no second animation on top of theirs.
 window.addEventListener("popstate", (e) => {
   if ((e as PopStateEvent & { hasUAVisualTransition?: boolean }).hasUAVisualTransition) skipNextAnimation();

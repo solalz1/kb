@@ -825,6 +825,13 @@ def test_pages_come_back_from_memory_and_slide(site):
     expect(page.locator(".fiche")).to_have_count(14)
     assert asked
 
+    # back while the page is still sliding in: the animation is cut short, nothing breaks
+    page.locator(".fiche").first.click()
+    page.wait_for_url(re.compile(r"/item/"))
+    page.go_back()
+    expect(page.locator(".fiche")).to_have_count(14)
+    _settled(page)
+
 
 def test_installed_app_gestures(site):
     """In the app installed on an iPhone (no browser bar): pulling the page down from its top reloads it, and a finger
