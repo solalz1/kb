@@ -180,6 +180,22 @@ create table if not exists public.notion_trash (
 );
 
 -- -----------------------------------------------------------------------------
+-- Folders: the user's own shelves (ML, Claude, Interviews…), one per item. Claude files each new item in the
+-- folder that fits (app/folders.py); a folder the user picks by hand sticks (items.metadata.manual_folder).
+-- -----------------------------------------------------------------------------
+create table if not exists public.folders (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  description text,                -- what goes in it: guides the automatic filing
+  position    int  not null default 0,
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists folders_name_idx on public.folders (lower(name));
+
+alter table public.items add column if not exists folder_id uuid references public.folders (id) on delete set null;
+create index if not exists items_folder_idx on public.items (folder_id, created_at desc);
+
+-- -----------------------------------------------------------------------------
 -- Agent de veille : sources suivies (ingénieurs, blogs), digests quotidiens/hebdo, retours
 -- -----------------------------------------------------------------------------
 create table if not exists public.watch (
@@ -401,6 +417,7 @@ alter table public.item_links enable row level security;
 alter table public.actions    enable row level security;
 alter table public.kb_settings  enable row level security;
 alter table public.notion_trash enable row level security;
+alter table public.folders      enable row level security;
 alter table public.watch           enable row level security;
 alter table public.digests         enable row level security;
 alter table public.digest_feedback enable row level security;

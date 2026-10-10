@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 
-from . import db, notion, pipeline
+from . import db, folders, notion, pipeline
 from .config import get_settings
 
 log = logging.getLogger(__name__)
@@ -28,6 +28,8 @@ class Worker:
             t.start()
             self._threads.append(t)
         log.info("Worker démarré (%d threads)", self.concurrency)
+        # the items saved before folders existed are filed once, in the background
+        threading.Thread(target=folders.startup, name="kb-folders", daemon=True).start()
         if notion.enabled():
             self._notion = notion.Syncer()
             self._notion.start()

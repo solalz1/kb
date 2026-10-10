@@ -46,8 +46,10 @@ def _texts(value):
 
 
 def _request(shortcut):
+    """The request that sends the share (the first POST)."""
     return next(a["WFWorkflowActionParameters"] for a in shortcut["WFWorkflowActions"]
-                if a["WFWorkflowActionIdentifier"].endswith(".downloadurl"))
+                if a["WFWorkflowActionIdentifier"].endswith(".downloadurl")
+                and a["WFWorkflowActionParameters"]["WFHTTPMethod"] == "POST")
 
 
 def _keys(dictionary_field):
@@ -101,12 +103,12 @@ def test_requests_match_the_api(shortcuts):
     add = _request(shortcuts["Add To KB"])
     assert add["WFURL"] == "https://kb.example.com/api/ingest" and add["WFURL"].removeprefix("https://kb.example.com") in routes
     assert add["WFHTTPMethod"] == "POST" and add["WFHTTPBodyType"] == "JSON"
-    assert set(_keys(add["WFJSONValues"])) == {"url", "text", "note", "category", "page_follows"}
+    assert set(_keys(add["WFJSONValues"])) == {"url", "text", "note", "folder", "page_follows"}
 
     files = _request(shortcuts["Fichier vers ma KB"])
     assert files["WFHTTPBodyType"] == "Form"
     form = _keys(files["WFFormValues"])
-    assert set(form) == {"file", "note", "category"} and form["file"]["WFItemType"] == 5
+    assert set(form) == {"file", "note", "folder"} and form["file"]["WFItemType"] == 5
     # A File row is a variable wrapped twice: anything else crashes Shortcuts when it loads the file.
     assert form["file"]["WFValue"] == {
         "Value": {"Value": {"Type": "Variable", "VariableName": "Repeat Item"},
@@ -125,8 +127,29 @@ def test_choices_are_understood_by_the_app(build):
     for word in build.CATEGORIES:
         assert taxonomy.normalize_category(word) in taxonomy.CATEGORIES, word
     assert set(build.CATEGORIES) == {label for label, _, _ in taxonomy.CATEGORIES.values()}
-    assert [taxonomy.space_from_word(w) for w in build.PLACES[:2]] == ["main", "perso"]
-    assert build.PLACES[2:] == build.CATEGORIES
+
+
+@pytest.mark.parametrize("name", ["Add To KB", "Fichier vers ma KB"])
+def test_where_to_file_it_comes_from_the_kb(build, shortcuts, name):
+    """"Où le ranger ?" lists the KB's folders as they are when sharing: a folder added in the app shows up without
+    rebuilding the Shortcut. The choice goes back as `folder`."""
+    from app.main import api
+
+    params = [a["WFWorkflowActionParameters"] for a in shortcuts[name]["WFWorkflowActions"]]
+    ids = [a["WFWorkflowActionIdentifier"].removeprefix("is.workflow.actions.") for a in shortcuts[name]["WFWorkflowActions"]]
+    i = ids.index("choosefromlist")
+    fetch, pick, chosen = params[i - 2], params[i - 1], params[i]
+    assert ids[i - 2:i] == ["downloadurl", "getvalueforkey"] and "list" not in ids
+    assert fetch["WFURL"] == "https://kb.example.com" + build.CHOICES_PATH and fetch["WFHTTPMethod"] == "GET"
+    assert build.CHOICES_PATH in {r.path for r in api.routes if "GET" in getattr(r, "methods", ())}
+    assert _keys(fetch["WFHTTPHeaders"])["Authorization"]["WFValue"]["Value"]["string"] == "Bearer " + build.OBJECT
+    assert pick["WFDictionaryKey"] == "choices" and pick["WFInput"]["Value"]["OutputUUID"] == fetch["UUID"]
+    assert chosen["WFInput"]["Value"]["OutputUUID"] == pick["UUID"]
+    assert chosen["WFChooseFromListActionPrompt"] == "Où le ranger ?"
+    request = _request(shortcuts[name])
+    body = _keys(request.get("WFJSONValues") or request["WFFormValues"])
+    (ref,) = body["folder"]["WFValue"]["Value"]["attachmentsByRange"].values()
+    assert ref["OutputUUID"] == chosen["UUID"]
 
 
 def test_file_shortcut_reports_the_server_message(shortcuts):

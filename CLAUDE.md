@@ -25,8 +25,13 @@ update both.
   - `main.py`: `/api/*`, the SPA, and `RootApp`, which routes `/mcp` (Bearer header) and `/mcp/<KB_MCP_SECRET>`
     to the MCP server.
   - `pipeline.py`: `ingest()` (queueing + dedup, `#perso`/`#leçon` hashtag routing), `create_note()` (hand-written
-    notes, kept verbatim) and `process()` (extract → `llm.enrich` → chunks → embeddings → links). A title or tags set by
-    the user (`metadata.manual_title`, `metadata.user_tags`) survive reprocessing.
+    notes, kept verbatim) and `process()` (extract → `llm.enrich` → chunks → embeddings → links). A title, tags or a
+    folder set by the user (`metadata.manual_title`, `metadata.user_tags`, `metadata.manual_folder`) survive reprocessing.
+  - `folders.py`: the user's folders (`folders` table, one `items.folder_id` per item). Defaults are created once
+    (`kb_settings` flag `folders_seeded`) at start; `llm.enrich` picks the folder of each new item, `sort_items`
+    (`llm.classify_folders`, batches of 20) files the rest once at start (`folders_sorted`) and from the app. The
+    Shortcut's "Où le ranger ?" list comes from `GET /api/folders/choices` (Automatique, the folders, Espace Perso) and
+    goes back as `folder`; a folder chosen by hand is never changed by Claude.
   - `worker.py`: threads calling `claim_next_item()`. `ExtractionError` = permanent failure; any other exception = retry.
   - `extractors/`: one module per source. URL routing in `urls.classify()`, then `extractors/__init__.py`.
     PDFs use pypdfium2 (not thread-safe: always go through `_PDFIUM_LOCK`).
@@ -55,14 +60,18 @@ update both.
     `render.py` (Markdown, e-mail HTML, SMTP). Tables: `watch`, `digests`, `digest_feedback`.
 - `shortcuts/build.py`: generates the three iOS/macOS Shortcuts (binary plists, stdlib only; the token is an import
   question, never written). Signing needs macOS (`--sign`). `tests/test_shortcuts.py` checks them against the API.
-- `web/`: React 19 + Vite PWA, no CSS framework. "Warm paper" design (`styles.css`): ivory ground (`--desk`), cream
-  cards (`--surface`), brown ink, one terracotta accent (`--waterman`) for every action, a kraft tint (`--tint`) for
-  the Perso space, "à redécouvrir" and stat tiles. Every card is the same sheet; the content type is a small colored
-  `.dot` (`--dot-*`) next to its label. Newsreader (serif) for titles, quotes and the user's notes, Instrument Sans
-  for the interface, Geist Mono for code only (fonts self-hosted with `@fontsource-variable`); 12–16px radii, pill
-  chips, 44px touch targets. Desktop: sidebar with "Ajouter" as the primary button and Réglages at the bottom.
-  Phone: no top bar; a five-slot tab bar with the + in the middle, and the Feed page head carries the À faire badge
-  and the settings cog. Keep this visual language and these colors.
+- `web/`: React 19 + Vite PWA, no CSS framework. The pages follow the user's design canvas "KB — redesign chaud"
+  (18 artboards, Mac and iPhone): match its sizes, spacing and wording when changing a page. "Warm paper" design
+  (`styles.css`, phone first, the sidebar from 900px): ivory ground (`--desk`), cream cards (`--surface`), brown ink,
+  one terracotta accent (`--accent`) for every action, kraft (`--tint`) for the Perso space, "à redécouvrir", related
+  items and stat tiles, sand (`--sand`) for segmented controls. The content type is a small colored `.dot`
+  (`--dot-*`). Newsreader (serif) for titles, quotes and the user's notes, Instrument Sans for the interface, Geist
+  Mono for code only (self-hosted with `@fontsource-variable`). Icons are drawn in `src/icons.tsx` (no icon
+  library). Desktop: sidebar (Ajouter, Veille, Perso, Dossiers, Journal, Digest, Demander, À faire, Réglages at the
+  bottom); the item page is two columns. Phone: no top bar, a five-slot tab bar with the + in the middle (the tab of
+  the section a page belongs to is lit), Veille's head carries the folders, À faire and settings icons, Perso's the
+  journal; Réglages is grouped rows that open `/settings/<section>`. `useDesktop()` (`layout.ts`) when a page differs
+  by more than CSS.
   Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
   each with an undo toast; a deletion waits 5 s before it reaches the API.
 

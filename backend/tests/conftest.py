@@ -49,8 +49,8 @@ def database():
 def clean_db(database):
     from app import db
 
-    db.execute("truncate items, chunks, item_links, actions, kb_settings, notion_trash, watch, digests, digest_feedback, usage_log "
-               "restart identity cascade")
+    db.execute("truncate items, chunks, item_links, actions, kb_settings, notion_trash, watch, digests, digest_feedback, usage_log, "
+               "folders restart identity cascade")
     yield
 
 
@@ -91,7 +91,7 @@ def fake_llm(monkeypatch):
     """Remplace tous les appels à Claude par des réponses déterministes."""
     from app import llm
 
-    calls = {"enrich": [], "describe_image": [], "links": [], "stream": []}
+    calls = {"enrich": [], "describe_image": [], "links": [], "stream": [], "classify": []}
 
     def enrich(**kw):
         calls["enrich"].append(kw)
@@ -108,6 +108,8 @@ def fake_llm(monkeypatch):
             "genre": "other",
             "language": "fr",
             **({"category": "lecon"} if kw.get("space") == "perso" else {}),
+            # the first folder whose name the content mentions
+            "folder": next((f["name"] for f in kw.get("folders") or [] if _mentions(kw["content"], f["name"])), None),
             "translations": {"en": {"title": f"Generated title: {(kw['content'] or '')[:30]}",
                                     "summary": f"Summary of the {kw['kind']}: {(kw['content'] or '')[:200]}",
                                     "key_points": ["Point A (en)", "Point B (en)"],
@@ -124,6 +126,11 @@ def fake_llm(monkeypatch):
         calls["links"].append(candidates)
         return [{"id": c["id"], "related": True, "reason": "Même sujet"} for c in candidates]
 
+    def classify_folders(items, folders):
+        calls["classify"].append([it["id"] for it in items])
+        text = lambda it: f"{it.get('title') or ''} {it.get('summary') or ''} {' '.join(it.get('tags') or [])}"
+        return {it["id"]: f["name"] for it in items for f in reversed(folders) if _mentions(text(it), f["name"])}
+
     def stream_text(*, system, messages, model=None, max_tokens=4000):
         calls["stream"].append({"system": system, "messages": messages, "model": model})
         yield "Réponse "
@@ -133,12 +140,19 @@ def fake_llm(monkeypatch):
     monkeypatch.setattr(llm, "describe_image", describe_image)
     monkeypatch.setattr(llm, "describe_frames", lambda frames, context="": "Des diapositives sur l'IA.")
     monkeypatch.setattr(llm, "explain_links", explain_links)
+    monkeypatch.setattr(llm, "classify_folders", classify_folders)
     monkeypatch.setattr(llm, "rewrite_query", lambda history, q: q + " (reformulée)")
     monkeypatch.setattr(llm, "plan_project_queries",
                         lambda d: {"project_summary": "Projet test", "queries": ["agents rag", "évaluation"]})
     monkeypatch.setattr(llm, "stream_text", stream_text)
     monkeypatch.setattr(llm, "transcribe_pdf", lambda data, first_page=1: f"[p. {first_page}]\nTexte OCR du scan")
     return calls
+
+
+def _mentions(text: str | None, name: str) -> bool:
+    import re
+
+    return bool(re.search(rf"\b{re.escape(name)}\b", text or "", re.I))
 
 
 def drain():

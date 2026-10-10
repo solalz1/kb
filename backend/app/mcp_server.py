@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import anyio
 from mcp.server.mcpserver import MCPServer
 
-from . import chat, db, pipeline, search
+from . import chat, db, folders, pipeline, search
 from .formatting import item_markdown
 from .search import ITEM_FIELDS
 from .taxonomy import normalize_category, normalize_space
@@ -157,6 +157,7 @@ async def add_to_kb(
     space: str | None = None,
     category: str | None = None,
     title: str | None = None,
+    folder: str | None = None,
 ) -> str:
     """Ajoute un lien (tweet, article, vidéo, PDF…) ou une note texte à la knowledge base.
 
@@ -167,9 +168,11 @@ async def add_to_kb(
         space: "main" (veille, par défaut) ou "perso" (développement personnel).
         category: pour space="perso" : principe, valeur, lecon, objectif, habitude, reflexion, journal, citation, ressource.
         title: titre de la note (facultatif ; sinon Claude en propose un).
+        folder: dossier où le ranger (nom d'un dossier listé par kb_overview) ; par défaut Claude choisit.
     """
     try:
-        res = await _run(pipeline.ingest, url=url, text=text, note=note, space=space, category=category, title=title)
+        res = await _run(pipeline.ingest, url=url, text=text, note=note, space=space, category=category, title=title,
+                         folder=folder)
     except ValueError as exc:
         return f"Impossible : {exc}"
     if res["duplicate"]:
@@ -198,19 +201,27 @@ async def browse_kb(
     since_days: int | None = None,
     space: str | None = None,
     category: str | None = None,
+    folder: str | None = None,
     limit: int = 30,
     offset: int = 0,
 ) -> str:
-    """Liste exhaustive (paginée) des éléments filtrés par espace, catégorie, type, tag, entité (personne, outil,
-    concept) ou période.
+    """Liste exhaustive (paginée) des éléments filtrés par espace, catégorie, dossier, type, tag, entité (personne,
+    outil, concept) ou période.
 
     À utiliser quand il faut couvrir tout un sujet plutôt que les meilleurs résultats d'une recherche
-    (ex. space="perso", category="lecon" pour toutes ses leçons). Renvoie une ligne par élément ; get_item pour le détail.
+    (ex. space="perso", category="lecon" pour toutes ses leçons ; folder="ML" pour tout son dossier ML ; les dossiers
+    sont listés par kb_overview). Renvoie une ligne par élément ; get_item pour le détail.
     """
     try:
         spaces, cat = _space(space), normalize_category(category)
     except ValueError as exc:
         return str(exc)
+    shelf = None
+    if folder:
+        shelf = await _run(folders.resolve, folder)
+        if not shelf:
+            names = await _run(lambda: [f["name"] for f in folders.all_folders()])
+            return f"Dossier inconnu : {folder} (dossiers : {', '.join(names) or 'aucun'})."
 
     def load():
         where, params = ["status = 'ready'", "not archived"], []
@@ -220,6 +231,9 @@ async def browse_kb(
         if cat:
             where.append("category = %s")
             params.append(cat)
+        if shelf:
+            where.append("folder_id = %s::uuid")
+            params.append(shelf["id"])
         if kind:
             where.append("kind = %s")
             params.append(kind)
@@ -272,15 +286,16 @@ async def kb_overview() -> str:
         perso = db.fetchall(
             """select coalesce(category, 'sans catégorie') as category, count(*)::int n from items
                where status='ready' and not archived and space = 'perso' group by 1 order by n desc""")
-        return kinds, tags, ents, last, perso
+        return kinds, tags, ents, last, perso, folders.all_folders()
 
-    kinds, tags, ents, last, perso = await _run(load)
+    kinds, tags, ents, last, perso, shelves = await _run(load)
     if not last or not last["n"]:
         return "La KB est vide pour l'instant."
     n_perso = sum(p["n"] for p in perso)
     return "\n".join([
         f"{last['n']} éléments (veille {last['n'] - n_perso}, perso {n_perso}), dernier ajout le {str(last['d'])[:10]}.",
         "Perso par catégorie : " + (", ".join(f"{p['category']} {p['n']}" for p in perso) or "vide"),
+        "Dossiers (browse_kb folder=…) : " + (", ".join(f"{f['name']} {f['count']}" for f in shelves) or "aucun"),
         "Par type : " + ", ".join(f"{k['kind']} {k['n']}" for k in kinds),
         "Tags principaux : " + ", ".join(f"{t['tag']} ({t['n']})" for t in tags),
         "Personnes, outils, concepts : " + ", ".join(f"{e['name']} [{e['type']}] ({e['n']})" for e in ents),

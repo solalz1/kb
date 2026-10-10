@@ -9,6 +9,7 @@ Share anything from your iPhone or Mac (a tweet or thread, an article, a YouTube
 - **Capture from anywhere**: the Share button on iPhone and Mac (ready-made Shortcuts), the web app, or Claude itself.
 - **Every format**: X posts and threads, web articles, arXiv, GitHub, YouTube, TikTok/Instagram/Vimeo, podcasts, audio, video, PDFs (scanned ones too), images, Word/PowerPoint/Excel, plain notes.
 - **Sources kept**: each card keeps the original link, author, date and file. Every answer cites its sources with links.
+- **Folders**: your own shelves (ML, Interviews…, add and rename them in the app). Claude files each new item in the one that fits; pick one yourself when you share, and the Shortcut always offers your current folders.
 - **Ask your KB**: "What did I save about…?", or "I'm starting this project, what can help?", which returns a sourced brief.
 - **Personal space**: write your principles, values, lessons, goals and a daily journal (with a calendar). Your words are kept as written. **Advice mode** answers a decision from *your* principles and cites them.
 - **Morning tech digest** (optional): Hacker News, Hugging Face papers, rising GitHub repos, blogs and the people you follow on X, ranked by what you save. On Mondays, the week in review and project ideas.

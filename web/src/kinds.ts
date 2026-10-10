@@ -9,7 +9,7 @@ export const KINDS: Record<Kind, { label: string; plural: string }> = {
   video: { label: t("Vidéo"), plural: t("Vidéos") },
   audio: { label: "Audio", plural: "Audio" },
   pdf: { label: "PDF", plural: "PDF" },
-  paper: { label: "Paper", plural: "Papers" },
+  paper: { label: t("Papier"), plural: t("Papiers") },
   image: { label: "Image", plural: "Images" },
   document: { label: "Document", plural: "Documents" },
   note: { label: "Note", plural: "Notes" },
@@ -17,6 +17,26 @@ export const KINDS: Record<Kind, { label: string; plural: string }> = {
 };
 
 export const FILTER_ORDER: Kind[] = ["tweet", "article", "youtube", "video", "pdf", "paper", "image", "note", "audio", "repo", "document"];
+
+/** The feed's type filters: a few groups of kinds (sent to the API as a comma-separated list). */
+export const KIND_FILTERS: { id: string; label: string; short?: string; kinds: Kind[] }[] = [
+  { id: "tweet", label: "Tweets", kinds: ["tweet"] },
+  { id: "article", label: "Articles", kinds: ["article"] },
+  { id: "video", label: t("Vidéos"), kinds: ["youtube", "video", "audio"] },
+  { id: "paper", label: t("Papiers & PDF"), short: t("Papiers"), kinds: ["paper", "pdf", "document"] },
+  { id: "image", label: "Images", kinds: ["image"] },
+  { id: "note", label: "Notes", kinds: ["note"] },
+  { id: "repo", label: "GitHub", kinds: ["repo"] },
+];
+export const kindsOf = (filter: string) => KIND_FILTERS.find((f) => f.id === filter)?.kinds.join(",") ?? filter;
+
+/** "2 h 04", "34 min": how long a video or a podcast lasts. */
+export function duration(seconds: number | null | undefined): string {
+  if (!seconds || seconds < 1) return "";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return t("{n} min", { n: Math.max(1, minutes) });
+  return t("{h} h {mm}", { h: Math.floor(minutes / 60), mm: String(minutes % 60).padStart(2, "0") });
+}
 
 export const kindLabel = (k: Kind | null | undefined) => (k && KINDS[k]?.label) || t("Élément");
 
@@ -42,6 +62,19 @@ export function ago(iso: string | null | undefined): string {
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), "hour");
   if (abs < 86400 * 30) return rtf.format(Math.round(diff / 86400), "day");
   return new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** "2 h", "hier", "3 j": the short form of `ago`, for phone cards. */
+export function agoShort(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return t("à l'instant");
+  if (diff < 3600) return t("{n} min", { n: Math.round(diff / 60) });
+  if (diff < 86400) return t("{n} h", { n: Math.round(diff / 3600) });
+  const days = Math.round(diff / 86400);
+  if (days === 1) return t("hier");
+  if (days < 30) return t("{n} j", { n: days });
+  return new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "short" });
 }
 
 export function fullDate(iso: string | null | undefined): string {

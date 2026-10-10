@@ -1,50 +1,72 @@
-import { AlertTriangle, Archive, ArrowLeft, Compass, Download, ExternalLink, Loader2, MessageSquare, PenLine, Pin, RefreshCw, SquareArrowOutUpRight, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type ItemDetail, type Space } from "../api";
+import { api, type Folder, type ItemDetail, type Space } from "../api";
 import { openInClaude } from "../claude";
 import { Embed } from "../components/Embed";
-import { localized, t, tServer } from "../i18n";
+import { IconBack, IconDownload, IconExternal, IconMore, IconPin, IconSpinner } from "../icons";
 import { fullDate, genreLabel, hostOf, sourceLabel } from "../kinds";
+import { localized, locale, t, tServer } from "../i18n";
+import { useDesktop } from "../layout";
 import { renderMarkdown } from "../markdown";
 import { CATEGORIES, headLabel, isEditableNote, spaceHome } from "../perso";
+
+const PREVIEW = 1400;
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "long" });     // characters of the full content shown before "show everything"
 
 export default function ItemPage() {
   const { id = "" } = useParams();
   const nav = useNavigate();
+  const desktop = useDesktop();
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [editingNote, setEditingNote] = useState(false);
-  const [tagInput, setTagInput] = useState("");
+  const [savedNote, setSavedNote] = useState(false);
+  const [tagInput, setTagInput] = useState<string | null>(null);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [menu, setMenu] = useState(false);
+  const [allContent, setAllContent] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const load = () =>
     api.item(id).then((it) => { setItem(it); setNote(it.user_note ?? ""); setError(""); }).catch((e) => setError(e.message));
 
-  useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); setAllContent(false); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { api.folders().then((r) => setFolders(r.folders)).catch(() => {}); }, []);
 
   const pending = item && (item.status === "pending" || item.status === "processing");
   useEffect(() => {
     if (!pending) return;
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
   }, [pending]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menu]);
+
   if (error) return <div className="page"><div className="error-box">{error}</div></div>;
-  if (!item) return <div className="page"><div className="status-line"><Loader2 size={16} className="spin" /> {t("Chargement…")}</div></div>;
+  if (!item) return <div className="page"><div className="status-line"><IconSpinner /> {t("Chargement…")}</div></div>;
 
   const update = async (body: Parameters<typeof api.patch>[1]) => {
     await api.patch(item.id, body);
     setItem({ ...item, ...body } as ItemDetail);
   };
-  const saveNote = async () => { await update({ user_note: note.trim() }); setEditingNote(false); };
-  const addTag = async () => {
-    const t = tagInput.trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-");
-    if (!t || item.tags.includes(t)) return setTagInput("");
-    await update({ tags: [...item.tags, t] });
-    setTagInput("");
+  const saveNote = async () => {
+    if (note.trim() === (item.user_note ?? "")) return;
+    await update({ user_note: note.trim() });
+    setSavedNote(true);
+    setTimeout(() => setSavedNote(false), 2000);
   };
-  const removeTag = (t: string) => update({ tags: item.tags.filter((x) => x !== t) });
+  const addTag = async () => {
+    const tag = (tagInput ?? "").trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-");
+    setTagInput(null);
+    if (!tag || item.tags.includes(tag)) return;
+    await update({ tags: [...item.tags, tag] });
+  };
+  const removeTag = (tag: string) => update({ tags: item.tags.filter((x) => x !== tag) });
   const toggleAction = async (aid: number, done: boolean) => {
     await api.setAction(aid, done);
     setItem({ ...item, actions: item.actions.map((a) => (a.id === aid ? { ...a, done } : a)) });
@@ -54,180 +76,206 @@ export default function ItemPage() {
     await api.remove(item.id);
     nav(spaceHome(item.space), { replace: true });
   };
-  const reprocess = async () => { await api.reprocess(item.id); load(); };
+  const reprocess = async () => { setMenu(false); await api.reprocess(item.id); load(); };
   const moveTo = async (space: Space) => {
     await api.patch(item.id, { space });
-    setItem({ ...item, space, category: space === "main" ? null : item.category });   // Veille : pas de catégorie
+    setItem({ ...item, space, category: space === "main" ? null : item.category });   // Veille: no category
   };
+  const fileIn = (folderId: string) => update({ folder_id: folderId || null });
+
   const perso = item.space === "perso";
   const writtenNote = isEditableNote(item);
   const noteText = writtenNote ? (item.content ?? item.input_text ?? "") : "";
   const shown = localized(item);
-
   const m = item.metadata || {};
   const who = item.author || item.site_name || hostOf(item.source_url);
   const thread: { id: string; url: string }[] = Array.isArray(m.thread) ? m.thread.filter((tw: unknown) => tw && typeof tw === "object") : [];
-  const details = [
-    item.published_at && t("publié le {date}", { date: fullDate(item.published_at) }),
-    m.pages && (m.pages > 1 ? t("{n} pages", { n: m.pages }) : t("{n} page", { n: m.pages })),
-    m.duration && `${Math.max(1, Math.round(m.duration / 60))} min`,
-  ].filter(Boolean) as string[];
+  const ready = item.status === "ready";
+  const content = !writtenNote && item.content ? item.content : "";
+  const back = perso ? t("Perso") : t("Veille");
+  const tools = [
+    { label: item.pinned ? t("Désépingler") : t("Épingler"), run: () => { setMenu(false); update({ pinned: !item.pinned }); } },
+    { label: item.archived ? t("Désarchiver") : t("Archiver"), run: () => { setMenu(false); update({ archived: !item.archived }); } },
+    { label: t("Retraiter"), run: reprocess },
+    { label: t("Supprimer"), run: () => { setMenu(false); remove(); }, danger: true },
+  ];
+  const dig = () => openInClaude(
+    t("Avec le connecteur KB, lis l'élément {id} de ma knowledge base (get_item, contenu complet) "
+      + "ainsi que ses éléments liés (get_related), puis aide-moi à creuser « {title} ». "
+      + "Commence par me dire en trois points ce qu'il faut en retenir.",
+      { id: item.id, title: shown.title ?? t("cet élément") }));
 
   return (
-    <div className="page">
-      <button className="back" onClick={() => (history.length > 1 ? nav(-1) : nav(spaceHome(item.space)))}><ArrowLeft size={16} /> {t("Retour")}</button>
+    <div className="page item-page">
+      <div className="item-main">
+        <div className="item-top">
+          <button className="back" onClick={() => (history.length > 1 ? nav(-1) : nav(spaceHome(item.space)))}>
+            <IconBack size={desktop ? 18 : 20} /> {back}
+          </button>
+          <div className="menu-wrap phone-only" ref={menuRef}>
+            <button className="icon-link" style={{ border: 0, background: "none" }} aria-label={t("Plus d'actions")}
+                    aria-expanded={menu} onClick={() => setMenu((v) => !v)}><IconMore size={22} /></button>
+            {menu && (
+              <div className="menu" role="menu">
+                {tools.map((x) => <button key={x.label} role="menuitem" className={x.danger ? "danger" : undefined} onClick={x.run}>{x.label}</button>)}
+              </div>
+            )}
+          </div>
+        </div>
 
-      <article className="fiche sheet" data-kind={item.kind ?? undefined} data-space={perso ? "perso" : undefined}>
-        <div className="fiche-head">
+        <div className="item-meta">
           {!perso && item.kind && <span className="dot" data-kind={item.kind} />}
           <span className="kind">{headLabel(item)}</span>
-          {!perso && genreLabel(item.genre) && <span>{genreLabel(item.genre)}</span>}
-          <span className="when">{writtenNote ? t("écrit le {date}", { date: fullDate(item.created_at) }) : t("sauvé le {date}", { date: fullDate(item.created_at) })}</span>
-        </div>
-        <h1>{shown.title || item.source_url || t("Sans titre")}</h1>
-        <div className="byline">
-          {item.author_url ? <a href={item.author_url} target="_blank" rel="noreferrer">{who}</a> : who}
-          {details.length > 0 && <>{who ? ", " : ""}{details.join(", ")}</>}
+          {desktop ? (
+            <>
+              {[!perso && genreLabel(item.genre), who].filter(Boolean).length > 0 && (
+                <span>{!perso && genreLabel(item.genre) ? `${genreLabel(item.genre)}${who ? " · " : ""}` : ""}
+                  {who && (item.author_url ? <a href={item.author_url} target="_blank" rel="noreferrer">{who}</a> : who)}</span>
+              )}
+              <span>·</span>
+              <span>{writtenNote ? t("écrit le {date}", { date: fullDate(item.created_at) }) : t("sauvé le {date}", { date: fullDate(item.created_at) })}</span>
+            </>
+          ) : <span>{[who, shortDate(item.created_at)].filter(Boolean).join(" · ")}</span>}
+          {item.pinned && <IconPin size={14} className="pin" aria-label={t("Épinglé")} role="img" aria-hidden={false} />}
         </div>
 
-        {pending && <div className="status-line"><Loader2 size={16} className="spin" /> {t("Lecture, résumé et indexation en cours…")}</div>}
+        <h1 className="item-title">{shown.title || item.source_url || t("Sans titre")}</h1>
+
+        {pending && <div className="status-line"><IconSpinner /> {t("Lecture, résumé et indexation en cours…")}</div>}
         {item.status === "error" && (
-          <div className="error-box"><AlertTriangle size={15} /> {item.error}
-            <div style={{ marginTop: 8 }}><button className="btn small" onClick={reprocess}><RefreshCw size={14} /> {t("Réessayer")}</button></div>
+          <div className="error-box">{item.error}
+            <div style={{ marginTop: 8 }}><button className="btn xs" onClick={reprocess}>{t("Réessayer")}</button></div>
           </div>
         )}
 
-        {writtenNote && noteText && (
-          <div className="content-md note-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(noteText) }} />
-        )}
-        {shown.summary && !writtenNote && <p className="ruled">{shown.summary}</p>}
+        {writtenNote && noteText && <div className="note-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(noteText) }} />}
+        {!writtenNote && shown.summary && <p className="item-summary">{shown.summary}</p>}
 
-        {!editingNote && item.user_note && (
-          <p className="why" onClick={() => setEditingNote(true)} title={t("Modifier")}>{item.user_note}</p>
-        )}
-        {(editingNote || (!item.user_note && !writtenNote)) && item.status === "ready" && (
-          <div className="why-edit">
-            <label className="sr-only" htmlFor="why">{t("Pourquoi tu gardes ça ?")}</label>
-            <textarea id="why" className="field" style={{ minHeight: 60 }} placeholder={t("Pourquoi tu gardes ça ? (ça aide à le retrouver plus tard)")}
-                      value={note} onChange={(e) => setNote(e.target.value)} />
-            {(note !== (item.user_note ?? "")) && <button className="btn small primary" style={{ marginTop: 8 }} onClick={saveNote}>{t("Enregistrer la note")}</button>}
-          </div>
-        )}
-
-        <div className="source-row">
-          {writtenNote && (
-            <Link className="btn primary" to={`/note/${item.id}/edit`}><PenLine size={16} /> {t("Modifier la note")}</Link>
-          )}
+        <div className="item-actions">
+          {writtenNote && <Link className="btn primary primary-action" to={`/note/${item.id}/edit`}>{t("Modifier la note")}</Link>}
           {item.source_url && (
-            <a className="btn primary" href={item.source_url} target="_blank" rel="noreferrer"><ExternalLink size={16} /> {sourceLabel(item.kind)}</a>
+            <a className="btn primary primary-action" href={item.source_url} target="_blank" rel="noreferrer"><IconExternal size={18} /> {sourceLabel(item.kind)}</a>
           )}
-          {item.file_url && (
-            <a className="btn" href={item.file_url} target="_blank" rel="noreferrer"><Download size={16} /> {item.file_name || t("Fichier original")}</a>
-          )}
-          {item.status === "ready" && !perso && (
-            <Link className="btn" to={`/ask?about=${item.id}`}><MessageSquare size={16} /> {t("Poser une question")}</Link>
-          )}
-          {item.status === "ready" && perso && (
-            <Link className="btn" to="/ask?mode=advice"><Compass size={16} /> {t("Demander conseil")}</Link>
-          )}
-          {item.status === "ready" && (
-            <button className="btn" onClick={() => openInClaude(
-              t("Avec le connecteur KB, lis l'élément {id} de ma knowledge base (get_item, contenu complet) "
-                + "ainsi que ses éléments liés (get_related), puis aide-moi à creuser « {title} ». "
-                + "Commence par me dire en trois points ce qu'il faut en retenir.",
-                { id: item.id, title: shown.title ?? t("cet élément") }))}>
-              <SquareArrowOutUpRight size={16} /> {t("Creuser dans Claude")}
-            </button>
+          {ready && (
+            <div className="more">
+              {perso
+                ? <Link className="btn" to="/ask?mode=advice">{t("Demander conseil")}</Link>
+                : <Link className="btn" to={`/ask?about=${item.id}`}>{t("Poser une question")}</Link>}
+              <button className="btn" onClick={dig}>{t("Creuser dans Claude")}</button>
+              {item.file_url && <a className="btn" href={item.file_url} target="_blank" rel="noreferrer"><IconDownload size={16} /> {item.file_name || t("Fichier original")}</a>}
+            </div>
           )}
         </div>
-        <div className="placement">
-          <div className="modes small" role="group" aria-label={t("Espace")}>
-            <button aria-pressed={!perso} onClick={() => perso && moveTo("main")}>{t("Veille")}</button>
-            <button aria-pressed={perso} onClick={() => !perso && moveTo("perso")}>{t("Perso")}</button>
-          </div>
-          {perso && (
-            <label className="model-pick">
-              <span>{t("Catégorie")}</span>
-              <select value={item.category ?? ""} onChange={(e) => update({ category: e.target.value || null })}>
-                <option value="">{t("Aucune")}</option>
-                {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
-            </label>
-          )}
-        </div>
+
+        {item.kind !== "tweet" && <Embed item={item} />}
+
+        {!writtenNote && ready && (
+          <label className="stack why-box">
+            <span className="label">{t("Pourquoi tu gardes ça ?")} {savedNote && <span className="saved">· {t("Enregistré")}</span>}</span>
+            <textarea className="field serif" rows={2} value={note} onChange={(e) => setNote(e.target.value)} onBlur={saveNote}
+                      placeholder={desktop ? t("Une phrase suffit — elle aide à le retrouver plus tard.") : t("Une phrase suffit.")} />
+          </label>
+        )}
+        {writtenNote && item.user_note && <p className="why-box hint">{item.user_note}</p>}
         {m.hint && <div className="warn">{tServer(m.hint)}</div>}
         {m.thread_maybe_incomplete && (
           <div className="warn">{t("Ce tweet ouvre peut-être un thread plus long. Pour un thread de plus de 7 jours, partage son dernier tweet : tout ce qui précède sera récupéré.")}</div>
         )}
-      </article>
 
-      <Embed item={item} />
-
-      {writtenNote && shown.summary && (
-        <section className="section"><h2>{t("En bref")}</h2><p className="ruled summary-ruled">{shown.summary}</p></section>
-      )}
-      {shown.key_points?.length > 0 && (
-        <section className="section"><h2>{t("Points clés")}</h2><ul>{shown.key_points.map((p, i) => <li key={i}>{p}</li>)}</ul></section>
-      )}
-      {shown.use_cases?.length > 0 && (
-        <section className="section"><h2>{t("Utile pour")}</h2><ul>{shown.use_cases.map((p, i) => <li key={i}>{p}</li>)}</ul></section>
-      )}
-      {item.actions?.length > 0 && (
-        <section className="section"><h2>{t("À faire")}</h2>
-          <ul className="todo-list">
-            {item.actions.map((a) => (
-              <li key={a.id}>
-                <input type="checkbox" checked={a.done} onChange={(e) => toggleAction(a.id, e.target.checked)} aria-label={a.text} />
-                <span className={a.done ? "done" : ""}>{a.text}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {item.links?.length > 0 && (
-        <section className="section links"><h2>{t("Liés dans ta KB")}</h2>
-          {item.links.map((l) => (
-            <Link key={l.id} to={`/item/${l.id}`}>
-              <span className="dot" data-kind={l.kind} />
-              <span><span className="t">{l.title}</span><span className="reason">{l.reason}</span></span>
-            </Link>
-          ))}
-        </section>
-      )}
-      {thread.length > 1 && (
-        <section className="section"><h2>{t("Tweets du thread")}</h2>
-          <ul>{thread.map((tw, i) => <li key={tw.id}><a href={tw.url} target="_blank" rel="noreferrer">{t("Tweet {i} sur {n}", { i: i + 1, n: thread.length })}</a></li>)}</ul>
-        </section>
-      )}
-      {item.entities?.length > 0 && (
-        <section className="section"><h2>{t("Personnes, outils, concepts")}</h2>
-          <div className="entities">{item.entities.map((e) => <Link key={e.name} to={`${spaceHome(item.space)}?entity=${encodeURIComponent(e.name)}`}>{e.name}</Link>)}</div>
-        </section>
-      )}
-      <section className="section"><h2>{t("Tags")}</h2>
-        <div className="tag-editor">
-          {item.tags.map((tg) => (
-            <span key={tg} className="chip">#{tg}<button className="x" style={{ border: 0, background: "none", padding: 0 }} onClick={() => removeTag(tg)} aria-label={t("Retirer {tag}", { tag: tg })}>×</button></span>
-          ))}
-          <input placeholder={t("Ajouter un tag")} value={tagInput} onChange={(e) => setTagInput(e.target.value)}
-                 onKeyDown={(e) => e.key === "Enter" && addTag()} onBlur={addTag} />
-        </div>
-      </section>
-      {item.content && !writtenNote && (
-        <section className="section">
-          <details>
-            <summary>{item.content.length >= 2000 ? t("Contenu complet ({n} k caractères)", { n: Math.round(item.content.length / 1000) }) : t("Contenu complet")}</summary>
-            <div className="content-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content.slice(0, 120_000)) }} />
-          </details>
-        </section>
-      )}
-
-      <div className="toolbar">
-        <button className="btn ghost" onClick={() => update({ pinned: !item.pinned })}><Pin size={16} /> {item.pinned ? t("Désépingler") : t("Épingler")}</button>
-        <button className="btn ghost" onClick={() => update({ archived: !item.archived })}><Archive size={16} /> {item.archived ? t("Désarchiver") : t("Archiver")}</button>
-        <button className="btn ghost" onClick={reprocess}><RefreshCw size={16} /> {t("Retraiter")}</button>
-        <button className="btn ghost danger" onClick={remove}><Trash2 size={16} /> {t("Supprimer")}</button>
       </div>
+
+      <div className="item-more">
+        {writtenNote && shown.summary && (
+          <section className="sec"><h2>{t("En bref")}</h2><p className="item-summary" style={{ margin: 0 }}>{shown.summary}</p></section>
+        )}
+        {shown.key_points?.length > 0 && (
+          <section className="sec"><h2>{t("Points clés")}</h2><ul className="points">{shown.key_points.map((p, i) => <li key={i}>{p}</li>)}</ul></section>
+        )}
+        {content && (
+          <section className="sec">
+            <h2>{t("Contenu complet")}</h2>
+            <div className="content-box">
+              <div className="content-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(allContent ? content.slice(0, 120_000) : content.slice(0, PREVIEW)) }} />
+              {content.length > PREVIEW && (
+                <button className="more-content" onClick={() => setAllContent((v) => !v)}>
+                  {allContent ? t("Réduire") : t("… afficher la suite ({n} k caractères)", { n: Math.round(content.length / 1000) })}
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+        {thread.length > 1 && (
+          <section className="sec"><h2>{t("Tweets du thread")}</h2>
+            <ul className="points">{thread.map((tw, i) => <li key={tw.id}><a href={tw.url} target="_blank" rel="noreferrer">{t("Tweet {i} sur {n}", { i: i + 1, n: thread.length })}</a></li>)}</ul>
+          </section>
+        )}
+      </div>
+
+      <aside className="item-aside">
+        {shown.use_cases?.length > 0 && (
+          <section className="aside-sec"><h2 className="mini-h">{t("Utile pour")}</h2>
+            {shown.use_cases.map((u, i) => <p key={i} className="use-for">{u}</p>)}
+          </section>
+        )}
+        {item.actions?.length > 0 && (
+          <section className="aside-sec"><h2 className="mini-h">{t("À faire")}</h2>
+            {item.actions.map((a) => (
+              <label key={a.id} className="check-card">
+                <input type="checkbox" checked={a.done} onChange={(e) => toggleAction(a.id, e.target.checked)} />
+                <span className={a.done ? "done" : ""}>{a.text}</span>
+              </label>
+            ))}
+          </section>
+        )}
+        {item.links?.length > 0 && (
+          <section className="aside-sec"><h2 className="mini-h">{t("Liés dans ta KB")}</h2>
+            {item.links.map((l) => (
+              <Link key={l.id} to={`/item/${l.id}`} className="related"><span className="t">{l.title}</span><span className="r">{l.reason}</span></Link>
+            ))}
+          </section>
+        )}
+        {item.entities?.length > 0 && (
+          <section className="aside-sec"><h2 className="mini-h">{t("Personnes, outils, concepts")}</h2>
+            <div className="pills">{item.entities.map((e) => <Link key={e.name} className="pill" to={`${spaceHome(item.space)}?entity=${encodeURIComponent(e.name)}`}>{e.name}</Link>)}</div>
+          </section>
+        )}
+        <section className="aside-sec"><h2 className="mini-h">{t("Tags")}</h2>
+          <div className="pills">
+            {item.tags.map((tg) => (
+              <span key={tg} className="pill">#{tg}
+                <button type="button" className="icon-btn x" onClick={() => removeTag(tg)}
+                        aria-label={t("Retirer {tag}", { tag: tg })}>×</button></span>
+            ))}
+            {tagInput === null
+              ? <button type="button" className="pill add" onClick={() => setTagInput("")}>{t("+ tag")}</button>
+              : <span className="pill"><input autoFocus aria-label={t("Ajouter un tag")} placeholder={t("nouveau tag")} value={tagInput}
+                                              onChange={(e) => setTagInput(e.target.value)} onBlur={addTag}
+                                              onKeyDown={(e) => { if (e.key === "Enter") addTag(); if (e.key === "Escape") setTagInput(null); }} /></span>}
+          </div>
+        </section>
+        <section className="aside-sec placement"><h2 className="mini-h">{t("Rangement")}</h2>
+          <label className="stack">
+            <span className="hint">{t("Dossier")}</span>
+            <select className="field" value={item.folder_id ?? ""} onChange={(e) => fileIn(e.target.value)} aria-label={t("Dossier")}>
+              <option value="">{t("Aucun dossier")}</option>
+              {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+          <div className="seg sm" role="group" aria-label={t("Espace")}>
+            <button type="button" aria-pressed={!perso} onClick={() => perso && moveTo("main")}>{t("Veille")}</button>
+            <button type="button" aria-pressed={perso} onClick={() => !perso && moveTo("perso")}>{t("Perso")}</button>
+          </div>
+          {perso && (
+            <select className="field" value={item.category ?? ""} onChange={(e) => update({ category: e.target.value || null })} aria-label={t("Catégorie")}>
+              <option value="">{t("Sans catégorie")}</option>
+              {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          )}
+        </section>
+        <div className="item-tools desk-only">
+          {tools.map((x) => <button key={x.label} type="button" className={x.danger ? "danger" : undefined} onClick={x.run}>{x.label}</button>)}
+        </div>
+      </aside>
     </div>
   );
 }

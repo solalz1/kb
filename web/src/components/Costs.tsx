@@ -1,7 +1,7 @@
-import { Check, ExternalLink, Loader2, Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type CostService, type Costs as CostsT } from "../api";
 import { lang, locale, t } from "../i18n";
+import { IconEdit, IconSpinner } from "../icons";
 import { ago, fullDate } from "../kinds";
 
 /** US dollars, as the services bill them ("$US" in French, like the Claude Console); tiny amounts don't read as zero. */
@@ -20,13 +20,13 @@ export function Costs() {
   useEffect(() => { api.costs().then(setData).catch((e) => setError(e.message)); }, []);
 
   if (error) return <div className="error-box">{error}</div>;
-  if (!data) return <div className="status-line"><Loader2 size={16} className="spin" /> {t("Chargement…")}</div>;
+  if (!data) return <div className="status-line"><IconSpinner /> {t("Chargement…")}</div>;
 
   return (
     <>
       <div className="cost-totals">
-        <div><span className="mono-label">{t("Ce mois-ci")}</span><b>{dollars(data.month)}</b></div>
-        <div><span className="mono-label">{t("Depuis le début")}</span><b>{dollars(data.total)}</b></div>
+        <div><span>{t("Ce mois-ci")}</span><b>{dollars(data.month)}</b></div>
+        <div><span>{t("Depuis le début")}</span><b>{dollars(data.total)}</b></div>
       </div>
       <ul className="cost-list">
         {data.services.map((s) => (
@@ -125,7 +125,7 @@ function CostRow({ s, open, onToggle, onSaved }: {
           <span className="muted">{t("{amount} en tout", { amount: dollars(s.total) })}</span>
         </div>
         <button type="button" className="icon-btn" aria-expanded={open} aria-label={t("Modifier {name}", { name: s.name })}
-                onClick={onToggle}><Pencil size={15} /></button>
+                onClick={onToggle}><IconEdit size={18} /></button>
       </div>
       {open && (
         <form className="cost-edit" onSubmit={save}>
@@ -152,8 +152,8 @@ function CostRow({ s, open, onToggle, onSaved }: {
           )}
           {error && <div className="error-box">{error}</div>}
           <div className="cost-edit-actions">
-            <button className="btn small primary" disabled={busy}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {t("Enregistrer")}</button>
-            <a className="btn small ghost" href={s.url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> {t("Voir le compte")}</a>
+            <button className="btn small primary" disabled={busy}>{busy && <IconSpinner size={14} />} {t("Enregistrer")}</button>
+            <a className="btn small ghost" href={s.url} target="_blank" rel="noreferrer">{t("Voir le compte")} ↗</a>
           </div>
         </form>
       )}

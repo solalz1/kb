@@ -325,6 +325,58 @@ conseils fidèles à SES principes et SES valeurs. Donc :
 {cats}"""
 
 
+NO_FOLDER = "aucun"
+
+
+def _folder_property(folders: list[dict]) -> dict:
+    return {"type": "string", "enum": [f["name"] for f in folders] + [NO_FOLDER]}
+
+
+def _folder_list(folders: list[dict]) -> str:
+    return "\n".join(f"  - {f['name']}" + (f" : {f['description']}" if f.get("description") else "") for f in folders)
+
+
+def _folder_rules(folders: list[dict]) -> str:
+    return f"""
+
+- folder : le dossier de l'utilisateur où ranger l'élément, d'après son sujet principal (nom exact), ou « {NO_FOLDER} »
+  si aucun ne convient vraiment. Ses dossiers :
+{_folder_list(folders)}"""
+
+
+FOLDERS_SCHEMA_ITEM = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id", "folder"]}
+
+
+def classify_folders(items: list[dict], folders: list[dict]) -> dict[str, str]:
+    """Files existing items in the user's folders: {item id: folder name}, items that fit none left out. One call for
+    a batch of items (id, kind, title, summary, tags)."""
+    lines = []
+    for it in items:
+        tags = ", ".join(it.get("tags") or [])
+        lines.append(f"- id={it['id']} | {it.get('kind') or '?'} | {it.get('title') or '(sans titre)'}"
+                     f" | {(it.get('summary') or '')[:400]}" + (f" | tags : {tags}" if tags else ""))
+    item_schema = {**FOLDERS_SCHEMA_ITEM,
+                   "properties": {**FOLDERS_SCHEMA_ITEM["properties"], "folder": _folder_property(folders)}}
+    out = call_tool(
+        system=(
+            "Tu ranges les éléments de la knowledge base personnelle de l'utilisateur dans SES dossiers. Pour chaque "
+            "élément, choisis le dossier qui correspond à son sujet principal (nom exact), ou "
+            f"« {NO_FOLDER} » si aucun ne convient vraiment. Ses dossiers :\n{_folder_list(folders)}"
+        ),
+        content="ÉLÉMENTS\n" + "\n".join(lines),
+        tool_name="file_items",
+        tool_description="Enregistre le dossier de chaque élément.",
+        schema={"type": "object", "properties": {"items": {"type": "array", "items": item_schema}},
+                "required": ["items"]},
+        max_tokens=200 + 60 * len(items),
+    )
+    names = {f["name"] for f in folders}
+    ids = {it["id"] for it in items}
+    rows = out.get("items") if isinstance(out.get("items"), list) else []
+    return {r["id"]: r["folder"] for r in rows
+            if isinstance(r, dict) and r.get("id") in ids and r.get("folder") in names}
+
+
 def _truncate_middle(text: str, limit: int = 60_000) -> str:
     if len(text) <= limit:
         return text
@@ -344,7 +396,10 @@ def enrich(
     existing_tags: list[str],
     space: str = "main",
     category: str | None = None,
+    folders: list[dict] | None = None,
 ) -> dict:
+    """`folders`: the user's folders ({name, description}) when Claude should pick one (`folder` in the answer: a
+    folder's name, or NO_FOLDER)."""
     perso = space == "perso"
     header = [
         f"Type : {kind}" + (" (note écrite par l'utilisateur)" if kind == "note" else ""),
@@ -362,12 +417,16 @@ def enrich(
     if perso:
         properties["category"] = {"type": "string", "enum": list(CATEGORIES)}
         required.append("category")
+    if folders:
+        properties["folder"] = _folder_property(folders)
+        required.append("folder")
     second = get_settings().second_language
     if second:
         properties["translation"] = TRANSLATION_SCHEMA
         required.append("translation")
     request = dict(
-        system=_enrich_system() + (_translation_rule(second) if second else "") + (_perso_rules() if perso else ""),
+        system=_enrich_system() + (_translation_rule(second) if second else "") + (_perso_rules() if perso else "")
+        + (_folder_rules(folders) if folders else ""),
         content=prompt,
         tool_name="save_card",
         tool_description="Enregistre la fiche de l'élément dans la knowledge base.",
@@ -386,6 +445,8 @@ def enrich(
     out["tags"] = _normalize_tags(_text_list(out.get("tags")))
     out["entities"] = _dict_list(out.get("entities"), "name")
     out["action_items"] = _dict_list(out.get("action_items"), "text")
+    names = {f["name"] for f in folders or []}
+    out["folder"] = out.get("folder") if out.get("folder") in names else None
     out["translations"] = {second: _clean_translation(out.pop("translation", None))} if second else {}
     if second and not out["translations"][second]:
         out["translations"] = {}

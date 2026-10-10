@@ -50,6 +50,7 @@ def _markdown(it: dict, names: dict[str, str], related: list[tuple[str, str]], f
         "title": it["title"],
         "space": locales.space_labels(lang).get(it.get("space") or "main"),
         "category": locales.category_labels(lang).get(it.get("category") or ""),
+        "folder": it.get("folder_name"),
         "type": it["kind"],
         "source": it["source_url"],
         "author": it["author"],
@@ -92,9 +93,9 @@ def export_zip_file(include_files: bool = False, lang: str | None = None) -> str
     `lang` : langue des résumés, titres et intitulés (défaut : KB_LANGUAGE)."""
     lang = locales.normalize(lang or get_settings().kb_language)
     items = [locales.localized(it, lang) for it in db.fetchall(
-        """select * from items
-           where status = 'ready' or (kind = 'note' and input_text is not null)
-           order by created_at""")]
+        """select i.*, f.name as folder_name from items i left join folders f on f.id = i.folder_id
+           where i.status = 'ready' or (i.kind = 'note' and i.input_text is not null)
+           order by i.created_at""")]
     links = db.fetchall("select source_id::text, target_id::text, reason from item_links")
     names: dict[str, str] = {}
     used: set[str] = set()
