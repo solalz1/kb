@@ -37,7 +37,11 @@ App **Raccourcis** → **+** → nomme-le `Ajouter à ma KB`.
 3. Ajoute **Obtenir l'élément de la liste** → *Premier élément* de *URL*.
 4. Ajoute **Obtenir le texte de l'entrée** (entrée : *Entrée du raccourci*).
 5. Facultatif mais utile : **Demander une entrée** → type *Texte*, question `Pourquoi tu gardes ça ?`. Tu pourras valider sans rien écrire.
-   Puis, pour le ranger d'un tap : **Liste** avec `Veille`, `Perso`, `Principe`, `Valeur`, `Leçon`, `Objectif`, `Habitude`, `Réflexion`, `Journal`, `Citation`, `Ressource`, suivie de **Choisir dans la liste** (question `Où le ranger ?`).
+   Puis, pour choisir un dossier d'un tap, demande à la KB sa liste du moment (un dossier ajouté dans l'app y
+   apparaît tout seul) : **Obtenir le contenu de l'URL** → `https://kb.example.com/api/folders/choices`, méthode
+   **GET**, en-tête `Authorization` = `Bearer TON_KB_API_TOKEN` ; **Obtenir la valeur du dictionnaire** → clé
+   `choices` ; **Choisir dans la liste** sur cette valeur (question `Où le ranger ?`). La liste propose
+   `Automatique` (Claude choisit), tes dossiers, puis `Espace Perso` (tes notes de développement personnel).
 6. Ajoute **Obtenir le contenu de l'URL** :
    - URL : `https://kb.example.com/api/ingest`
    - Touche **Afficher plus** :
@@ -47,7 +51,7 @@ App **Raccourcis** → **+** → nomme-le `Ajouter à ma KB`.
        - `url` = *Élément de la liste* (étape 3)
        - `text` = *Texte* (étape 4)
        - `note` = *Entrée fournie* (étape 5), ou laisse vide
-       - `category` = *Élément choisi* (étape 5), si tu as ajouté la liste : `Veille` et `Perso` choisissent l'espace, les autres une catégorie Perso
+       - `folder` = *Élément choisi* (étape 5), si tu as ajouté la liste
 7. Ajoute **Obtenir la valeur du dictionnaire** → clé `message` dans *Contenu de l'URL*.
 8. Ajoute **Afficher la notification** → *Valeur du dictionnaire*.
 9. Pour les sites qui refusent les serveurs (Medium…) : ajoute le champ `page_follows` = `1` au JSON de l'étape 6, puis
@@ -64,13 +68,13 @@ Test : dans l'app X, touche Partager sur un tweet → **Ajouter à ma KB** → �
 ## Raccourci 2 : « Fichier vers ma KB » (PDF, images, audio, vidéo)
 
 1. **ⓘ** → **Afficher dans la feuille de partage**. Types reçus : **Images**, **PDF**, **Fichiers** et **Médias** uniquement.
-2. Facultatif : **Demander une entrée** → `Pourquoi tu gardes ça ?`, puis la même **Liste** + **Choisir dans la liste** que dans le Raccourci 1.
+2. Facultatif : **Demander une entrée** → `Pourquoi tu gardes ça ?`, puis le même choix de dossier que dans le Raccourci 1 (les trois actions qui finissent par **Choisir dans la liste**).
 3. Ajoute **Répéter avec chaque élément** de *Entrée du raccourci*, et dans la boucle :
    - **Obtenir le contenu de l'URL** → `https://kb.example.com/api/ingest`, méthode **POST**, même en-tête `Authorization`.
      Corps de la requête : **Formulaire**, avec :
      - `file` → type **Fichier** = *Élément répété*
      - `note` → type **Texte** = *Entrée fournie*
-     - `category` → type **Texte** = *Élément choisi*
+     - `folder` → type **Texte** = *Élément choisi*
    - **Obtenir la valeur du dictionnaire** → clé `message` dans *Contenu de l'URL*.
 4. Après la boucle : **Afficher la notification** → *Résultats de la répétition* : la réponse du serveur pour chaque fichier, erreurs comprises.
 
@@ -117,4 +121,7 @@ Test : « Dis Siri, Note perso », dicte « Je ne réponds plus aux mails après
   Safari, connecté.
 - **Idée au vol** : lance **Ajouter à ma KB** sans rien partager (depuis l'écran d'accueil ou Siri) : il prend le contenu du presse-papiers. Tu peux aussi dicter une note dans l'app.
 - Pour aller plus vite, supprime l'étape « Pourquoi tu gardes ça ? ». Tu pourras ajouter la note plus tard dans la fiche.
-- **Ranger dans Perso** : les Raccourcis générés demandent « Où le ranger ? » (Veille, Perso ou une catégorie Perso). Sans cette liste, écris `#perso` dans la note « Pourquoi tu gardes ça ? » (ex. `#perso #ressource à relire avant mes objectifs 2027`). L'élément va dans l'espace Perso, et un hashtag de catégorie (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`) le range directement. Ces hashtags sont retirés de la note.
+- **Dossiers** : les Raccourcis générés demandent « Où le ranger ? » avec les dossiers de la KB tels qu'ils sont au
+  moment du partage : un dossier créé dans l'app (**Dossiers**) est proposé la fois suivante, sans regénérer le
+  Raccourci. `Automatique` laisse Claude choisir ; un élément rangé à la main reste dans son dossier.
+- **Ranger dans Perso** : choisis `Espace Perso` dans « Où le ranger ? ». Sans cette liste, écris `#perso` dans la note « Pourquoi tu gardes ça ? » (ex. `#perso #ressource à relire avant mes objectifs 2027`). L'élément va dans l'espace Perso, et un hashtag de catégorie (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`) le range directement. Ces hashtags sont retirés de la note.

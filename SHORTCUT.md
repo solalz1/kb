@@ -35,7 +35,11 @@ action, "Text", never into the files) and adds the Shortcut. They reach your iPh
 3. Add **Get Item from List** → *First Item* of *URLs*.
 4. Add **Get Text from Input** (input: *Shortcut Input*).
 5. Optional but useful: **Ask for Input** → type *Text*, prompt `Why are you keeping this?`. You can confirm without typing anything.
-   Then, to file it with one tap: **List** with `Veille`, `Perso`, `Principe`, `Valeur`, `Leçon`, `Objectif`, `Habitude`, `Réflexion`, `Journal`, `Citation`, `Ressource`, followed by **Choose from List** (prompt `Où le ranger ?`).
+   Then, to pick a folder with one tap, ask the KB for its current list (a folder you add in the app shows up here
+   by itself): **Get Contents of URL** → `https://kb.example.com/api/folders/choices`, method **GET**, header
+   `Authorization` = `Bearer YOUR_KB_API_TOKEN`; **Get Dictionary Value** → key `choices`; **Choose from List** on
+   that value (prompt `Où le ranger ?`). The list reads `Automatique` (Claude chooses), your folders, then
+   `Espace Perso` (your personal-development notes).
 6. Add **Get Contents of URL**:
    - URL: `https://kb.example.com/api/ingest`
    - Tap **Show More**:
@@ -45,7 +49,7 @@ action, "Text", never into the files) and adds the Shortcut. They reach your iPh
        - `url` = *Item from List* (step 3)
        - `text` = *Text* (step 4)
        - `note` = *Provided Input* (step 5), or leave empty
-       - `category` = *Chosen Item* (step 5), if you added the list: `Veille` and `Perso` pick the space, the others a Perso category
+       - `folder` = *Chosen Item* (step 5), if you added the list
 7. Add **Get Dictionary Value** → key `message` in *Contents of URL*.
 8. Add **Show Notification** → *Dictionary Value*.
 9. For sites that refuse servers (Medium…): add the field `page_follows` = `1` to the JSON of step 6, then
@@ -61,13 +65,13 @@ Test: in the X app, tap Share on a tweet → **Add to my KB** → a confirmation
 ## Shortcut 2: "File to my KB" (PDFs, images, audio, video)
 
 1. **ⓘ** → **Show in Share Sheet**. Input types: **Images**, **PDFs**, **Files** and **Media** only.
-2. Optional: **Ask for Input** → `Why are you keeping this?`, then the same **List** + **Choose from List** as in Shortcut 1.
+2. Optional: **Ask for Input** → `Why are you keeping this?`, then the same folder choice as in Shortcut 1 (the three actions that end with **Choose from List**).
 3. Add **Repeat with Each** item in *Shortcut Input*, and inside the loop:
    - **Get Contents of URL** → `https://kb.example.com/api/ingest`, method **POST**, same `Authorization` header.
      Request Body: **Form**, with:
      - `file` → type **File** = *Repeat Item*
      - `note` → type **Text** = *Provided Input*
-     - `category` → type **Text** = *Chosen Item*
+     - `folder` → type **Text** = *Chosen Item*
    - **Get Dictionary Value** → key `message` in *Contents of URL*.
 4. After the loop: **Show Notification** → *Repeat Results*: the server's answer for each file, including errors.
 
@@ -113,4 +117,7 @@ Test: "Hey Siri, Personal note", dictate "I don't answer emails after 8pm", pick
   fetch the page and sends it. Member-only stories: the full text comes only from Safari, signed in.
 - **Quick idea**: run **Add to my KB** without sharing anything (from the Home Screen or Siri): it takes the clipboard. You can also dictate a note in the app.
 - To go faster, drop the "Why are you keeping this?" step. You can add the note later on the card.
-- **File it in Perso**: the generated Shortcuts ask "Où le ranger ?" (Veille, Perso or a Perso category). Without that list, type `#perso` in the "Why are you keeping this?" note (e.g. `#perso #ressource to reread before my 2027 goals`). The item goes to the Perso space, and a category hashtag (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`, or the English `#principle`, `#value`, `#lesson`, `#goal`, `#habit`, `#quote`) files it directly. These hashtags are removed from the note.
+- **Folders**: the generated Shortcuts ask "Où le ranger ?" with the KB's folders as they are when you share, so a
+  folder created in the app (**Dossiers**) is offered the next time, without rebuilding the Shortcut. `Automatique`
+  lets Claude choose; an item you file by hand stays in its folder.
+- **File it in Perso**: pick `Espace Perso` in "Où le ranger ?". Without that list, type `#perso` in the "Why are you keeping this?" note (e.g. `#perso #ressource to reread before my 2027 goals`). The item goes to the Perso space, and a category hashtag (`#principe`, `#valeur`, `#leçon`, `#objectif`, `#habitude`, `#réflexion`, `#journal`, `#citation`, `#ressource`, or the English `#principle`, `#value`, `#lesson`, `#goal`, `#habit`, `#quote`) files it directly. These hashtags are removed from the note.

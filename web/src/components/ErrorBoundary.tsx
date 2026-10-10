@@ -1,4 +1,3 @@
-import { RotateCw, Undo2 } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { t } from "../i18n";
 
@@ -27,10 +26,10 @@ export class ErrorBoundary extends Component<{ resetKey?: string; children: Reac
         <h1 className="title">{t("Cette page n'a pas pu s'afficher")}</h1>
         <p>{t("Le reste de l'app marche toujours. Reviens en arrière, ou recharge la page.")}</p>
         <p className="code">{error.message || String(error)}</p>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="btn-row">
           <button type="button" className="btn primary" onClick={() => window.history.length > 1 ? window.history.back() : window.location.assign("/")}>
-            <Undo2 size={16} /> {t("Revenir en arrière")}</button>
-          <button type="button" className="btn ghost" onClick={() => window.location.reload()}><RotateCw size={16} /> {t("Recharger")}</button>
+            {t("Revenir en arrière")}</button>
+          <button type="button" className="btn ghost" onClick={() => window.location.reload()}>{t("Recharger")}</button>
         </div>
       </div>
     );

@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, llm, migrate, notion, pipeline, search, storage
+from . import chat, costs, db, export, folders, llm, migrate, notion, pipeline, search, storage
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -61,6 +61,7 @@ def _build_mcp_http():
 async def lifespan(_: FastAPI):
     # the database first: the code that was just deployed may need a new column
     await run_in_threadpool(migrate.run_at_startup)
+    await run_in_threadpool(_seed_folders)
     worker = None
     if settings.run_worker:
         worker = Worker()
@@ -71,6 +72,13 @@ async def lifespan(_: FastAPI):
     if worker:
         worker.stop()
     db.close()
+
+
+def _seed_folders() -> None:
+    try:
+        folders.seed()
+    except Exception:  # noqa: BLE001 — the schema may not be there yet (AUTO_MIGRATE off): next start
+        log.warning("Dossiers par défaut non créés", exc_info=True)
 
 
 api = FastAPI(title="KB", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -161,7 +169,7 @@ async def ingest(request: Request):
         if "multipart/form-data" in ctype or "application/x-www-form-urlencoded" in ctype:
             form = await request.form()
             url, text, note = _str(form.get("url")), _str(form.get("text")), _str(form.get("note"))
-            extra = {k: _str(form.get(k)) for k in ("space", "category", "title")}
+            extra = {k: _str(form.get(k)) for k in ("space", "category", "title", "folder")}
             files = [f for key in ("file", "files", "file[]") for f in form.getlist(key) if isinstance(f, UploadFile)]
             for f in files:
                 data = await f.read()
@@ -177,7 +185,7 @@ async def ingest(request: Request):
             results.append(await run_in_threadpool(
                 pipeline.ingest, url=_str(body.get("url")), text=_str(body.get("text")), note=_str(body.get("note")),
                 space=_str(body.get("space")), category=_str(body.get("category")), title=_str(body.get("title")),
-                page_follows=str(body.get("page_follows") or "").lower() in ("1", "true", "yes", "oui")))
+                folder=_str(body.get("folder")), page_follows=str(body.get("page_follows") or "").lower() in ("1", "true", "yes", "oui")))
         else:
             raw = (await request.body()).decode("utf-8", errors="replace")
             results.append(await run_in_threadpool(pipeline.ingest, text=raw))
@@ -225,17 +233,86 @@ class NoteIn(BaseModel):
     category: str | None = None
     tags: list[str] | None = None
     entry_date: date | None = None     # journal notes: the day they belong to (default: today)
+    folder: str | None = None          # a folder id or name; none: Claude files it
 
 
 @api.post("/api/notes", dependencies=auth)
 def create_note(note: NoteIn):
     """Note écrite dans l'app (espace Perso par défaut)."""
     try:
+        folder_id, _ = folders.parse_choice(note.folder)
         res = pipeline.create_note(content=note.content, title=note.title, space=note.space,
-                                   category=note.category, tags=note.tags, entry_date=note.entry_date)
+                                   category=note.category, tags=note.tags, entry_date=note.entry_date,
+                                   folder_id=folder_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "id": res["id"], "status": res["status"], "message": "Note ajoutée à ta KB ✓"}
+
+
+# ---------------------------------------------------------------------------
+# Folders
+# ---------------------------------------------------------------------------
+
+class FolderIn(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class FolderPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    position: int | None = None
+
+
+@api.get("/api/folders", dependencies=auth)
+def list_folders():
+    """The folders with their item counts, and how many items are in none."""
+    return folders.overview()
+
+
+@api.get("/api/folders/choices", dependencies=auth)
+def folder_choices():
+    """The Shortcut's "Où le ranger ?" list: Automatique, every folder, Espace Perso. Sent back as `folder`."""
+    return {"choices": folders.choices()}
+
+
+@api.post("/api/folders", dependencies=auth)
+def create_folder(body: FolderIn):
+    try:
+        return folders.create(body.name, body.description)
+    except folders.FolderError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@api.patch("/api/folders/{folder_id}", dependencies=auth)
+def update_folder(folder_id: str, body: FolderPatch):
+    try:
+        found = folders.update(folder_id, **body.model_dump(exclude_unset=True))
+    except folders.FolderError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not found:
+        raise HTTPException(404, "Dossier introuvable")
+    return found
+
+
+@api.delete("/api/folders/{folder_id}", dependencies=auth)
+def delete_folder(folder_id: str):
+    if not folders.delete(folder_id):
+        raise HTTPException(404, "Dossier introuvable")
+    return {"ok": True}
+
+
+@api.post("/api/folders/sort", dependencies=auth)
+def sort_folders():
+    """Claude files again every item not filed by hand (after adding a folder, say)."""
+    try:
+        done = folders.sort_items()
+    except Exception as exc:  # noqa: BLE001 — Claude unreachable: say so in the app
+        log.warning("Rangement automatique impossible", exc_info=True)
+        raise HTTPException(502, f"Rangement impossible : {exc}"[:300]) from exc
+    if done.get("busy"):
+        raise HTTPException(409, "Un rangement est déjà en cours")
+    return {**done, **folders.overview()}
 
 
 @api.get("/api/taxonomy", dependencies=auth)
@@ -254,7 +331,8 @@ def taxonomy():
 LIST_FIELDS = """id::text, kind, status, error, coalesce(title, left(input_text, 90)) as title, source_url, author,
                  site_name, published_at, created_at, left(coalesce(summary, input_text), 320) as summary, tags,
                  thumbnail_url, user_note, pinned, archived, file_path, file_mime,
-                 metadata->>'thumb_path' as thumb_path, genre, space, category, translations, entry_date"""
+                 metadata->>'thumb_path' as thumb_path, genre, space, category, translations, entry_date,
+                 folder_id::text as folder_id, (metadata->>'duration')::float as duration"""
 
 
 def _with_thumbs(rows: list[dict]) -> list[dict]:
@@ -283,21 +361,31 @@ def list_items(
     archived: bool = False,
     space: str | None = None,
     category: str | None = None,
+    folder: str | None = None,          # a folder id, or "none": the items in no folder
     limit: int = 40,
     offset: int = 0,
 ):
     limit = max(1, min(limit, 100))
+    kinds = [k.strip() for k in (kind or "").split(",") if k.strip()]     # "youtube,video": any of them
+    folder_id = None
+    if folder and folder != "none":
+        found = folders.get(folder)
+        if not found:
+            raise HTTPException(404, "Dossier introuvable")
+        folder_id = found["id"]
     try:
         space, category = normalize_space(space), normalize_category(category)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if q and q.strip():
-        found = search.search_items(q.strip(), limit=limit, kinds=[kind] if kind else None, tags=[tag] if tag else None,
+        found = search.search_items(q.strip(), limit=limit, kinds=kinds or None, tags=[tag] if tag else None,
                                     spaces=[space] if space else None)
         if category:
             found = [f for f in found if f.get("category") == category]
         ids = [f["id"] for f in found]
         rows = db.fetchall(f"select {LIST_FIELDS} from items where id = any(%s::uuid[])", (ids,)) if ids else []
+        if folder:
+            rows = [r for r in rows if r["folder_id"] == folder_id]
         order = {iid: i for i, iid in enumerate(ids)}
         excerpts = {f["id"]: (f.get("excerpts") or [None])[0] for f in found}
         rows.sort(key=lambda r: order[r["id"]])
@@ -312,9 +400,14 @@ def list_items(
     if category:
         where.append("category = %s")
         params.append(category)
+    if folder == "none":
+        where.append("folder_id is null")
+    elif folder_id:
+        where.append("folder_id = %s::uuid")
+        params.append(folder_id)
     if kind:
-        where.append("kind = %s")
-        params.append(kind)
+        where.append("kind = any(%s)")
+        params.append(kinds)
     if tag:
         where.append("%s = any(tags)")
         params.append(tag)
@@ -368,6 +461,7 @@ def get_item(item_id: str):
         it["file_url"] if it.get("kind") == "image" else it.get("thumbnail_url"))
     it["links"] = _links(item_id)
     it["actions"] = db.fetchall("select id, text, kind, done from actions where item_id = %s order by id", (item_id,))
+    it["folder_id"] = str(it["folder_id"]) if it.get("folder_id") else None
     it.pop("locked_at", None)
     return it
 
@@ -382,6 +476,7 @@ class ItemPatch(BaseModel):
     category: str | None = None
     content: str | None = None    # notes uniquement : le texte est remplacé puis retraité
     entry_date: date | None = None  # journal : déplace la note vers un autre jour
+    folder_id: str | None = None    # filed by hand (null: out of any folder)
 
 
 @api.patch("/api/items/{item_id}", dependencies=auth)
@@ -392,6 +487,10 @@ def patch_item(item_id: str, patch: ItemPatch):
     item = db.fetchone("select kind, input_url, file_path, title from items where id = %s", (item_id,))
     if not item:
         raise HTTPException(404, "Élément introuvable")
+    if "folder_id" in changes:
+        if changes["folder_id"] and not folders.get(changes["folder_id"]):
+            raise HTTPException(404, "Dossier introuvable")
+        folders.move(item_id, changes["folder_id"] or None)
 
     sets, params, meta = [], [], {}
     try:

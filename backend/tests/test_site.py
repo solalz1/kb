@@ -67,6 +67,9 @@ def browser():
 @pytest.fixture
 def site(browser, server, clean_db, fake_llm, monkeypatch):
     """Opens pages as a signed-in user; fails the test on any page error, console error or failed request."""
+    from app import folders
+
+    folders.seed()          # as the app does when it starts
     monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
         kind="article", title="Mesurer un agent sur de vraies tâches", source_url=url, author="Jane Doe",
         content="Un benchmark d'agents doit utiliser de vraies tâches et mesurer le coût. " * 30))
@@ -141,7 +144,8 @@ def test_sign_in(site):
     expect(page.get_by_text("Ce jeton ne correspond pas")).to_be_visible()
     page.get_by_label("Jeton d'accès").fill("test-token")
     page.get_by_role("button", name="Se connecter").click()
-    expect(page.get_by_placeholder("Chercher un sujet, une idée, une personne…")).to_be_visible()
+    expect(page.get_by_placeholder("Chercher un sujet, une personne…")).to_be_visible()
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
 
 
 @pytest.mark.parametrize("viewport", [PHONE, DESKTOP], ids=["phone", "desktop"])
@@ -155,7 +159,8 @@ def test_every_page_opens(site, viewport):
         ("/digest", page.get_by_role("button", name="Générer maintenant").or_(page.get_by_text("Pas encore de digest"))),
         ("/digest/interets", page.get_by_role("heading", name="Ce qui t'intéresse")),
         ("/ask", page.get_by_role("heading", name="Demande à ta KB")),
-        ("/add", page.get_by_role("heading", name="Ajouter à ta KB")),
+        ("/add", page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")),
+        ("/folders", page.get_by_role("heading", name="Dossiers", exact=True)),
         ("/todo", page.get_by_text("Tester l'outil mentionné").first),
         ("/settings", page.get_by_role("heading", name="Réglages")),
         (f"/item/{ids['article']}", page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")),
@@ -171,7 +176,7 @@ def test_item_page_shows_the_whole_summary(site):
     page = site("/")
     ids = _seed(page)
     page.goto(f"/item/{ids['article']}")
-    summary = page.locator(".sheet .ruled")
+    summary = page.locator(".item-summary")
     expect(summary).to_contain_text("Résumé de article")
     assert summary.evaluate("el => getComputedStyle(el).webkitLineClamp") in ("none", "")
 
@@ -225,7 +230,7 @@ def test_journal_other_days(site):
     day = _api(page, "GET", f"/api/journal/{last_month.isoformat()}")["body"]
     assert [e["text"] for e in day["entries"]] == ["Un souvenir de ce jour-là."]
 
-    page.get_by_role("button", name="Aujourd'hui").first.click()
+    page.get_by_role("button", name="Revenir à aujourd'hui").click()
     expect(page.locator(".cal-day[aria-current='date']")).to_have_attribute("aria-pressed", "true")
     expect(page.locator(".entry")).to_have_count(0)
 
@@ -242,7 +247,8 @@ def test_journal_other_days(site):
 
 
 def test_phone_head_and_tab_bar(site):
-    """On a phone, Veille's head carries the To do badge and the settings cog; the + in the tab bar opens Add."""
+    """On a phone, Veille's head carries the folders, the To do badge and the settings cog; the + in the tab bar opens
+    Add."""
     page = site("/")
     _seed(page)
     page.reload()
@@ -253,8 +259,12 @@ def test_phone_head_and_tab_bar(site):
     page.goto("/")
     page.locator(".page-head").get_by_role("link", name="Réglages").click()
     expect(page.get_by_role("heading", name="Réglages")).to_be_visible()
+    page.go_back()
+    page.locator(".page-head").get_by_role("link", name="Dossiers").click()
+    expect(page.get_by_role("heading", name="Dossiers", exact=True)).to_be_visible()
+    expect(page.locator(".tabbar a[aria-current='page']")).to_have_text("Veille")     # folders belong to Veille
     page.locator(".tabbar").get_by_role("link", name="Ajouter").click()
-    expect(page.get_by_role("heading", name="Ajouter à ta KB")).to_be_visible()
+    expect(page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")).to_be_visible()
     # the "Tout" chip is the default filter and clears a type filter
     page.goto("/?kind=article")
     expect(page.locator(".chip[aria-pressed='true']")).to_have_text("Articles")
@@ -266,6 +276,7 @@ def test_journal_from_the_menus(site):
     page = site("/perso")
     page.get_by_role("link", name="Journal").click()
     expect(page.get_by_role("heading", name="Journal", exact=True)).to_be_visible()
+    expect(page.locator(".tabbar a[aria-current='page']")).to_have_text("Perso")       # the journal belongs to Perso
     desk = site("/", viewport=DESKTOP)
     desk.locator(".rail").get_by_role("link", name="Journal").click()
     expect(desk.get_by_role("heading", name="Journal", exact=True)).to_be_visible()
@@ -274,25 +285,26 @@ def test_journal_from_the_menus(site):
 def test_english(site):
     page = site("/")
     _seed(page)
-    # on a phone the language lives in Settings (the sidebar's FR | EN switch is desktop only)
+    # the language lives in Settings: a row on a phone, a section on a computer
     page.get_by_role("link", name="Réglages").click()
-    page.get_by_role("group", name="Langue").get_by_role("button", name="English").click()
+    page.get_by_role("group", name="Langue").get_by_role("button", name="EN").click()
     page.goto("/")
     expect(page.locator(".tabbar").get_by_role("link", name="Feed")).to_be_visible()
-    expect(page.get_by_placeholder("Search for a topic, an idea, a person…")).to_be_visible()
-    expect(page.locator(".fiche .ruled").first).to_contain_text("Summary of the article")   # the English card
+    expect(page.get_by_placeholder("Search for a topic, a person…")).to_be_visible()
+    expect(page.locator(".fiche .summary").first).to_contain_text("Summary of the article")   # the English card
     page.goto("/journal")
-    expect(page.locator(".cal-wd").first).to_have_text("Mon")
+    expect(page.locator(".cal-wd").first).to_have_text("M")
     expect(page.get_by_role("button", name="Add to the journal")).to_be_visible()
-    desk = site("/", viewport=DESKTOP, lang="en")
-    desk.locator(".rail .lang").get_by_role("button", name="FR").click()
+    desk = site("/settings", viewport=DESKTOP, lang="en")
+    desk.locator("#langue").get_by_role("button", name="Français").click()
+    desk.goto("/")
     expect(desk.get_by_placeholder("Chercher un sujet, une idée, une personne…")).to_be_visible()
 
 
 def test_add_a_link(site):
     page = site("/add")
-    page.get_by_label("Lien ou note").fill("https://blog.ex.com/agents")
-    page.get_by_role("button", name="Ajouter à la KB").click()
+    page.get_by_label("Lien, idée ou citation").fill("https://blog.ex.com/agents")
+    page.get_by_role("button", name="Ajouter", exact=True).click()
     expect(page.get_by_role("status")).to_contain_text("Ajouté à ta KB ✓")
     drain()
     page.goto("/")
@@ -310,8 +322,8 @@ def test_add_a_blocked_article_with_its_text(site, monkeypatch):
     monkeypatch.setattr(extractors, "extract_url", blocked)
     page = site("/add")
     article = "Cinq astuces pour écrire de meilleures instructions à Claude, une par paragraphe. " * 40
-    page.get_by_label("Lien ou note").fill(f"https://medium.com/ex-publication/cinq-astuces-1a2b3c4d5e6f\n\n{article}")
-    page.get_by_role("button", name="Ajouter à la KB").click()
+    page.get_by_label("Lien, idée ou citation").fill(f"https://medium.com/ex-publication/cinq-astuces-1a2b3c4d5e6f\n\n{article}")
+    page.get_by_role("button", name="Ajouter", exact=True).click()
     expect(page.get_by_role("status")).to_contain_text("Ajouté à ta KB ✓")
     drain()
     row = db.fetchone("select status, kind, source_url, content from items")
@@ -324,7 +336,8 @@ def test_upload_a_file(site, tmp_path):
     pdf = tmp_path / "notes.txt"
     pdf.write_text("Des notes de lecture sur les agents.")
     page.locator("input[type=file]").set_input_files(str(pdf))
-    page.get_by_role("button", name="Ajouter à la KB").click()
+    expect(page.get_by_text("notes.txt")).to_be_visible()
+    page.get_by_role("button", name="Ajouter", exact=True).click()
     expect(page.get_by_role("status")).to_contain_text("Ajouté à ta KB ✓")
 
 
@@ -436,7 +449,7 @@ def test_a_card_whose_lists_were_saved_as_text(site):
     expect(page.get_by_role("heading", name="Apprendre un domaine en 48 h")).to_be_visible()
     points = page.locator("section", has=page.get_by_role("heading", name="Points clés")).locator("li")
     expect(points).to_have_text(["Les questions comptent plus que le volume.", "Trois débats d'experts."])
-    expect(page.locator("section", has=page.get_by_role("heading", name="Utile pour")).locator("li")).to_have_count(2)
+    expect(page.locator("section", has=page.get_by_role("heading", name="Utile pour")).locator(".use-for")).to_have_count(2)
     page.go_back()
     expect(page.locator(f"a[href='/item/{row['id']}']")).to_be_visible()
 
@@ -460,7 +473,9 @@ def test_a_page_that_crashes_shows_a_way_back(site):
     expect(page.locator(f"a[href='/item/{ids['article']}']")).to_be_visible()
     page.unroute(f"**/api/items/{ids['article']}")
     page.locator(f"a[href='/item/{ids['article']}']").click()
-    expect(page.get_by_role("button", name="Archiver")).to_be_visible()
+    expect(page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")).to_be_visible()
+    page.get_by_role("button", name="Plus d'actions").click()               # on a phone, the item's actions are in •••
+    expect(page.get_by_role("menuitem", name="Archiver")).to_be_visible()
 
 
 def test_mouse_clicks_still_open_cards(site):
@@ -507,11 +522,13 @@ def test_no_page_slides_sideways_on_a_phone(site):
     db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
                   values ('daily', current_date, current_date, 'ready', 'Une journée.', %s)""",
                (db.jsonb({"entries": [entry]}),))
-    for path in ["/", "/perso", "/journal", "/digest", "/digest/interets", "/ask", "/add", "/todo", "/settings"]:
+    for path in ["/", "/perso", "/folders", "/journal", "/digest", "/digest/interets", "/ask", "/add", "/todo", "/settings",
+                 "/settings/couts", "/settings/connecteur"]:
         page.goto(path)
         page.wait_for_load_state("networkidle")
         assert page.evaluate(_OVERFLOW) == [], path
-    for path, field in [("/", "#q"), ("/digest/interets", ".add-row .field")]:
+    for path, field in [("/", ".search input"), ("/digest/interets", ".add-row .field"), ("/add", "select"),
+                        ("/ask", ".model-pick select")]:
         page.goto(path)
         size = page.locator(field).first.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
         assert size >= 16, (path, size)
@@ -550,20 +567,26 @@ def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
     costs.record("anthropic", 0.42, model="claude-haiku-5-5")
     costs.record("x", 0.05)
     billing_apis.answers[costs.X_CREDITS_URL] = {"data": {"total_balance": 4.2, "free_balance": 0}}
-    page = site("/settings", touch=True)
-
-    # the strip of sections stays on screen and takes you straight to one
-    nav = page.get_by_role("navigation", name="Sections des réglages")
-    nav.get_by_role("link", name="Tes données").click()
-    heading = page.get_by_role("heading", name="Tes données")
-    page.wait_for_function("() => { const h = [...document.querySelectorAll('h2')].find(e => e.textContent === 'Tes données');"
+    # on a computer, a strip of sections takes you straight to one
+    desk = site("/settings", viewport=DESKTOP)
+    nav = desk.get_by_role("navigation", name="Sections des réglages")
+    nav.get_by_role("link", name="Connecteur Claude").click()
+    heading = desk.get_by_role("heading", name="Connecteur Claude")
+    desk.wait_for_function("() => { const h = [...document.querySelectorAll('h2')].find(e => e.textContent === 'Connecteur Claude');"
                            " const r = h.getBoundingClientRect(); return r.top > 0 && r.top < 260; }")
     expect(heading).to_be_in_viewport()
-    expect(nav).to_be_in_viewport()
-    expect(nav.get_by_role("link", name="Tes données")).to_have_attribute("aria-current", "true")
+    expect(nav.get_by_role("link", name="Connecteur Claude")).to_have_attribute("aria-current", "true")
+    expect(desk.locator("#couts .cost-totals")).to_contain_text("Ce mois-ci")
+
+    # on a phone, grouped rows, each opening its section
+    page = site("/settings", touch=True)
+    rows = page.get_by_role("navigation", name="Sections des réglages")
+    expect(rows.get_by_role("link", name=re.compile("^Coûts"))).to_contain_text("5,47 $US ce mois-ci")   # with the Railway plan
+    rows.get_by_role("link", name=re.compile("^Coûts")).click()
+    expect(page).to_have_url(re.compile(r"/settings/couts$"))
+    expect(page.get_by_role("heading", name="Coûts", exact=True)).to_be_visible()
 
     # costs in US dollars, by service, each marked synced or estimated
-    nav.get_by_role("link", name="Coûts").click()
     section = page.locator("#couts")
     expect(section.locator(".cost-totals")).to_contain_text("Ce mois-ci")
     claude = section.locator(".cost-row[data-service='anthropic']")
@@ -610,8 +633,10 @@ def test_settings_menu_and_costs(site, billing_apis, monkeypatch):
 def test_thinking_can_be_turned_off_in_settings(site):
     from app import llm
 
-    page = site("/settings")
-    page.get_by_role("navigation", name="Sections des réglages").get_by_role("link", name="Réflexion").click()
+    desk = site("/settings", viewport=DESKTOP)
+    desk.get_by_role("navigation", name="Sections des réglages").get_by_role("link", name="Réflexion").click()
+    expect(desk.get_by_label("Laisser Claude réfléchir avant de répondre")).to_be_checked()
+    page = site("/settings")                             # on a phone, a switch in the first group
     box = page.get_by_label("Laisser Claude réfléchir avant de répondre")
     expect(box).to_be_checked()                          # on by default
     box.uncheck()
@@ -631,7 +656,7 @@ def test_generate_button_on_the_digest(site):
     db.execute("""insert into digests (kind, period_start, period_end, status, headline, data)
                   values ('daily', %s, %s, 'ready', 'Une journée.', '{"entries": []}')""", (today, today))
     page = site("/digest")
-    button = page.locator(".digest-bar").get_by_role("button", name="Générer maintenant")
+    button = page.get_by_role("button", name="Générer maintenant")
     expect(button).to_be_visible()
     asked = []
     page.once("dialog", lambda d: (asked.append(d.message), d.dismiss()))
@@ -639,3 +664,79 @@ def test_generate_button_on_the_digest(site):
     expect(page.get_by_role("heading", name="Digest du", exact=False)).to_be_visible()
     assert asked and "existe déjà" in asked[0]
     assert db.fetchone("select status from digests")["status"] == "ready"      # dismissed: nothing rewritten
+
+
+def test_folders(site):
+    """The Dossiers page: the default folders, a new one, an item filed by hand from its page, and the folder's own feed."""
+    page = site("/")
+    ids = _seed(page)
+    page.locator(".page-head").get_by_role("link", name="Dossiers").click()
+    cards = page.locator(".folder-card")
+    expect(cards.locator(".t")).to_have_text(["ML", "Claude", "Entretien", "Perso", "Sans dossier"])
+
+    page.get_by_role("button", name="Nouveau dossier").click()
+    page.get_by_label("Nom du dossier").fill("Lectures")
+    page.get_by_label("Ce qui va dedans").fill("Romans et essais")
+    page.get_by_role("button", name="Créer le dossier").click()
+    expect(cards.filter(has_text="Lectures")).to_contain_text("Romans et essais")
+
+    # filed by hand from the item's page
+    page.goto(f"/item/{ids['article']}")
+    page.get_by_label("Dossier").select_option(label="Lectures")
+    _wait_for(lambda: _api(page, "GET", f"/api/items/{ids['article']}")["body"]["folder_id"] is not None, page)
+    item = _api(page, "GET", f"/api/items/{ids['article']}")["body"]
+    assert item["metadata"]["manual_folder"] is True
+
+    # the folder's feed, then rename and delete it
+    page.goto("/folders")
+    lectures = cards.filter(has_text="Lectures")
+    expect(lectures.locator(".n")).to_have_text("1")
+    lectures.click()
+    expect(page.get_by_role("heading", name="Lectures", exact=True)).to_be_visible()
+    expect(page.locator(".fiche")).to_have_count(1)
+    expect(page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")).to_be_visible()
+    page.get_by_role("button", name="Modifier le dossier").click()
+    page.get_by_label("Nom du dossier").fill("Lectures du soir")
+    page.get_by_role("button", name="Enregistrer").click()
+    expect(page.get_by_role("heading", name="Lectures du soir", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Modifier le dossier").click()
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name="Supprimer le dossier").click()
+    expect(page.get_by_role("heading", name="Dossiers", exact=True)).to_be_visible()
+    expect(cards.filter(has_text="Lectures")).to_have_count(0)
+    assert _api(page, "GET", f"/api/items/{ids['article']}")["body"]["folder_id"] is None
+
+    # the items in no folder, and Dossiers in the sidebar on a computer
+    page.locator(".folder-card.unfiled").click()
+    expect(page.get_by_role("heading", name="Sans dossier", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")).to_be_visible()
+    desk = site("/", viewport=DESKTOP)
+    desk.locator(".rail").get_by_role("link", name="Dossiers").click()
+    expect(desk.get_by_role("heading", name="Dossiers", exact=True)).to_be_visible()
+
+
+def test_add_into_a_folder(site):
+    page = site("/add")
+    page.get_by_label("Lien, idée ou citation").fill("https://blog.ex.com/agents")
+    page.get_by_label("Dossier").select_option(label="Entretien")
+    page.get_by_role("button", name="Ajouter", exact=True).click()
+    expect(page.get_by_role("status")).to_contain_text("Ajouté à ta KB ✓")
+    drain()
+    folders = {f["name"]: f["id"] for f in _api(page, "GET", "/api/folders")["body"]["folders"]}
+    items = _api(page, "GET", f"/api/items?folder={folders['Entretien']}")["body"]["items"]
+    assert [i["title"] for i in items] == ["Mesurer un agent sur de vraies tâches"]
+
+
+def test_feed_type_filters_group_kinds(site):
+    """« Vidéos » shows YouTube videos and uploaded videos, « Papiers & PDF » papers and PDFs."""
+    from app import db
+
+    for kind, title in [("youtube", "Une vidéo YouTube"), ("video", "Une vidéo envoyée"), ("pdf", "Un PDF"),
+                        ("paper", "Un papier"), ("tweet", "Un tweet")]:
+        db.execute("insert into items (kind, title, status) values (%s, %s, 'ready')", (kind, title))
+    page = site("/", viewport=DESKTOP)
+    page.get_by_role("button", name="Vidéos").click()
+    expect(page.locator(".fiche h3")).to_have_text(["Une vidéo envoyée", "Une vidéo YouTube"], ignore_case=False)
+    page.get_by_role("button", name="Papiers & PDF").click()
+    expect(page.locator(".fiche h3")).to_have_count(2)
+    expect(page.locator(".feed-main")).not_to_contain_text("Un tweet")

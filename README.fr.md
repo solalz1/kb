@@ -9,6 +9,7 @@ Partage n'importe quoi depuis ton iPhone ou ton Mac (un tweet ou un thread, un a
 - **Capture de partout** : le bouton Partager sur iPhone et Mac (Raccourcis tout faits), l'app web, ou Claude lui-même.
 - **Tous les formats** : posts et threads X, articles web, arXiv, GitHub, YouTube, TikTok/Instagram/Vimeo, podcasts, audio, vidéo, PDF (scannés aussi), images, Word/PowerPoint/Excel, notes.
 - **Sources gardées** : chaque fiche garde le lien d'origine, l'auteur, la date et le fichier. Chaque réponse cite ses sources, avec les liens.
+- **Dossiers** : tes propres rayons (ML, Entretien…, à ajouter et renommer dans l'app). Claude range chaque nouvel élément dans celui qui lui correspond ; choisis-le toi-même en partageant, le Raccourci propose toujours tes dossiers du moment.
 - **Interroge ta KB** : « Qu'est-ce que j'ai sauvegardé sur… ? », ou « Je commence ce projet, qu'est-ce qui peut m'aider ? », qui renvoie une note sourcée.
 - **Espace perso** : écris tes principes, tes valeurs, tes leçons, tes objectifs et un journal quotidien (avec un calendrier). Tes mots restent tels que tu les as écrits. Le **mode Conseil** répond à une décision à partir de *tes* principes, et les cite.
 - **Digest tech du matin** (facultatif) : Hacker News, les papiers Hugging Face, les dépôts GitHub qui montent, des blogs et les personnes que tu suis sur X, classés selon ce que tu sauvegardes. Le lundi, la semaine en bref et des idées de projets.

@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import db, embeddings, llm, notion, storage, urls
+from . import db, embeddings, folders, llm, notion, storage, urls
 from .chunking import chunk_text
 from .config import get_settings
 from .extractors import ExtractionError, Extracted, extract_item
@@ -115,14 +115,19 @@ def ingest(
     category: str | None = None,
     title: str | None = None,
     page_follows: bool = False,
+    folder: str | None = None,
 ) -> dict:
     """`page_follows`: the client (the Shortcut) can fetch the page from the phone. For a site that refuses the server,
-    the answer then says `page_wanted`, and the item waits a little for POST /api/items/<id>/page."""
+    the answer then says `page_wanted`, and the item waits a little for POST /api/items/<id>/page.
+    `folder`: where to file it, as the Shortcut's "Où le ranger ?" list says it (a folder's name, "Automatique",
+    "Espace Perso") or a folder id; nothing or "Automatique": Claude chooses."""
     url = (url or "").strip() or None
     text = (text or "").strip() or None
     note = (note or "").strip() or None
     title = (title or "").strip()[:300] or None
     explicit = normalize_space(space)
+    folder_id, folder_space = folders.parse_choice(folder)
+    explicit = explicit or folder_space
     if category and space_from_word(category):
         # the Shortcuts' "Où le ranger ?" list mixes spaces (Veille, Perso) and Perso categories in one field
         explicit, category = explicit or space_from_word(category), None
@@ -145,6 +150,8 @@ def ingest(
         page = text if len(text) > PAGE_TEXT_MIN else None
         text = None
     metadata = {"manual_title": True} if title else {}
+    if folder_id:
+        metadata["manual_folder"] = True
 
     if file:
         data, filename, mime = file
@@ -155,9 +162,10 @@ def ingest(
         path = storage.upload(f"uploads/{item_id}/{safe}", data, mime)
         row = db.fetchone(
             """insert into items (id, file_path, file_name, file_mime, input_text, user_note, kind, title,
-                                  space, category, metadata)
-               values (%s, %s, %s, %s, %s, %s, null, %s, %s, %s, %s) returning id, status""",
-            (item_id, path, filename, mime, text, note, title or filename, space, category, db.jsonb(metadata)),
+                                  space, category, metadata, folder_id)
+               values (%s, %s, %s, %s, %s, %s, null, %s, %s, %s, %s, %s::uuid) returning id, status""",
+            (item_id, path, filename, mime, text, note, title or filename, space, category, db.jsonb(metadata),
+             folder_id),
         )
         _wake()
         return {"id": str(row["id"]), "status": row["status"], "duplicate": False}
@@ -183,6 +191,8 @@ def ingest(
             if space == "perso" and existing["space"] != "perso":   # repartagé exprès vers Perso : on le déplace
                 db.execute("update items set space = 'perso', category = coalesce(%s, category) where id = %s",
                            (category, existing["id"]))
+            if folder_id:       # shared again into a chosen folder: it moves there
+                folders.move(str(existing["id"]), folder_id)
             out = {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
             if retried:
                 out["retried"] = True
@@ -196,18 +206,18 @@ def ingest(
         wanted = page_follows and not page and info.kind == "web" and web_blocks_servers(url)
         row = db.fetchone(
             """insert into items (id, input_url, input_text, user_note, source_url, kind, title, space, category,
-                                  metadata, next_attempt_at)
+                                  metadata, next_attempt_at, folder_id)
                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       case when %s then now() + make_interval(secs => %s) end) returning id, status""",
+                       case when %s then now() + make_interval(secs => %s) end, %s::uuid) returning id, status""",
             (item_id, url, text, note, info.canonical, INGEST_KIND.get(info.kind), title, space, category,
-             db.jsonb(metadata), wanted, PAGE_WAIT_SECONDS),
+             db.jsonb(metadata), wanted, PAGE_WAIT_SECONDS, folder_id),
         )
         _wake()
         out = {"id": str(row["id"]), "status": row["status"], "duplicate": False}
         return {**out, "page_wanted": True, "page_url": url} if wanted else out
 
     if text:
-        return create_note(content=text, title=title, space=space, category=category, why=note)
+        return create_note(content=text, title=title, space=space, category=category, why=note, folder_id=folder_id)
 
     raise ValueError("Envoie une URL, un texte ou un fichier")
 
@@ -226,8 +236,10 @@ def create_note(
     tags: list[str] | None = None,
     why: str | None = None,
     entry_date: date | None = None,
+    folder_id: str | None = None,
 ) -> dict:
-    """Note écrite à la main (ou dictée) : le texte est gardé tel quel, Claude ajoute résumé, tags et liens."""
+    """Note écrite à la main (ou dictée) : le texte est gardé tel quel, Claude ajoute résumé, tags et liens.
+    `folder_id`: a folder chosen by hand (else Claude files it)."""
     content = (content or "").strip()
     if not content:
         raise ValueError("La note est vide")
@@ -240,12 +252,16 @@ def create_note(
         metadata["manual_title"] = True
     if tags:
         metadata["user_tags"] = tags
+    if folder_id:
+        metadata["manual_folder"] = True
     # a journal note belongs to a day: the one chosen in the calendar, today otherwise
     entry_date = (entry_date or today()) if category == "journal" else None
     row = db.fetchone(
-        """insert into items (input_text, user_note, kind, title, space, category, tags, metadata, entry_date)
-           values (%s, %s, 'note', %s, %s, %s, %s, %s, %s) returning id, status""",
-        (content, (why or "").strip() or None, title, space, category, tags, db.jsonb(metadata), entry_date),
+        """insert into items (input_text, user_note, kind, title, space, category, tags, metadata, entry_date,
+                               folder_id)
+           values (%s, %s, 'note', %s, %s, %s, %s, %s, %s, %s::uuid) returning id, status""",
+        (content, (why or "").strip() or None, title, space, category, tags, db.jsonb(metadata), entry_date,
+         folder_id),
     )
     _wake()
     return {"id": str(row["id"]), "status": row["status"], "duplicate": False}
@@ -353,6 +369,7 @@ def process(item: dict) -> None:
             log.warning("Vignette non stockée", exc_info=True)
 
     space = item.get("space") or "main"
+    manual_folder = bool(metadata.get("manual_folder"))
     enr = llm.enrich(
         kind=ex.kind,
         title=item.get("title") if metadata.get("manual_title") else ex.title,
@@ -364,6 +381,7 @@ def process(item: dict) -> None:
         existing_tags=existing_tags(),
         space=space,
         category=item.get("category"),
+        folders=None if manual_folder else folders.for_enrich(),
     )
     title = ex.title if (ex.title and ex.kind in KEEP_SOURCE_TITLE) else (enr.get("title") or ex.title)
     if ex.kind == "tweet" and ex.title:  # Article X : on garde son titre
@@ -399,6 +417,7 @@ def process(item: dict) -> None:
         "space": space,
         "category": category,
         "translations": _translations(enr, title),
+        "folder_id": item.get("folder_id") if manual_folder else folders.id_for(enr.get("folder")),
     }
 
     card = build_card(fields)
@@ -410,7 +429,8 @@ def process(item: dict) -> None:
     with db.conn() as c, c.transaction():
         # L'utilisateur a pu modifier l'élément pendant le traitement : on relit la ligne, verrouillée
         current = c.execute(
-            "select status, locked_at, title, category, tags, user_note, space, metadata from items where id = %s for update",
+            """select status, locked_at, title, category, tags, user_note, space, metadata, folder_id::text
+                 from items where id = %s for update""",
             (item_id,),
         ).fetchone()
         if not current or current["status"] != "processing" or current["locked_at"] != item.get("locked_at"):
@@ -429,21 +449,25 @@ def process(item: dict) -> None:
             fields["category"] = current["category"]
         if current["space"] != "perso":
             fields["category"] = None
-        fields["metadata"] = {**fields["metadata"], **{k: meta_now[k] for k in ("manual_title", "user_tags") if k in meta_now}}
+        if meta_now.get("manual_folder"):       # filed by hand, maybe while this ran
+            fields["folder_id"] = current["folder_id"]
+        fields["metadata"] = {**fields["metadata"],
+                              **{k: meta_now[k] for k in ("manual_title", "user_tags", "manual_folder") if k in meta_now}}
         fields["translations"] = _translations(enr, fields["title"])
         stale = card_built_with != [fields.get(k) for k in keys]
         c.execute(
             """update items set kind=%s, title=%s, source_url=%s, author=%s, author_url=%s, site_name=%s,
                       published_at=%s, language=%s, thumbnail_url=%s, content=%s, summary=%s, key_points=%s,
                       tags=%s, entities=%s, use_cases=%s, genre=%s, metadata=%s, category=%s, translations=%s,
-                      status='ready', error=null, locked_at=null, next_attempt_at=null
+                      folder_id=%s::uuid, status='ready', error=null, locked_at=null, next_attempt_at=null
                where id=%s""",
             (
                 fields["kind"], fields["title"], fields["source_url"], fields["author"], fields["author_url"],
                 fields["site_name"], fields["published_at"], fields["language"], fields["thumbnail_url"],
                 fields["content"], fields["summary"], db.jsonb(fields["key_points"]), fields["tags"],
                 db.jsonb(fields["entities"]), db.jsonb(fields["use_cases"]), fields["genre"],
-                db.jsonb(fields["metadata"]), fields["category"], db.jsonb(fields["translations"]), item_id,
+                db.jsonb(fields["metadata"]), fields["category"], db.jsonb(fields["translations"]),
+                fields["folder_id"], item_id,
             ),
         )
         c.execute("delete from chunks where item_id = %s", (item_id,))

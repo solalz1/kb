@@ -31,8 +31,10 @@ REPEAT_ITEM = {"Type": "Variable", "VariableName": "Repeat Item"}
 COLORS = {"red": 4282601983, "blue": 463140863, "taupe": 2846468607}
 GLYPHS = {"bookmark": 59670, "paperclip": 59794, "microphone": 59780}
 CATEGORIES = ["Principe", "Valeur", "Leçon", "Objectif", "Habitude", "Réflexion", "Journal", "Citation", "Ressource"]
-# "Où le ranger ?": sent as `category`; the API reads Veille / Perso as a space and the rest as a Perso category
-PLACES = ["Veille", "Perso", *CATEGORIES]
+# "Où le ranger ?" is filled by the KB at each share (GET /api/folders/choices: Automatique, your folders, Espace Perso),
+# so a folder added in the app shows up without rebuilding the Shortcut. The choice goes back as `folder`.
+CHOICES_PATH = "/api/folders/choices"
+WHERE_PROMPT = "Où le ranger ?"
 HAS_ANY_VALUE = 100                    # WFCondition of an If: "has any value"
 # Pages fetched from the phone (sites that refuse servers) ask as Safari on an iPhone would
 PHONE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
@@ -72,6 +74,10 @@ def field(key: str, *value: str | dict, item_type: int = TEXT) -> dict:
 
 def fields(*rows: dict) -> dict:
     return {"Value": {"WFDictionaryFieldValueItems": list(rows)}, "WFSerializationType": "WFDictionaryFieldValue"}
+
+
+def headers(token: dict) -> dict:
+    return fields(field("Authorization", "Bearer ", token))
 
 
 class Builder:
@@ -114,6 +120,15 @@ class Builder:
         options = self.add("list", "List", WFItems=[{"WFItemType": TEXT, "WFValue": text(i)} for i in items])
         return self.add("choosefromlist", "Chosen Item", WFInput=attachment(options), WFChooseFromListActionPrompt=prompt)
 
+    def choose_folder(self, base: str, token: dict) -> dict:
+        """"Où le ranger ?" with the KB's current choices: asked to the server each time, so new folders appear."""
+        answer = self.add("downloadurl", "Contents of URL", custom_name="Dossiers", WFURL=f"{base}{CHOICES_PATH}",
+                          WFHTTPMethod="GET", ShowHeaders=True, WFHTTPHeaders=headers(token))
+        options = self.add("getvalueforkey", "Dictionary Value", custom_name="Choix", WFGetDictionaryValueType="Value",
+                           WFDictionaryKey="choices", WFInput=attachment(answer))
+        return self.add("choosefromlist", "Chosen Item", WFInput=attachment(options),
+                        WFChooseFromListActionPrompt=WHERE_PROMPT)
+
     def token(self) -> dict:
         ref = self.add("gettext", "Text", custom_name="Jeton KB", WFTextActionText="")
         self.ask_on_import("WFTextActionText", TOKEN_QUESTION)
@@ -141,10 +156,6 @@ class Builder:
         return plist
 
 
-def headers(token: dict) -> dict:
-    return fields(field("Authorization", "Bearer ", token))
-
-
 def add_to_kb(base: str) -> dict:
     """Share sheet, links and text: POST /api/ingest as JSON. For a site that refuses servers (Medium…), the API answers
     `page_wanted`: the phone then fetches the page itself and sends it to POST /api/items/<id>/page."""
@@ -156,11 +167,11 @@ def add_to_kb(base: str) -> dict:
     first = b.add("getitemfromlist", "Item from List", WFItemSpecifier="First Item", WFInput=attachment(urls))
     shared = b.add("detect.text", "Text", WFInput=attachment(SHORTCUT_INPUT))
     why = b.add("ask", "Provided Input", WFAskActionPrompt="Pourquoi tu gardes ça ?", WFInputType="Text")
-    where = b.choose("Où le ranger ?", PLACES)
+    where = b.choose_folder(base, token)
     response = b.add("downloadurl", "Contents of URL", WFURL=f"{base}/api/ingest", WFHTTPMethod="POST",
                      ShowHeaders=True, WFHTTPHeaders=headers(token), WFHTTPBodyType="JSON",
                      WFJSONValues=fields(field("url", first), field("text", shared), field("note", why),
-                                         field("category", where), field("page_follows", "1")))
+                                         field("folder", where), field("page_follows", "1")))
     message = b.add("getvalueforkey", "Dictionary Value", WFGetDictionaryValueType="Value",
                     WFDictionaryKey="message", WFInput=attachment(response))
     b.add("notification", WFNotificationActionBody=text(message))
@@ -192,14 +203,14 @@ def file_to_kb(base: str) -> dict:
     b = Builder("Fichier vers ma KB")
     token = b.token()
     why = b.add("ask", "Provided Input", WFAskActionPrompt="Pourquoi tu gardes ça ?", WFInputType="Text")
-    where = b.choose("Où le ranger ?", PLACES)
+    where = b.choose_folder(base, token)
     group = new_uuid()
     b.add("repeat.each", with_uuid=False, WFControlFlowMode=0, GroupingIdentifier=group,
           WFInput=attachment(SHORTCUT_INPUT))
     response = b.add("downloadurl", "Contents of URL", WFURL=f"{base}/api/ingest", WFHTTPMethod="POST",
                      ShowHeaders=True, WFHTTPHeaders=headers(token), WFHTTPBodyType="Form",
                      WFFormValues=fields(field("file", REPEAT_ITEM, item_type=FILE), field("note", why),
-                                         field("category", where)))
+                                         field("folder", where)))
     b.add("getvalueforkey", "Dictionary Value", WFGetDictionaryValueType="Value", WFDictionaryKey="message",
           WFInput=attachment(response))
     # the loop's result is the server's message for each file, success or error
