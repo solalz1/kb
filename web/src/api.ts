@@ -275,8 +275,31 @@ function write(key: string, value: string) {
   try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch { /* stockage indisponible */ }
 }
 
-/** Forget the token on this device: the app goes back to its sign-in page (App listens). */
-export const signOut = () => { auth.token = ""; window.dispatchEvent(new Event("kb:unauthorized")); };
+/** Shared sign-in (SSO_URL on the server, read from /api/health by App): no token on this device, the session cookie
+ *  of the sign-in service opens the app. Empty when it's off. */
+export const sso = { login: "" };
+
+/** Off to the shared sign-in page, which brings you back to this exact page. */
+export function goSignIn() {
+  try { const u = new URL(sso.login); u.searchParams.set("next", window.location.href); window.location.replace(u.href); }
+  catch { window.location.replace(sso.login); }
+}
+
+/** The token when this device has one; otherwise the session cookie, with a header other sites can't add. */
+function authHeaders(headers: Headers = new Headers()): Headers {
+  if (auth.token) headers.set("Authorization", `Bearer ${auth.token}`);
+  else headers.set("X-KB-Client", "web");
+  return headers;
+}
+
+/** Forget the token on this device (and end the shared session): the app goes back to its sign-in page (App listens). */
+export const signOut = async () => {
+  auth.token = "";
+  if (sso.login) {
+    try { await fetch(`${auth.base}/api/logout`, { method: "POST", headers: { "X-KB-Client": "web" } }); } catch { /* offline */ }
+  }
+  window.dispatchEvent(new Event("kb:unauthorized"));
+};
 
 export const auth = {
   get token() { return read(TOKEN_KEY); },
@@ -293,8 +316,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const change = init.method && init.method !== "GET" ? cache.changeStarted() : 0;
   try {
-    const headers = new Headers(init.headers);
-    headers.set("Authorization", `Bearer ${auth.token}`);
+    const headers = authHeaders(new Headers(init.headers));
     if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
     const res = await fetch(`${auth.base}${path}`, { ...init, headers });
     if (!res.ok) {
@@ -317,7 +339,7 @@ function upload(form: FormData, onProgress: (fraction: number) => void): Promise
   return new Promise<IngestResult>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${auth.base}/api/ingest`);
-    xhr.setRequestHeader("Authorization", `Bearer ${auth.token}`);
+    authHeaders().forEach((value, name) => xhr.setRequestHeader(name, value));
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
     xhr.onload = () => {
       let body: { detail?: string } & Partial<IngestResult> = {};
@@ -397,7 +419,7 @@ export function cleanDetail(item: ItemDetail): ItemDetail {
 }
 
 export const api = {
-  health: () => request<{ ok: boolean }>("/api/health"),
+  health: () => request<{ ok: boolean; sso_login?: string | null }>("/api/health"),
   items: (params: { q?: string; kind?: string; tag?: string; entity?: string; space?: Space; category?: string;
                     folder?: string; limit?: number; offset?: number; archived?: boolean }) =>
     request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`)
@@ -468,7 +490,7 @@ export const api = {
     request<{ sorted: number; filed: number; folders: Folder[]; unfiled: number }>("/api/folders/sort", { method: "POST" }),
   exportZip: async (files = false, language: string = lang) => {
     const res = await fetch(`${auth.base}/api/export${qs({ files: files || undefined, lang: language })}`,
-                            { headers: { Authorization: `Bearer ${auth.token}` } });
+                            { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, t("Export impossible"));
     return res.blob();
   },
@@ -489,7 +511,7 @@ export async function streamChat(
 ) {
   const res = await fetch(`${auth.base}/api/chat`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
+    headers: authHeaders(new Headers({ "Content-Type": "application/json" })),
     body: JSON.stringify({ ...body, lang }),   // Claude answers in the interface language
     signal,
   });

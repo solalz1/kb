@@ -15,6 +15,7 @@ export default {
   "Copié": "Copied",
   "Copier l'adresse": "Copy the address",
   "Copier le jeton": "Copy the token",
+  "Le jeton est la variable KB_API_TOKEN de ton serveur : cet appareil n'en a pas besoin, il passe par la connexion commune.": "The token is your server's KB_API_TOKEN variable: this device doesn't need it, it goes through the shared sign-in.",
   "Le pas-à-pas complet est dans SHORTCUT.md, à la racine du dépôt.":
     "The full walkthrough is in SHORTCUT.md, at the root of the repository.",
   "Connecteur Claude": "Claude connector",

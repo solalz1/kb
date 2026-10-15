@@ -76,10 +76,12 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     contexts, problems = [], []
 
     def open_page(path: str = "/", viewport: dict = PHONE, lang: str = "fr", signed_in: bool = True,
-                  expected_status: int | None = None, touch: bool = False, expected_errors: tuple = ()) -> Page:
+                  expected_status: int | None = None, touch: bool = False, expected_errors: tuple = (),
+                  setup=None) -> Page:
         """`expected_status`: an HTTP error the test causes on purpose (the browser logs it as a console error).
         `touch`: a touch screen, as on an iPhone (see _swipe).
-        `expected_errors`: console errors the test causes on purpose (a page made to crash), by a piece of their text."""
+        `expected_errors`: console errors the test causes on purpose (a page made to crash), by a piece of their text.
+        `setup`: called with the browser context before the page opens (cookies, routes)."""
         ctx = browser.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
                                   has_touch=touch)
         # first visit only: switching the language in the app (which reloads it) must stick
@@ -88,6 +90,8 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
             init += "if (!localStorage.getItem('kb_token')) localStorage.setItem('kb_token', 'test-token');"
         ctx.add_init_script(init)
         contexts.append(ctx)
+        if setup:
+            setup(ctx)
         page = ctx.new_page()
         page.on("pageerror", lambda e: problems.append(f"{page.url}: {e}"))
         page.on("console", lambda m: problems.append(f"{page.url}: {m.text}") if m.type == "error" and not (
@@ -910,3 +914,50 @@ def test_ticked_actions_stay_in_place_and_a_deleted_item_goes(site):
     expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
     expect(page.locator(f"a[href='/item/{ids['article']}']")).to_have_count(0)
     assert not _exists(ids["article"])
+
+
+def test_shared_sign_in(site, server, monkeypatch):
+    """With SSO_URL set, a device without the token opens the app with the sign-in service's session cookie, is sent
+    to the sign-in page (and back) without it, and signing out ends the shared session."""
+    from app import sso
+    from app.config import get_settings
+
+    from .test_sso import FakeService
+
+    service = FakeService()
+    service.domain = "localhost"        # the cookie then stays on the test server's host, as it does on the domain
+    monkeypatch.setattr(get_settings(), "sso_url", "https://auth.example.com")
+    monkeypatch.setattr(get_settings(), "sso_email", "owner@example.com")
+    monkeypatch.setattr(sso, "_http_get", service.get)
+    sso.reset_cache()
+    host = server.split("//")[1].split(":")[0]
+
+    def signin_page(ctx):
+        ctx.route("https://auth.example.com/**", lambda route: route.fulfill(
+            status=200, content_type="text/html", body="<!doctype html><title>Connexion</title><h1>Connexion</h1>"))
+
+    def signed_in(ctx):
+        signin_page(ctx)
+        ctx.add_cookies([{"name": sso.COOKIE, "value": service.token(), "domain": host, "path": "/",
+                          "secure": True, "httpOnly": True, "sameSite": "Strict"}])
+
+    # No token, no session: off to the sign-in page, with the way back.
+    page = site("/perso", signed_in=False, setup=signin_page, expected_status=401)
+    page.wait_for_url("https://auth.example.com/**")
+    assert page.url.startswith("https://auth.example.com/?next=")
+    assert server.replace(":", "%3A").replace("/", "%2F") + "%2Fperso" in page.url
+
+    # The session cookie opens the app; the token never lands on the device.
+    # (after signing out, a refresh still in flight may meet a 401 before the page leaves: expected)
+    page = site("/", signed_in=False, setup=signed_in, expected_status=401)
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    assert page.evaluate("localStorage.getItem('kb_token')") is None
+    page.goto("/settings/raccourcis")
+    expect(page.get_by_text("cet appareil n'en a pas besoin")).to_be_visible()
+    expect(page.get_by_role("button", name="Copier le jeton")).to_have_count(0)
+
+    # Signing out ends the shared session on this device and goes to the sign-in page.
+    page.goto("/settings/appareil")
+    page.get_by_role("button", name="Se déconnecter").click()
+    page.wait_for_url("https://auth.example.com/**")
+    assert not [c for c in page.context.cookies() if c["name"] == sso.COOKIE and c["value"]]

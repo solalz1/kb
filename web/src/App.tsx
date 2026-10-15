@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Outlet, ScrollRestoration, useLocation } from "react-router-dom";
-import { ApiError, api, auth } from "./api";
+import { ApiError, api, auth, goSignIn, sso } from "./api";
 import { cache, useQuery } from "./cache";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { EdgeSwipeBack, PullToRefresh, settleSwipe } from "./components/Gestures";
@@ -84,7 +84,8 @@ function Login({ onDone }: { onDone: () => void }) {
 
 /** The app around every page: the sidebar or the tab bar, gestures, scroll positions, and the page (routes in main.tsx). */
 export default function App() {
-  const [authed, setAuthed] = useState(Boolean(auth.token));
+  // true with a token on this device; null while finding out whether the shared sign-in's cookie opens the app
+  const [authed, setAuthed] = useState<boolean | null>(auth.token ? true : null);
   const location = useLocation();
   const navigate = useNavigate();
   const tab = useRef("/");
@@ -93,9 +94,23 @@ export default function App() {
   const stats = useQuery(authed ? keys.stats : null, api.stats, { maxAge: 20_000, poll: 60_000 });
   const pending = stats.data?.open_actions ?? 0;
 
-  // a token the server refuses, or signing out in Settings
+  // Shared sign-in (SSO_URL on the server): without a token, the session cookie opens the app, or it's off to the
+  // sign-in page. Without it, the token form as before.
   useEffect(() => {
-    const out = () => { auth.token = ""; cache.clear(); setAuthed(false); };
+    let live = true;
+    (async () => {
+      try { sso.login = (await api.health()).sso_login ?? ""; } catch { /* offline: the token form */ }
+      if (!live || auth.token) return;
+      if (!sso.login) { setAuthed(false); return; }
+      try { await api.stats(); if (live) setAuthed(true); }
+      catch (err) { if (live && !(err instanceof ApiError && err.status === 401)) setAuthed(false); }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // a token the server refuses, an expired session, or signing out in Settings
+  useEffect(() => {
+    const out = () => { auth.token = ""; cache.clear(); if (sso.login) goSignIn(); else setAuthed(false); };
     window.addEventListener("kb:unauthorized", out);
     return () => window.removeEventListener("kb:unauthorized", out);
   }, []);
@@ -123,6 +138,7 @@ export default function App() {
   useLayoutEffect(() => { settleSwipe(); }, [location.key]);
   const back = useCallback(() => navigate(-1), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (authed === null) return <div className="login"><div className="login-top"><b>KB</b></div></div>;
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
   // the tab bar's lens sits on the current tab; tapping the tab you're on brings its page back to the top
