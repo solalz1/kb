@@ -10,6 +10,7 @@ import { IconBack, IconNext } from "../icons";
 import { ago, KINDS } from "../kinds";
 import { useDesktop } from "../layout";
 import { Link } from "../nav";
+import { DEFAULT_VAULT, setVaultName, vaultName } from "../obsidian";
 import { keys } from "../queries";
 
 type Stats = Awaited<ReturnType<typeof api.stats>>;
@@ -289,6 +290,7 @@ function WikiSettings() {
   const [text, setText] = useState<string | null>(null);
   const [busy, setBusy] = useState<"" | "sync" | "zip" | "save">("");
   const [notice, setNotice] = useState("");
+  const [vault, setVault] = useState(vaultName());
   const shown = text ?? schema.data?.text ?? "";
 
   const syncNow = async () => {
@@ -344,6 +346,12 @@ function WikiSettings() {
         <button className="btn small" onClick={zip} disabled={Boolean(busy)}>{busy === "zip" ? t("Préparation…") : t("Télécharger le coffre (zip)")}</button>
       </div>
       <p className="hint">{t("Dans Obsidian, tes modifications d'une page remplacent la version de l'app ; index.md, log.md et les notes de Sources sont réécrits par la KB.")}</p>
+      <label className="stack">
+        <span className="label">{t("Nom du coffre sur cet appareil")}</span>
+        <input className="field" value={vault} placeholder={DEFAULT_VAULT} aria-label={t("Nom du coffre sur cet appareil")}
+               onChange={(e) => setVault(e.target.value)} onBlur={() => { setVaultName(vault); setVault(vaultName()); }} />
+        <span className="hint">{t("Les boutons « Ouvrir dans Obsidian » et « Chercher dans Obsidian » ouvrent le coffre qui porte ce nom (le nom du dossier ouvert comme coffre). Dans Obsidian, Cmd+G ouvre le graphe.")}</span>
+      </label>
       <label className="stack">
         <span className="label">{t("Tes conventions pour Claude")} {notice && <span className="saved">· {notice}</span>}</span>
         <textarea className="field" rows={4} value={shown} onChange={(e) => setText(e.target.value)} aria-label={t("Tes conventions pour Claude")}

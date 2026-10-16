@@ -1011,6 +1011,22 @@ def test_wiki_pages_links_and_log(site):
     expect(page.locator(".item-title")).to_have_text("Mesurer un agent sur de vraies tâches")
     assert f"/item/{ids['article']}" in page.url
 
+    # Obsidian: the vault, this page's note, and its search with what was typed in the filter, under the vault name
+    # set on this device
+    page.goto("/wiki")
+    expect(page.get_by_role("link", name="Ouvrir dans Obsidian")).to_have_attribute(
+        "href", "obsidian://open?vault=KB-Wiki&file=index")
+    page.get_by_label("Filtrer les pages").fill("coût agents")
+    expect(page.get_by_role("link", name="Chercher « coût agents » dans Obsidian")).to_have_attribute(
+        "href", "obsidian://search?vault=KB-Wiki&query=co%C3%BBt%20agents")
+    page.get_by_label("Filtrer les pages").fill("")
+    page.goto("/settings/wiki")
+    page.get_by_label("Nom du coffre sur cet appareil").fill("Mon coffre")
+    page.get_by_label("Nom du coffre sur cet appareil").blur()
+    page.goto("/wiki/agents-ia")
+    expect(page.get_by_role("link", name="Ouvrir dans Obsidian")).to_have_attribute(
+        "href", "obsidian://open?vault=Mon%20coffre&file=Wiki%2FRecherche%2FAgents%20IA")
+
     # the log, then a review now (worked here), whose ideas show on the wiki's home
     page.goto("/wiki")
     page.get_by_role("button", name="Journal").click()

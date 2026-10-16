@@ -302,6 +302,7 @@ def test_wiki_api(client):
     assert page["title"] == "Agents IA" and page["sources"][0]["id"] == item
     assert page["refs"][wiki.ref(item)]["title"] == "Construire un agent fiable"
     assert page["links_resolved"] == {"évaluation des agents": "evaluation-des-agents"}
+    assert page["vault_path"] == "Wiki/Recherche/Agents IA"
     assert [b["title"] for b in client.get("/api/wiki/pages/evaluation-des-agents", headers=AUTH).json()["backlinks"]] \
         == ["Agents IA"]
     assert page["history"][0]["reason"] == "ingest"
@@ -369,18 +370,18 @@ def test_vault_zip(client):
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
     z = zipfile.ZipFile(io.BytesIO(r.content))
     names = set(z.namelist())
-    source = f"KB Wiki/Sources/Construire un agent fiable ({wiki.ref(item)}).md"
-    assert {"KB Wiki/index.md", "KB Wiki/log.md", "KB Wiki/SCHEMA.md", "KB Wiki/.obsidian/graph.json",
-            "KB Wiki/Wiki/Recherche/Agents IA.md", source} <= names
-    note = z.read("KB Wiki/Wiki/Recherche/Agents IA.md").decode()
+    source = f"KB-Wiki/Sources/Construire un agent fiable ({wiki.ref(item)}).md"
+    assert {"KB-Wiki/index.md", "KB-Wiki/log.md", "KB-Wiki/SCHEMA.md", "KB-Wiki/.obsidian/graph.json",
+            "KB-Wiki/Wiki/Recherche/Agents IA.md", source} <= names
+    note = z.read("KB-Wiki/Wiki/Recherche/Agents IA.md").decode()
     page = _pages()["Agents IA"]
     assert note.startswith(f'---\nkb_id: "{page["id"]}"\nsection: "Recherche"\ntype: "thème"')
     assert f"Un fait [[Sources/Construire un agent fiable ({wiki.ref(item)})|↗]]." in note
     assert "Voir aussi [[Évaluation des agents]]." in note
     assert note.split(obsidian.MARKER)[1].count("[[Sources/") == 1
     assert "[[Agents IA]]" in z.read(source).decode()
-    assert "- [[Agents IA]] — Ce que le wiki sait de Agents IA · 1 source" in z.read("KB Wiki/index.md").decode()
-    graph = json.loads(z.read("KB Wiki/.obsidian/graph.json"))
+    assert "- [[Agents IA]] — Ce que le wiki sait de Agents IA · 1 source" in z.read("KB-Wiki/index.md").decode()
+    graph = json.loads(z.read("KB-Wiki/.obsidian/graph.json"))
     assert {'path:"Wiki/Recherche"', 'path:"Sources"'} <= {g["query"] for g in graph["colorGroups"]}
     # read back, a note gives the page's content exactly
     meta, extra, body = obsidian.parse_note(note)

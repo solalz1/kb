@@ -99,6 +99,8 @@ update both.
   The wiki: `/wiki` (pages by section, the log, the review's ideas) and `/wiki/:slug` (a page laid out like an item
   page); `wiki.ts` renders a page's Markdown (`[[links]]` and `[src:…]` become links the router handles). « Demander »
   has a Wiki / Éléments switch (`source` of `/api/chat`, remembered per device) and « Garder dans le wiki » on answers.
+  `obsidian.ts` builds the `obsidian://` links (open the vault at index, a page's note by its `vault_path`, Obsidian's
+  search); the vault name is per device in localStorage, `KB-Wiki` by default (= `obsidian.VAULT`, the zip's folder).
   Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
   each with an undo toast; a deletion waits 5 s before it reaches the API.
   - **Data comes from an in-memory cache** (`cache.ts`, keys and fetchers in `queries.ts`): `useQuery(key, fetcher)`

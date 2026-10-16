@@ -27,7 +27,6 @@ export default {
   "Relu {when} : {what}": "Reviewed {when}: {what}",
   "{n} intégration(s) en erreur cette semaine": "{n} integration(s) failed this week",
   "Relire maintenant": "Review now",
-  "Ouvrir dans Obsidian (zip)": "Open in Obsidian (zip)",
   "Synchro Obsidian": "Obsidian sync",
   "À creuser": "To dig into",
   "À creuser, d'après la dernière relecture": "To dig into, from the last review",
@@ -47,8 +46,15 @@ export default {
   "mise à jour {when}": "updated {when}",
   "Relecture lancée : Claude passe le wiki en revue, le journal dira ce qu'il a corrigé.":
     "Review started: Claude is going over the wiki, the log will say what it fixed.",
-  "Décompresse le zip et ouvre le dossier « KB Wiki » dans Obsidian (Ouvrir un dossier comme coffre).":
-    "Unzip it and open the “KB Wiki” folder in Obsidian (Open folder as vault).",
+  "Décompresse le zip et ouvre le dossier « KB-Wiki » dans Obsidian (Ouvrir un dossier comme coffre).":
+    "Unzip it and open the “KB-Wiki” folder in Obsidian (Open folder as vault).",
+  "Ouvrir dans Obsidian": "Open in Obsidian",
+  "Chercher dans Obsidian": "Search in Obsidian",
+  "Chercher « {q} » dans Obsidian": "Search “{q}” in Obsidian",
+  "Recherche plein texte dans tout le coffre, dans l'app Obsidian": "Full-text search across the whole vault, in the Obsidian app",
+  "Nom du coffre sur cet appareil": "Vault name on this device",
+  "Les boutons « Ouvrir dans Obsidian » et « Chercher dans Obsidian » ouvrent le coffre qui porte ce nom (le nom du dossier ouvert comme coffre). Dans Obsidian, Cmd+G ouvre le graphe.":
+    "The “Open in Obsidian” and “Search in Obsidian” buttons open the vault with this name (the name of the folder opened as a vault). In Obsidian, Cmd+G opens the graph.",
 
   // log
   "Intégré": "Integrated",

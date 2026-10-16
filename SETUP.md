@@ -178,7 +178,9 @@ Claude connector keep using `KB_API_TOKEN` and `KB_MCP_SECRET`. Leave `SSO_URL` 
 
 The wiki needs nothing to set up. Once deployed, every item that becomes ready is integrated into the wiki's pages, and the items you already had are integrated too, one after the other (the **Wiki** page shows the queue). Each page is a theme, a concept, a person or a book, in one of five sections (Personal, Research, Reading, Business, Competitive analysis), and cites its sources. Every night after `WIKI_LINT_HOUR` (if the wiki changed that day), Claude reviews it: contradictions, stale claims, duplicates, missing links, orphan pages, and a few ideas of what to dig next, also given to the weekly project ideas. In **Demander**, the **Wiki / Éléments** switch picks where an answer comes from; **Garder dans le wiki** turns a good answer into a page. **Réglages → Wiki et Obsidian** holds your conventions for Claude ("one page per book with its best quotes"…).
 
-**A first look in Obsidian**: **Wiki → Ouvrir dans Obsidian (zip)**, unzip, and in [Obsidian](https://obsidian.md) **Open folder as vault** on the `KB Wiki` folder. The graph view comes coloured by section.
+**A first look in Obsidian**: **Wiki → Télécharger le coffre (zip)**, unzip, and in [Obsidian](https://obsidian.md) **Open folder as vault** on the `KB-Wiki` folder. The graph view (Cmd+G) comes coloured by section.
+
+**From the app to Obsidian**: **Ouvrir dans Obsidian** on the Wiki page opens the vault, the same button on a page opens that page's note, and **Chercher dans Obsidian** runs Obsidian's search (with what you typed in the filter). These buttons find the vault by its name, `KB-Wiki` by default: if you named the folder otherwise on a device, set it in **Réglages → Wiki et Obsidian → Nom du coffre**, per device (on iPhone, the name the vault has in the Obsidian app).
 
 **Two-way sync**, so that the vault on your Mac stays up to date and your edits come back to the app:
 

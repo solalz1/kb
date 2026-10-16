@@ -42,6 +42,7 @@ log = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 STATE_KEY = "wiki_git"
+VAULT = "KB-Wiki"          # the vault's folder (the zip's, the clone's in SETUP.md): its name in obsidian:// links
 MARKER = "%% kb:sources"
 SCHEMA_NOTE = ("%% Tes conventions pour Claude quand il écrit ce wiki, en plus des siennes. Modifie-les ici ou dans "
                "l'app (Réglages > Wiki) : elles sont reprises à la synchro suivante. %%")
@@ -218,7 +219,7 @@ def export_zip_file() -> str:
     try:
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
             for name, content in sorted(files.items()):
-                z.writestr(f"KB Wiki/{name}", content)
+                z.writestr(f"{VAULT}/{name}", content)
     except BaseException:
         os.unlink(path)
         raise

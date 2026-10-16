@@ -4,9 +4,10 @@ import { api, type WikiLogEntry, type WikiPageSummary, type WikiSection } from "
 import { useQuery } from "../cache";
 import { Lines } from "../components/Skeleton";
 import { t } from "../i18n";
-import { IconBack, IconDownload, IconSearch, IconSpark, IconSpinner } from "../icons";
+import { IconBack, IconDownload, IconGem, IconSearch, IconSpark, IconSpinner } from "../icons";
 import { ago } from "../kinds";
 import { Link } from "../nav";
+import { obsidianOpen, obsidianSearch } from "../obsidian";
 import { keys } from "../queries";
 import { KIND_LABEL, SECTIONS } from "../wiki";
 
@@ -66,7 +67,7 @@ export default function Wiki() {
       a.download = `kb-wiki-${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
-      setNotice(t("Décompresse le zip et ouvre le dossier « KB Wiki » dans Obsidian (Ouvrir un dossier comme coffre)."));
+      setNotice(t("Décompresse le zip et ouvre le dossier « KB-Wiki » dans Obsidian (Ouvrir un dossier comme coffre)."));
     } catch (e) { setFailed((e as Error).message); } finally { setWorking(""); }
   };
 
@@ -97,11 +98,12 @@ export default function Wiki() {
       </div>
 
       <div className="btn-row">
+        <a className="btn small primary" href={obsidianOpen()}><IconGem size={16} /> {t("Ouvrir dans Obsidian")}</a>
         <button className="btn small" onClick={lint} disabled={Boolean(working) || !wiki?.pages.length}>
           {working === "lint" ? <IconSpinner /> : <IconSpark size={16} />} {t("Relire maintenant")}
         </button>
         <button className="btn small" onClick={zip} disabled={Boolean(working) || !wiki?.pages.length}>
-          {working === "zip" ? <IconSpinner /> : <IconDownload size={16} />} {t("Ouvrir dans Obsidian (zip)")}
+          {working === "zip" ? <IconSpinner /> : <IconDownload size={16} />} {t("Télécharger le coffre (zip)")}
         </button>
         <Link className="btn small ghost" to="/settings/wiki">{t("Synchro Obsidian")}</Link>
       </div>
@@ -126,6 +128,12 @@ export default function Wiki() {
             <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filtrer les pages")}
                    aria-label={t("Filtrer les pages")} />
           </label>
+        )}
+        {view === "pages" && (
+          <a className="btn small ghost obsidian-search" href={obsidianSearch(filter)}
+             title={t("Recherche plein texte dans tout le coffre, dans l'app Obsidian")}>
+            <IconGem size={16} /> {filter.trim() ? t("Chercher « {q} » dans Obsidian", { q: filter.trim() }) : t("Chercher dans Obsidian")}
+          </a>
         )}
       </div>
 

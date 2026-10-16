@@ -852,6 +852,10 @@ def page_detail(key: str) -> dict | None:
         history=history,
         merged_into=None,
     )
+    from . import obsidian
+
+    # where its note sits in the vault (an obsidian:// link opens it): its path without .md
+    page["vault_path"] = obsidian.page_path(page).removesuffix(".md")
     meta = db.loads(page.get("metadata")) or {}
     if page["archived"] and meta.get("merged_into"):
         target = db.fetchone("select slug, title from wiki_pages where id = %s", (meta["merged_into"],))

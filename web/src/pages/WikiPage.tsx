@@ -5,10 +5,11 @@ import { useQuery } from "../cache";
 import { openInClaude } from "../claude";
 import { Lines } from "../components/Skeleton";
 import { localized, t } from "../i18n";
-import { IconBack } from "../icons";
+import { IconBack, IconGem } from "../icons";
 import { ago } from "../kinds";
 import { useDesktop } from "../layout";
 import { Link, useNavigate } from "../nav";
+import { obsidianOpen } from "../obsidian";
 import { keys } from "../queries";
 import { headLabel } from "../perso";
 import { internalTarget, KIND_LABEL, renderWiki, sectionLabel } from "../wiki";
@@ -92,6 +93,7 @@ export default function WikiPage() {
           <div className="more">
             <Link className="btn" to={`/ask?page=${encodeURIComponent(page.title)}`}>{t("Poser une question")}</Link>
             <button className="btn" onClick={dig}>{t("Creuser dans Claude")}</button>
+            {!page.archived && <a className="btn wide" href={obsidianOpen(page.vault_path)}><IconGem size={16} /> {t("Ouvrir dans Obsidian")}</a>}
           </div>
         </div>
         <article className="wiki-body answer" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />

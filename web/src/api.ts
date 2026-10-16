@@ -187,6 +187,8 @@ export interface WikiPageDetail extends WikiPageSummary {
   backlinks: { id: string; title: string; slug: string; section: WikiSection; summary: string | null }[];
   history: { revision: number; author: "claude" | "user"; reason: string | null; created_at: string }[];
   merged_into: { slug: string; title: string } | null;
+  /** its note's path in the Obsidian vault, without .md */
+  vault_path: string;
 }
 
 export interface WikiJob { id: number; kind: string; status: "pending" | "running" | "done" | "error"; error: string | null;

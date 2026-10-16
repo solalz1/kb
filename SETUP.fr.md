@@ -179,7 +179,9 @@ seul.
 
 Le wiki n'a rien à configurer. Une fois déployé, chaque élément qui devient prêt est intégré aux pages du wiki, et les éléments que tu avais déjà y sont intégrés aussi, l'un après l'autre (la page **Wiki** montre la file). Chaque page est un thème, un concept, une personne ou un livre, dans une des cinq sections (Personnel, Recherche, Lectures, Business, Concurrence), et cite ses sources. Chaque nuit après `WIKI_LINT_HOUR` (si le wiki a changé dans la journée), Claude le relit : contradictions, infos périmées, doublons, liens manquants, pages orphelines, et quelques pistes à creuser, reprises aussi dans les idées de projets de la semaine. Dans **Demander**, le bouton **Wiki / Éléments** choisit d'où vient la réponse ; **Garder dans le wiki** fait d'une bonne réponse une page. **Réglages → Wiki et Obsidian** garde tes conventions pour Claude (« une page par livre avec ses meilleures citations »…).
 
-**Un premier coup d'œil dans Obsidian** : **Wiki → Ouvrir dans Obsidian (zip)**, décompresse, et dans [Obsidian](https://obsidian.md) **Ouvrir un dossier comme coffre** sur le dossier `KB Wiki`. La vue graphe arrive colorée par section.
+**Un premier coup d'œil dans Obsidian** : **Wiki → Télécharger le coffre (zip)**, décompresse, et dans [Obsidian](https://obsidian.md) **Ouvrir un dossier comme coffre** sur le dossier `KB-Wiki`. La vue graphe (Cmd+G) arrive colorée par section.
+
+**De l'app à Obsidian** : **Ouvrir dans Obsidian** sur la page Wiki ouvre le coffre, le même bouton sur une page ouvre sa note, et **Chercher dans Obsidian** lance la recherche d'Obsidian (avec ce que tu as tapé dans le filtre). Ces boutons trouvent le coffre par son nom, `KB-Wiki` par défaut : si tu as nommé le dossier autrement sur un appareil, indique-le dans **Réglages → Wiki et Obsidian → Nom du coffre**, appareil par appareil (sur iPhone, le nom du coffre dans l'app Obsidian).
 
 **Synchro dans les deux sens**, pour que le coffre de ton Mac reste à jour et que tes modifications reviennent dans l'app :
 
