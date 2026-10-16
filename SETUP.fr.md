@@ -159,7 +159,23 @@ Pèse-le d'abord : une clé Admin a tous les droits d'administration sur l'organ
 
 La limite de dépenses réglée dans la Console ne se lit pas par l'API : indique-la avec le crayon de la ligne Claude (**Limite de dépenses mensuelle**), et l'app affiche ce qu'il reste ce mois-ci. Un solde affiché sur une console marche pareil : note-le, et l'app soustrait ce que la KB dépense ensuite.
 
-## 13. Le wiki, et Obsidian (synchro facultative)
+## 13. Une seule connexion pour plusieurs apps (facultatif)
+
+Si tu as d'autres apps privées sur le même domaine (par exemple `jobs.example.com` et `tickets.example.com`) derrière un
+service de connexion commun, la KB peut accepter sa session au lieu de demander le jeton sur chaque appareil :
+
+1. Mets dans Railway `SSO_URL` à l'adresse du service (par exemple `https://auth.example.com`). Mets aussi `SSO_EMAIL` au
+   seul compte autorisé à ouvrir la KB (obligatoire : sans lui, la connexion commune reste coupée).
+2. Ouvre la KB sur un appareil sans jeton enregistré (ou **Réglages → Cet appareil → Se déconnecter**) : elle t'envoie
+   sur la page de connexion, puis te ramène.
+
+Le service doit publier ses clés publiques Ed25519 à `<SSO_URL>/api/keys` (`{"domain": …, "keys": [{"kid", "pub"}]}`),
+renouveler les sessions à `<SSO_URL>/api/renew` et poser la session dans un cookie `__Secure-sso` sur le domaine parent ;
+`backend/app/sso.py` décrit le jeton. La KB vérifie seulement les signatures : elle ne peut pas créer de session. Le
+Raccourci et le connecteur Claude gardent `KB_API_TOKEN` et `KB_MCP_SECRET`. Laisse `SSO_URL` vide pour garder le jeton
+seul.
+
+## 14. Le wiki, et Obsidian (synchro facultative)
 
 Le wiki n'a rien à configurer. Une fois déployé, chaque élément qui devient prêt est intégré aux pages du wiki, et les éléments que tu avais déjà y sont intégrés aussi, l'un après l'autre (la page **Wiki** montre la file). Chaque page est un thème, un concept, une personne ou un livre, dans une des cinq sections (Personnel, Recherche, Lectures, Business, Concurrence), et cite ses sources. Chaque nuit après `WIKI_LINT_HOUR` (si le wiki a changé dans la journée), Claude le relit : contradictions, infos périmées, doublons, liens manquants, pages orphelines, et quelques pistes à creuser, reprises aussi dans les idées de projets de la semaine. Dans **Demander**, le bouton **Wiki / Éléments** choisit d'où vient la réponse ; **Garder dans le wiki** fait d'une bonne réponse une page. **Réglages → Wiki et Obsidian** garde tes conventions pour Claude (« une page par livre avec ses meilleures citations »…).
 

@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, folders, llm, migrate, notion, obsidian, pipeline, search, storage, wiki
+from . import chat, costs, db, export, folders, llm, migrate, notion, obsidian, pipeline, search, sso, storage, wiki
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -124,11 +124,23 @@ def _token_ok(value: str | None) -> bool:
     return bool(expected and value and secrets.compare_digest(value.strip(), expected))
 
 
-def require_token(request: Request) -> None:
+def require_token(request: Request, response: Response) -> None:
     header = request.headers.get("authorization", "")
     token = header[7:] if header.lower().startswith("bearer ") else request.headers.get("x-kb-token")
-    if not _token_ok(token):
-        raise HTTPException(status_code=401, detail="Jeton invalide ou manquant")
+    if _token_ok(token):
+        return
+    # Optional shared sign-in (SSO_URL): the web app's calls carry the session cookie and the client header, which
+    # other sites can't add without a CORS preflight (never approved). Renewed once a day on the way out.
+    if sso.enabled() and not token and request.headers.get(sso.CLIENT_HEADER) == "web":
+        found = sso.session_from(request.headers.get("cookie"))
+        if found == sso.UNAVAILABLE:
+            raise HTTPException(status_code=503, detail="Service de connexion injoignable")
+        if found:
+            renewed = sso.renewal(found)
+            if renewed:
+                response.headers.append("set-cookie", renewed)
+            return
+    raise HTTPException(status_code=401, detail="Jeton invalide ou manquant")
 
 
 auth = [Depends(require_token)]
@@ -147,7 +159,20 @@ async def health():
         db_ok = False
     # "ok" only depends on the database (Railway's health check); "storage" tells why file shares would fail
     return {"ok": db_ok, "db": db_ok, "auth_configured": bool(settings.kb_api_token),
-            "schema": migrate.status, "storage": await run_in_threadpool(storage.check)}
+            "schema": migrate.status, "storage": await run_in_threadpool(storage.check),
+            # where the web app sends you to sign in when the shared sign-in is on (it adds ?next=)
+            "sso_login": sso.login_url() if sso.enabled() else None}
+
+
+@api.post("/api/logout")
+def logout(request: Request):
+    """Ends the shared session on this device (the token, if any, is forgotten by the app itself)."""
+    if request.headers.get(sso.CLIENT_HEADER) != "web":
+        raise HTTPException(status_code=403, detail="Requête refusée")
+    resp = JSONResponse({"ok": True, "login": sso.login_url() if sso.enabled() else None})
+    if sso.enabled():
+        resp.headers.append("set-cookie", sso.cleared_cookie())
+    return resp
 
 
 # ---------------------------------------------------------------------------

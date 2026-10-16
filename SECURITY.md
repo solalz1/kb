@@ -15,6 +15,11 @@ KB is designed for **one user per deployment**. Each person runs their own insta
 - **API and web app**: a single bearer token (`KB_API_TOKEN`), compared in constant time. Anyone with the token can
   read and write the whole knowledge base and spend the deployment's API credits, so generate it with
   `openssl rand -hex 32` and rotate it if in doubt.
+- **Optional shared sign-in** (`SSO_URL`): the web app also opens with the session cookie of a sign-in service on the
+  same domain. The KB checks its Ed25519 signature with the service's public keys (cached 5 minutes, so "sign out
+  everywhere" reaches it within that delay) and never holds a key that could create a session. Calls made with the
+  cookie must carry an `X-KB-Client` header, which other sites can't add without a CORS preflight; if no key can be
+  fetched, the cookie is refused (503). It stays off unless `SSO_EMAIL` names the one account allowed in.
 - **MCP connector**: either the secret URL path `/mcp/<KB_MCP_SECRET>` (for Claude custom connectors) or an
   `Authorization: Bearer` header (for Claude Code). Treat the connector URL like a password.
 - **Server-side fetching**: the ingest endpoint downloads URLs on the server. It's only reachable with the token;

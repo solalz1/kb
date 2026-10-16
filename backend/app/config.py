@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     kb_mcp_secret: str = ""         # segment secret de l'URL du connecteur MCP
     public_base_url: str = ""       # ex. https://kb.example.com (liens vers les fiches)
     cors_origins: str = ""          # origines autorisées si le front est hébergé ailleurs
+    sso_url: str = ""               # optional shared sign-in service (https://auth.example.com), see app/sso.py
+    sso_email: str = ""             # the only account it may open the app for (required with sso_url)
 
     # --- Claude ---
     anthropic_api_key: str = ""
