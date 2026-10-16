@@ -159,6 +159,31 @@ Pèse-le d'abord : une clé Admin a tous les droits d'administration sur l'organ
 
 La limite de dépenses réglée dans la Console ne se lit pas par l'API : indique-la avec le crayon de la ligne Claude (**Limite de dépenses mensuelle**), et l'app affiche ce qu'il reste ce mois-ci. Un solde affiché sur une console marche pareil : note-le, et l'app soustrait ce que la KB dépense ensuite.
 
+## 13. Le wiki, et Obsidian (synchro facultative)
+
+Le wiki n'a rien à configurer. Une fois déployé, chaque élément qui devient prêt est intégré aux pages du wiki, et les éléments que tu avais déjà y sont intégrés aussi, l'un après l'autre (la page **Wiki** montre la file). Chaque page est un thème, un concept, une personne ou un livre, dans une des cinq sections (Personnel, Recherche, Lectures, Business, Concurrence), et cite ses sources. Chaque nuit après `WIKI_LINT_HOUR` (si le wiki a changé dans la journée), Claude le relit : contradictions, infos périmées, doublons, liens manquants, pages orphelines, et quelques pistes à creuser, reprises aussi dans les idées de projets de la semaine. Dans **Demander**, le bouton **Wiki / Éléments** choisit d'où vient la réponse ; **Garder dans le wiki** fait d'une bonne réponse une page. **Réglages → Wiki et Obsidian** garde tes conventions pour Claude (« une page par livre avec ses meilleures citations »…).
+
+**Un premier coup d'œil dans Obsidian** : **Wiki → Ouvrir dans Obsidian (zip)**, décompresse, et dans [Obsidian](https://obsidian.md) **Ouvrir un dossier comme coffre** sur le dossier `KB Wiki`. La vue graphe arrive colorée par section.
+
+**Synchro dans les deux sens**, pour que le coffre de ton Mac reste à jour et que tes modifications reviennent dans l'app :
+
+1. Sur GitHub, crée un dépôt **privé**, par exemple `kb-wiki`, et laisse-le vide : la KB le remplit (n'y pousse pas le zip, ses notes compteraient comme plus anciennes que celles de la KB).
+2. Crée un jeton : GitHub → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Repository access : **Only select repositories** → `kb-wiki`. Permissions → Repository permissions → **Contents : Read and write** (Metadata en lecture vient avec). Choisis une expiration et mets-toi un rappel : quand il expire, la synchro s'arrête et **Réglages** dit pourquoi.
+3. Dans Railway : `WIKI_GIT_REPO=<toi>/kb-wiki` et `WIKI_GIT_TOKEN=github_pat_…` (`WIKI_GIT_BRANCH` si ce n'est pas `main`). Railway redéploie ; en deux minutes, tout le coffre est poussé dans le dépôt. **Réglages → Wiki et Obsidian** montre la dernière synchro et l'erreur éventuelle.
+4. Sur le Mac, clone-le : `git clone https://github.com/<toi>/kb-wiki ~/Documents/KB-Wiki` (ou avec GitHub Desktop), puis dans Obsidian **Ouvrir un dossier comme coffre** sur ce dossier.
+5. Dans Obsidian : **Réglages → Modules complémentaires → Parcourir**, installe et active **Git** (le module communautaire autrefois appelé Obsidian Git). Dans ses réglages, mets l'intervalle de commit-and-sync automatique et celui de pull automatique à quelques minutes, et active le pull au démarrage.
+
+Comment les deux côtés se rejoignent :
+
+- Tu modifies une page dans Obsidian : une fois que le module l'a poussée, la KB la lit en moins de `WIKI_GIT_INTERVAL` secondes et **ta version remplace la page** dans l'app (la précédente reste dans l'historique de la page). Renommer une note, la déplacer dans le dossier d'une autre section ou la supprimer fait de même dans l'app. Une nouvelle note dans le dossier d'une section devient une page.
+- Si Claude a mis à jour une page pendant que tu modifiais ta copie, ta version l'emporte quand même, et la relecture de la nuit remet les faits de la mise à jour de Claude que tu n'avais pas vus.
+- `index.md`, `log.md` et les notes de `Sources/` sont réécrits par la KB : une modification y est remplacée. `SCHEMA.md` contient tes conventions pour Claude : modifie-les là ou dans l'app.
+- La KB n'écrase ou ne supprime que les notes qu'elle a écrites : tes autres notes (un autre dossier, une note à toi dans `Sources/`) ne sont jamais touchées. Une note qu'elle ne peut pas prendre, par exemple une deuxième note au nom d'une page, reste telle quelle et apparaît dans **Réglages → Wiki et Obsidian** jusqu'à ce que tu la renommes.
+- Si le dépôt avait déjà des notes la première fois : les notes des pages que le wiki a prennent la version de la KB (l'historique git garde les tiennes), les autres deviennent des pages, et rien n'est supprimé.
+- Sur iPhone, la page **Wiki** de l'app lit les mêmes pages ; Obsidian sur iOS peut aussi utiliser le module Git, plus lentement.
+
+Dans Claude, le connecteur a aussi le wiki : `wiki_index`, `read_wiki_page`, `search_wiki`, et `write_wiki_page` quand tu demandes à Claude de garder une analyse dans ton wiki.
+
 ## Dépannage
 
 | Symptôme | Cause probable |
@@ -172,6 +197,8 @@ La limite de dépenses réglée dans la Console ne se lit pas par l'API : indiqu
 | Recherche vide alors que la fiche existe | La fiche n'est pas encore « prête », ou `VOYAGE_API_KEY` manque (voir les logs). |
 | Notion : « page parente introuvable » | La page n'est pas connectée à l'intégration (étape 7.2), ou `NOTION_PARENT_PAGE_ID` pointe vers une autre page. |
 | Pas de digest le matin | `DIGEST_ENABLED=true` ? Les logs affichent `Digest activé` au démarrage et `Digest … prêt` chaque matin. **Régénérer** affiche l'erreur s'il y en a une. |
+| Le wiki ne se remplit pas | `WIKI_ENABLED=true` ? Les logs affichent `Wiki activé` au démarrage ; la page **Wiki** montre la file et les intégrations en erreur. |
+| Synchro Obsidian : « GitHub 401 » ou « 404 » | Le jeton a expiré, ou n'a pas Contents en lecture et écriture sur `WIKI_GIT_REPO`. |
 | « Tes ingénieurs » reste vide | Il faut un compte X pour chaque personne suivie, `X_BEARER_TOKEN`, `DIGEST_X_MAX_POSTS` > 0 et des crédits X. |
 | Notion : rien n'apparaît | Regarde **Réglages → Copie dans Notion** : la variable manquante ou la dernière erreur y est indiquée. |
 

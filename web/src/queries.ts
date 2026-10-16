@@ -35,6 +35,10 @@ export const keys = {
   costs: "costs",
   notion: "notion",
   models: "models",
+  wiki: "wiki",
+  wikiPage: (slug: string) => `wiki-page:${slug}`,
+  wikiLog: "wiki-log",
+  wikiSchema: "wiki-schema",
 };
 
 // "À redécouvrir" is drawn at random among old items: it stays put rather than reshuffling after every change, and
@@ -103,4 +107,5 @@ export function prefetchTabs(): void {
   cache.prefetch(keys.folders, api.folders);
   cache.prefetch(keys.categories, api.categories);
   cache.prefetch(keys.models, api.models);
+  cache.prefetch(keys.wiki, api.wiki);
 }

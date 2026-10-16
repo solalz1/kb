@@ -102,6 +102,28 @@ class Settings(BaseSettings):
     digest_email_to: str = ""
     digest_email_from: str = ""
 
+    # --- Wiki: pages Claude writes and keeps up to date from the items (app/wiki.py) ---
+    wiki_enabled: bool = True
+    wiki_model: str = "claude-sonnet-5-5"         # integrates each new item into the pages
+    wiki_lint_model: str = "claude-sonnet-5-5"    # the nightly review (contradictions, stale claims, links)
+    wiki_lint_hour: int = 3                       # local hour (DIGEST_TIMEZONE) of the nightly review
+    wiki_max_pages_per_ingest: int = 6            # pages one item may touch
+    # Optional two-way sync with an Obsidian vault through a private GitHub repository (app/obsidian.py)
+    wiki_git_repo: str = ""                       # owner/name of a PRIVATE repository
+    wiki_git_token: str = ""                      # fine-grained token: Contents read and write on that repository only
+    wiki_git_branch: str = "main"
+    wiki_git_interval: int = 120                  # seconds between two looks at the repository
+
+    @field_validator("wiki_git_repo")
+    @classmethod
+    def _repo_name(cls, v: str) -> str:
+        """owner/name, also from a pasted URL (https://github.com/owner/name.git)."""
+        v = (v or "").strip().removesuffix(".git").rstrip("/")
+        for prefix in ("https://github.com/", "http://github.com/", "github.com/", "git@github.com:"):
+            if v.startswith(prefix):
+                v = v[len(prefix):]
+        return v
+
     # --- Worker ---
     run_worker: bool = True       # traite la file dans le même process que l'API
     auto_migrate: bool = True     # apply supabase/migrations at startup (idempotent)
@@ -139,6 +161,10 @@ class Settings(BaseSettings):
     def item_url(self, item_id: str) -> str:
         base = self.public_base_url.rstrip("/")
         return f"{base}/item/{item_id}" if base else f"/item/{item_id}"
+
+    def wiki_url(self, slug: str) -> str:
+        base = self.public_base_url.rstrip("/")
+        return f"{base}/wiki/{slug}" if base else f"/wiki/{slug}"
 
 
 @lru_cache

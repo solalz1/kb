@@ -16,7 +16,8 @@ type Stats = Awaited<ReturnType<typeof api.stats>>;
 
 const SECTIONS: [string, string][] = [
   ["langue", t("Langue")], ["couts", t("Coûts")], ["reflexion", t("Réflexion|thinking")], ["raccourcis", t("Raccourcis")],
-  ["connecteur", t("Connecteur Claude")], ["notion", t("Notion")], ["donnees", t("Tes données")], ["appareil", t("Cet appareil")],
+  ["connecteur", t("Connecteur Claude")], ["wiki", t("Wiki et Obsidian")], ["notion", t("Notion")], ["donnees", t("Tes données")],
+  ["appareil", t("Cet appareil")],
 ];
 const LANG_NAMES: Record<string, string> = { fr: "Français", en: "English" };
 
@@ -57,7 +58,7 @@ export default function Settings() {
         )}
         {SECTIONS.slice(1).map(([id, label]) => (
           <Card key={id} id={id} title={id === "reflexion" ? t("Réflexion de Claude") : id === "raccourcis" ? t("Raccourcis iPhone et Mac")
-                                       : id === "notion" ? t("Copie dans Notion") : label}>
+                                       : id === "notion" ? t("Copie dans Notion") : id === "wiki" ? t("Wiki et Obsidian") : label}>
             <SectionBody id={id} origin={origin} onLogout={onLogout} />
           </Card>
         ))}
@@ -89,12 +90,16 @@ function PhoneSettings({ stats, origin, onLogout }: { stats: Stats | null; origi
   const [desktopApp, setDesktopApp] = useState(claudePrefs.desktop);
   const month = useQuery(keys.costs, api.costs).data?.month ?? null;
   const notion = useQuery(keys.notion, api.notion).data ?? null;
+  const obsidian = useQuery(keys.wiki, api.wiki).data?.obsidian ?? null;
+  const wikiLine = !obsidian ? "" : !obsidian.configured ? t("Synchro Obsidian pas encore activée")
+    : obsidian.last_sync_at ? t("synchro {when}", { when: ago(obsidian.last_sync_at) }) : t("Synchro Obsidian activée");
   const notionLine = !notion ? "" : !notion.configured ? t("Pas encore activée")
     : `${notion.pending ? t("{n} en attente", { n: notion.pending }) : t("Tout est à jour")}${notion.last_sync_at ? ` · ${t("synchro {when}", { when: ago(notion.last_sync_at) })}` : ""}`;
   const rows: [string, string, string][] = [
     ["couts", t("Coûts"), month === null ? "" : t("{amount} ce mois-ci", { amount: dollars(month) })],
     ["raccourcis", t("Raccourcis iPhone et Mac"), t("Copier l'adresse et le jeton")],
     ["connecteur", t("Connecteur Claude"), t("URL MCP pour Claude et Claude Code")],
+    ["wiki", t("Wiki et Obsidian"), wikiLine],
     ["notion", t("Copie dans Notion"), notionLine],
     ["donnees", t("Tes données"), t("Export Markdown, avec ou sans fichiers")],
   ];
@@ -150,6 +155,7 @@ function SectionBody({ id, origin, onLogout }: { id: string; origin: string; onL
     case "raccourcis": return <Shortcuts origin={origin} />;
     case "connecteur": return <Connector origin={origin} />;
     case "notion": return <Notion />;
+    case "wiki": return <WikiSettings />;
     case "donnees": return <Export />;
     case "appareil":
       return (
@@ -271,6 +277,81 @@ function Notion() {
         </div>
       )}
       <p className="hint">{t("Chaque élément a sa page dans une base Notion, mise à jour à chaque modification. Modifie tes notes dans l'app : les retouches faites dans Notion sont écrasées.")}</p>
+    </>
+  );
+}
+
+function WikiSettings() {
+  const query = useQuery(keys.wiki, api.wiki);
+  const obsidian = query.data?.obsidian ?? null;
+  const schema = useQuery(keys.wikiSchema, api.wikiSchema);
+  const [text, setText] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"" | "sync" | "zip" | "save">("");
+  const [notice, setNotice] = useState("");
+  const shown = text ?? schema.data?.text ?? "";
+
+  const syncNow = async () => {
+    setBusy("sync");
+    try { await api.wikiSync(); await new Promise((r) => setTimeout(r, 3000)); await query.refresh(); } finally { setBusy(""); }
+  };
+  const zip = async () => {
+    setBusy("zip");
+    try {
+      const blob = await api.wikiZip();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `kb-wiki-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+    } finally { setBusy(""); }
+  };
+  const save = async () => {
+    setBusy("save");
+    try {
+      const r = await api.setWikiSchema(shown);
+      cache.set(keys.wikiSchema, r);
+      setText(null);
+      setNotice(t("Enregistré"));
+      setTimeout(() => setNotice(""), 2500);
+    } finally { setBusy(""); }
+  };
+
+  return (
+    <>
+      <p className="body">{t("Claude intègre chaque élément au wiki dès qu'il est prêt, et le relit chaque nuit. Le wiki s'ouvre aussi dans Obsidian, avec son graphe.")}</p>
+      {obsidian && !obsidian.configured && (
+        <p className="body">{t("Synchro Obsidian pas encore activée. Ajoute")} {(obsidian.missing ?? []).map((m, i) => <span key={m}>{i ? t(" et ") : ""}<code>{m}</code></span>)} {t("dans les variables du serveur (voir SETUP.md, étape Obsidian) : le wiki ira dans un dépôt GitHub privé que ton coffre Obsidian clone, et tes modifications faites dans Obsidian reviendront dans l'app.")}</p>
+      )}
+      {obsidian?.configured && (
+        <>
+          <p className="body">
+            {t("Synchronisé avec {repo}", { repo: obsidian.repo ?? "" })}
+            {obsidian.last_sync_at && <> · {t("Dernière synchro {when}", { when: ago(obsidian.last_sync_at) })}</>}
+          </p>
+          {obsidian.last_error && <p className="hint" style={{ color: "var(--accent-ink)" }}>{t("Dernière erreur :")} {obsidian.last_error}</p>}
+          {(obsidian.skipped?.length ?? 0) > 0 && (
+            <div className="warn">
+              {t("Notes laissées de côté (renomme-les dans Obsidian pour qu'elles deviennent des pages) :")}
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{obsidian.skipped!.map((x) => <li key={x.path}><code>{x.path}</code> : {x.reason}</li>)}</ul>
+            </div>
+          )}
+        </>
+      )}
+      <div className="btn-row">
+        {obsidian?.configured && <button className="btn small" onClick={syncNow} disabled={Boolean(busy)}>{busy === "sync" ? t("Synchronisation…") : t("Synchroniser maintenant")}</button>}
+        {obsidian?.url && <a className="btn small" href={obsidian.url} target="_blank" rel="noreferrer">{t("Ouvrir le dépôt")}</a>}
+        <button className="btn small" onClick={zip} disabled={Boolean(busy)}>{busy === "zip" ? t("Préparation…") : t("Télécharger le coffre (zip)")}</button>
+      </div>
+      <p className="hint">{t("Dans Obsidian, tes modifications d'une page remplacent la version de l'app ; index.md, log.md et les notes de Sources sont réécrits par la KB.")}</p>
+      <label className="stack">
+        <span className="label">{t("Tes conventions pour Claude")} {notice && <span className="saved">· {notice}</span>}</span>
+        <textarea className="field" rows={4} value={shown} onChange={(e) => setText(e.target.value)} aria-label={t("Tes conventions pour Claude")}
+                  placeholder={t("ex. Une page par livre avec ses meilleures citations. En Recherche, finis chaque page par les questions ouvertes.")} />
+        <span className="hint">{t("Claude les suit en écrivant chaque page. Tu peux aussi les modifier dans SCHEMA.md, dans Obsidian.")}</span>
+      </label>
+      <div className="btn-row">
+        <button className="btn small dark" onClick={save} disabled={busy === "save" || text === null}>{t("Enregistrer les conventions")}</button>
+      </div>
     </>
   );
 }

@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import db, embeddings, folders, llm, notion, storage, urls
+from . import db, embeddings, folders, llm, notion, storage, urls, wiki
 from .chunking import chunk_text
 from .config import get_settings
 from .extractors import ExtractionError, Extracted, extract_item
@@ -493,6 +493,10 @@ def process(item: dict) -> None:
     except Exception:
         log.warning("Calcul des liens impossible pour %s", item_id, exc_info=True)
     notion.wake()
+    try:
+        wiki.enqueue_item(item_id)      # the wiki integrates it into its pages, in its own queue
+    except Exception:
+        log.warning("Wiki : %s non mis en file", item_id, exc_info=True)
 
 
 def _translations(enr: dict, title: str | None) -> dict:

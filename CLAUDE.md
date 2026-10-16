@@ -11,7 +11,8 @@ update both.
 
 ## Architecture
 
-- `supabase/migrations/`: Postgres schema. **Idempotent**, safe to re-run: `app/migrate.py` applies it at every start
+- `supabase/migrations/`: Postgres schema, one file per feature (`init`, `wiki`), applied in name order. **Idempotent**,
+  safe to re-run: `app/migrate.py` applies it at every start
   (advisory lock, `AUTO_MIGRATE`, status in `/api/health`), so a migration must never destroy data. `vector(1024)` is
   fixed (= `EMBED_DIM`).
   Key SQL functions: `hybrid_search` (RRF of vectors + full text with the `kb` FR/EN config, `filter_spaces`),
@@ -43,6 +44,29 @@ update both.
     `thinking`) turns it off where the API allows: Haiku 5.5 `disabled`, Sonnet 5.5 `between_tools` (Opus 5.5 and
     Fable always think).
   - `chat.py`: RAG, project mode and advice mode (`advise`: charter + Perso search + a little Veille), SSE.
+  - `wiki.py`: the wiki (Karpathy's "LLM Wiki"): `wiki_pages` written by Claude, one per theme, concept, entity or book
+    (never one per item), in five sections (`SECTIONS`: personal, research, reading, business, competitive). Content is
+    Markdown with `[[Title]]` links (`links` keeps their lowercased targets, for backlinks) and `[src:xxxxxxxx]` item
+    references (first 8 hex characters of the id; `wiki_page_sources` is derived from them). One queue, `wiki_jobs`
+    (`ingest` after each `pipeline.process`, `answer`, `lint`), worked by one `WikiWorker` thread holding a lease in
+    `kb_settings` (one worker across containers). Every write is `save_page`: a compare-and-swap on `revision` inside
+    the caller's transaction (a job's pages are written together or not at all; `Conflict` retries the job), a row in
+    `wiki_revisions`, and the log (`wiki_log`, rendered as log.md). Ingest = `llm.wiki_plan` (pages to update or
+    create, from the index) then `llm.wiki_write` (the pages rewritten in full). The nightly review (`lint_due`, after
+    `WIKI_LINT_HOUR`, only if the wiki changed) = `findings()` computed in SQL/Python (broken links, orphans, pages
+    without sources, user edits that replaced an unseen Claude update) + `llm.wiki_lint` per batch of pages (fixes,
+    merges, suggestions kept in `kb_settings.wiki_suggestions`, also fed to the weekly project ideas). The user's
+    conventions (`kb_settings.wiki_schema`) go with every call. `chat.ask_wiki` answers from pages picked in the index
+    (`llm.wiki_pick`), falling back to RAG when the wiki has nothing.
+  - `obsidian.py`: the wiki as a vault (`render_vault`: index.md, log.md, SCHEMA.md, `Wiki/<Section>/<Title>.md`,
+    `Sources/<Title> (<ref>).md`, `.obsidian/graph.json`), as a zip, and the optional two-way sync with a private GitHub
+    repository through the Git Data API (`WIKI_GIT_*`). A pass imports the notes changed in the repository since the
+    last one, each in its own savepoint (the user's version wins; a page Claude changed meanwhile gets
+    `metadata.lost_update` for the review; a note that can't be taken is set aside in `skipped`), saves the state,
+    then commits the KB's version of what differs, in one commit. **The KB only overwrites or removes a note it owns**
+    (`files`: the blob it wrote or read back, unchanged since); index.md, log.md, SCHEMA.md and `Sources/` are its own.
+    `kb_settings.wiki_git` keeps `head`, `tree`, `remote` (every file's blob sha), `files` and `skipped`. A page keeps
+    the user's own frontmatter (`metadata.frontmatter`) and subfolder (`metadata.folder`).
   - `notion.py`: optional one-way copy to a Notion database (API version `2026-03-11`, data sources, `markdown` page
     content, `in_trash`). A `Syncer` thread in the worker, throttled to ~3 req/s; deleted items go through the
     `notion_trash` table; database IDs live in `kb_settings`.
@@ -67,11 +91,14 @@ update both.
   items and stat tiles, sand (`--sand`) for segmented controls. The content type is a small colored `.dot`
   (`--dot-*`). Newsreader (serif) for titles, quotes and the user's notes, Instrument Sans for the interface, Geist
   Mono for code only (self-hosted with `@fontsource-variable`). Icons are drawn in `src/icons.tsx` (no icon
-  library). Desktop: sidebar (Ajouter, Veille, Perso, Dossiers, Journal, Digest, Demander, À faire, Réglages at the
+  library). Desktop: sidebar (Ajouter, Veille, Perso, Wiki, Dossiers, Journal, Digest, Demander, À faire, Réglages at the
   bottom); the item page is two columns. Phone: no top bar, a five-slot tab bar with the + in the middle (the tab of
-  the section a page belongs to is lit), Veille's head carries the folders, À faire and settings icons, Perso's the
+  the section a page belongs to is lit), Veille's head carries the wiki, folders, À faire and settings icons, Perso's the
   journal; Réglages is grouped rows that open `/settings/<section>`. `useDesktop()` (`layout.ts`) when a page differs
   by more than CSS.
+  The wiki: `/wiki` (pages by section, the log, the review's ideas) and `/wiki/:slug` (a page laid out like an item
+  page); `wiki.ts` renders a page's Markdown (`[[links]]` and `[src:…]` become links the router handles). « Demander »
+  has a Wiki / Éléments switch (`source` of `/api/chat`, remembered per device) and « Garder dans le wiki » on answers.
   Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
   each with an undo toast; a deletion waits 5 s before it reaches the API.
   - **Data comes from an in-memory cache** (`cache.ts`, keys and fetchers in `queries.ts`): `useQuery(key, fetcher)`
@@ -108,7 +135,9 @@ docker compose up --build      # everything locally on :8000
 Before opening a PR: backend tests, `npm run build` and the browser tests must all pass (CI runs the three jobs:
 `backend`, `web`, `site`). Add a browser test in `tests/test_site.py` for every new page or flow.
 
-Tests never call external services: Claude is faked by the `fake_llm` fixture, embeddings by
+Tests never call external services: Claude is faked by the `fake_llm` fixture (the wiki's calls too: `_fake_wiki`
+files a source into topic pages by its words), GitHub by `FakeGitHub` in `tests/test_wiki.py`; the wiki's queue is
+worked with `wiki.drain()` (no worker runs in tests), embeddings by
 `EMBEDDINGS_PROVIDER=fake`, storage by the local disk, Notion by an `httpx.MockTransport` (`tests/test_notion.py`),
 digest sources and Claude by fakes in `tests/test_digest.py`. Every backend change comes with a test in `tests/`; run
 `pytest` and `npm run build` before saying a task is done. CI (`.github/workflows/ci.yml`) runs both on every push.

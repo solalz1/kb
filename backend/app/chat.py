@@ -137,6 +137,93 @@ def ask(messages: list[dict], kinds: list[str] | None = None, tags: list[str] | 
     yield {"type": "done"}
 
 
+SYSTEM_WIKI_EXTRA = """
+Mode Wiki. Les sources sont des pages de SON wiki : des synthèses par thème que tu as écrites et tenues à jour à partir
+de tout ce qu'il a sauvegardé. Appuie-toi sur elles plutôt que sur des éléments isolés : elles croisent déjà les
+sources, signalent les contradictions et suivent l'évolution des idées. Cite les pages avec leur numéro [n]. Si une
+page signale une contradiction ou une incertitude sur le point demandé, dis-le."""
+
+WIKI_PAGES = 8
+
+
+def _wiki_block(n: int, page: dict, titles: dict[str, str]) -> str:
+    from . import wiki
+
+    def cite(m: re.Match) -> str:
+        title = titles.get(m.group(1).lower())
+        return f"(source : {title})" if title else ""
+
+    body = wiki.CITE_RE.sub(cite, page["content"])
+    return (f'<source n="{n}">\nPage du wiki : {page["title"]} (section {wiki.section_label(page["section"])}, '
+            f"mise à jour le {str(page['updated_at'])[:10]})\n{body[:20_000]}\n</source>")
+
+
+def wiki_card(n: int, page: dict) -> dict:
+    from .config import get_settings
+
+    return {"n": n, "id": page["id"], "title": page["title"], "kind": "wiki", "slug": page["slug"],
+            "section": page["section"], "summary": (page.get("summary") or "")[:400], "author": None,
+            "source_url": None, "kb_url": get_settings().wiki_url(page["slug"]), "published_at": None,
+            "thumbnail_url": None, "space": "main", "category": None, "translations": {}}
+
+
+def gather_wiki(query: str) -> list[dict]:
+    """The pages to read for a question: Claude picks them from the index (Karpathy: the index first)."""
+    from . import wiki
+
+    pages = wiki.all_pages()
+    if not pages:
+        return []
+    picked = llm.wiki_pick(question=query, index=wiki.index_text(pages), limit=WIKI_PAGES)
+    out, seen = [], set()
+    for title in picked:
+        page = wiki.by_title(title)
+        if page and page["id"] not in seen:
+            seen.add(page["id"])
+            out.append(page)
+    if not out:             # nothing picked: the full-text search over the pages
+        for hit in wiki.search_pages(query, limit=4):
+            page = wiki.get_page(hit["slug"])
+            if page and page["id"] not in seen:
+                seen.add(page["id"])
+                out.append(page)
+    return out
+
+
+def ask_wiki(messages: list[dict], model: str | None = None, lang: str | None = None) -> Iterator[dict]:
+    """A question answered from the wiki's pages rather than from the items found by search (RAG)."""
+    from . import wiki
+
+    history = _clean_history(messages[:-1])
+    question = str(messages[-1]["content"]).strip()
+    query = llm.rewrite_query(history, question) if history else question
+    yield {"type": "status", "text": "Je lis l'index du wiki…"}
+    pages = gather_wiki(query)
+    if not pages:
+        yield {"type": "status", "text": "Rien dans le wiki là-dessus : je cherche dans tes éléments…"}
+        yield {"type": "fallback", "source": "rag"}
+        yield from ask(messages, model=model, lang=lang)
+        return
+    titles = {wiki.ref(r): it.get("title") or "" for r, it in
+              wiki.resolve_refs(sorted({c for p in pages for c in wiki.cites_of(p["content"])})).items()}
+    cards, blocks, used = [], [], 0
+    for n, page in enumerate(pages, 1):
+        block = _wiki_block(n, page, titles)
+        if used + len(block) > CONTEXT_BUDGET and blocks:
+            break
+        used += len(block)
+        blocks.append(block)
+        cards.append(wiki_card(n, page))
+    yield {"type": "sources", "query": query, "sources": cards}
+    user_turn = f"<sources>\n{chr(10).join(blocks)}\n</sources>\n\nQuestion : {question}"
+    msgs = history + [{"role": "user", "content": user_turn}]
+    if len(msgs) > 1 and msgs[-2]["role"] == "user":
+        msgs[-2:] = [{"role": "user", "content": msgs[-2]["content"] + "\n\n" + user_turn}]
+    for text in llm.stream_text(system=_system_common(lang) + SYSTEM_WIKI_EXTRA, messages=msgs, model=model):
+        yield {"type": "delta", "text": text}
+    yield {"type": "done"}
+
+
 def charter_items(budget: int = CHARTER_BUDGET) -> list[dict]:
     """Principes et valeurs (espace Perso), en texte intégral, les épinglés d'abord."""
     rows = db.fetchall(

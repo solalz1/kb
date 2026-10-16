@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, streamChat, type ChatMode, type ItemDetail, type SourceCard } from "../api";
+import { api, streamChat, type AskSource, type ChatMode, type ItemDetail, type SourceCard } from "../api";
 import { cache, useQuery } from "../cache";
 import { claudePrompt, openInClaude } from "../claude";
 import { localized, t, tServer } from "../i18n";
@@ -10,6 +10,7 @@ import { Link } from "../nav";
 import { keys } from "../queries";
 import { renderAnswer } from "../markdown";
 import { headLabel } from "../perso";
+import { sectionLabel } from "../wiki";
 
 type Mode = ChatMode;
 interface Turn {
@@ -22,11 +23,19 @@ interface Turn {
   error?: string;
   done?: boolean;
   model?: string;
+  source?: AskSource;
+  /** "Garder dans le wiki": being filed, then the page it became */
+  kept?: { state: "pending" } | { state: "done"; slug: string; title: string } | { state: "error"; message: string };
 }
 
 const MODEL_KEY = "kb_chat_model";
 const readModel = () => { try { return localStorage.getItem(MODEL_KEY) || ""; } catch { return ""; } };
 const saveModel = (id: string) => { try { localStorage.setItem(MODEL_KEY, id); } catch { /* storage unavailable */ } };
+// where a question's answer comes from: the wiki (default) or the items search finds
+const SOURCE_KEY = "kb_ask_source";
+const readSource = (): AskSource => { try { return localStorage.getItem(SOURCE_KEY) === "rag" ? "rag" : "wiki"; } catch { return "wiki"; } };
+const saveSource = (v: AskSource) => { try { localStorage.setItem(SOURCE_KEY, v); } catch { /* storage unavailable */ } };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // the conversation survives navigation (open a source, come back)
 let saved: { turns: Turn[]; mode: Mode } = { turns: [], mode: "ask" };
@@ -78,11 +87,21 @@ export default function Ask() {
   const model = !models.length || models.some((m) => m.id === picked) ? picked : models.find((m) => m.default)?.id ?? "";
   const modelInfo = models.find((m) => m.id === model);
   const pickModel = (id: string) => { setModel(id); saveModel(id); };
+  const [source, setSourceState] = useState<AskSource>(readSource);
+  const setSource = (v: AskSource) => { setSourceState(v); saveSource(v); };
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { saved = { turns, mode }; }, [turns, mode]);
+
+  useEffect(() => {
+    const page = params.get("page");
+    if (!page) return;
+    setMode("ask");
+    setSourceState("wiki");
+    setInput(t("À propos de la page « {title} » : ", { title: page }));
+  }, [params]);
 
   useEffect(() => {
     const about = params.get("about");
@@ -106,8 +125,10 @@ export default function Ask() {
     setInput("");
     setBusy(true);
     const history = [...turns, { role: "user" as const, mode, content }];
-    setTurns([...history, { role: "assistant", mode, content: "",
-                            status: mode === "advice" ? t("Je relis tes principes…") : t("Je cherche dans ta KB…"), model: modelInfo?.label }]);
+    const from: AskSource | undefined = mode === "ask" ? source : undefined;
+    setTurns([...history, { role: "assistant", mode, content: "", source: from,
+                            status: mode === "advice" ? t("Je relis tes principes…") : from === "wiki" ? t("Je lis ton wiki…") : t("Je cherche dans ta KB…"),
+                            model: modelInfo?.label }]);
     requestAnimationFrame(() => bottom.current?.scrollIntoView({ behavior: "smooth" }));
 
     const messages = mode === "project"
@@ -116,8 +137,9 @@ export default function Ask() {
 
     abort.current = new AbortController();
     try {
-      await streamChat({ messages, mode, model: model || undefined }, (e) => {
+      await streamChat({ messages, mode, model: model || undefined, source: from }, (e) => {
         if (e.type === "status") patchLast((x) => ({ ...x, status: tServer(e.text) }));
+        if (e.type === "fallback") patchLast((x) => ({ ...x, source: e.source }));
         if (e.type === "plan") patchLast((x) => ({ ...x, plan: e.queries, status: t("Je croise les résultats…") }));
         if (e.type === "sources") patchLast((x) => ({ ...x, sources: e.sources, status: e.sources.length ? t("Je rédige…") : t("Je rédige (rien de pertinent trouvé)…") }));
         if (e.type === "delta") patchLast((x) => ({ ...x, content: x.content + e.text, status: undefined }));
@@ -141,6 +163,31 @@ export default function Ask() {
   };
 
   const reset = () => { abort.current?.abort(); setTurns([]); setBusy(false); };
+
+  // "Garder dans le wiki": the answer becomes a page (filed in the wiki's queue, a few seconds)
+  const patchTurn = (idx: number, fn: (turn: Turn) => Turn) =>
+    setTurns((prev) => prev.map((x, i) => (i === idx ? fn(x) : x)));
+  const keep = async (idx: number) => {
+    const turn = turns[idx];
+    const question = [...turns.slice(0, idx)].reverse().find((x) => x.role === "user")?.content ?? "";
+    patchTurn(idx, (x) => ({ ...x, kept: { state: "pending" } }));
+    try {
+      const { job_id } = await api.keepAnswer({ question, answer: turn.content, sources: turn.sources ?? [] });
+      for (let i = 0; i < 60; i++) {
+        await sleep(i < 5 ? 1500 : 3000);
+        const job = await api.wikiJob(job_id);
+        if (job.status === "done" && job.result.slug) {
+          patchTurn(idx, (x) => ({ ...x, kept: { state: "done", slug: job.result.slug!, title: job.result.title ?? "" } }));
+          cache.staleAll();
+          return;
+        }
+        if (job.status === "error") throw new Error(job.error ?? t("Impossible de garder cette réponse"));
+      }
+      patchTurn(idx, (x) => ({ ...x, kept: { state: "error", message: t("Toujours dans la file du wiki : la page apparaîtra un peu plus tard.") } }));
+    } catch (err) {
+      patchTurn(idx, (x) => ({ ...x, kept: { state: "error", message: (err as Error).message } }));
+    }
+  };
 
   // the question being typed, else the last one asked in this thread
   const lastQuestion = [...turns].reverse().find((x) => x.role === "user");
@@ -169,6 +216,14 @@ export default function Ask() {
         <div className="seg" role="group" aria-label={t("Mode")}>
           {MODES.map((m) => <button key={m.id} type="button" aria-pressed={mode === m.id} onClick={() => setMode(m.id)}>{desktop ? m.label : m.short}</button>)}
         </div>
+        {mode === "ask" && (
+          <div className="seg sm" role="group" aria-label={t("Répondre à partir de")}>
+            <button type="button" aria-pressed={source === "wiki"} onClick={() => setSource("wiki")}
+                    title={t("Les pages de ton wiki : des synthèses par thème de tout ce que tu as lu")}>{t("Wiki")}</button>
+            <button type="button" aria-pressed={source === "rag"} onClick={() => setSource("rag")}
+                    title={t("Les éléments que la recherche trouve, un par un (RAG)")}>{t("Éléments")}</button>
+          </div>
+        )}
         {desktop && modelPicker}
         <span style={{ flex: 1 }} />
         {turns.length > 0 && (desktop
@@ -182,7 +237,9 @@ export default function Ask() {
         {turns.length === 0 && (
           <div className="ask-intro">
             <h1>{current.title}</h1>
-            <p className="lede">{current.intro}</p>
+            <p className="lede">{mode === "ask" && source === "wiki"
+              ? t("Les réponses s'appuient sur les pages de ton wiki : des synthèses par thème de tout ce que tu as sauvegardé, avec un renvoi vers chaque page.")
+              : current.intro}</p>
             {mode === "advice" && (
               <p className="hint">
                 {t("Tes principes et tes valeurs viennent de l'espace")} <Link to="/perso">{t("Perso")}</Link>
@@ -211,7 +268,18 @@ export default function Ask() {
                      dangerouslySetInnerHTML={{ __html: renderAnswer(turn.content) }} />
               )}
               {turn.error && <div className="error-box">{turn.error}</div>}
-              {turn.done && turn.model && <p className="answered-by">{t("Réponse de {model}", { model: turn.model })}</p>}
+              {turn.done && turn.model && (
+                <p className="answered-by">{t("Réponse de {model}", { model: turn.model })}
+                  {turn.source === "wiki" ? ` · ${t("d'après ton wiki")}` : turn.source === "rag" ? ` · ${t("d'après tes éléments")}` : ""}</p>
+              )}
+              {turn.done && turn.content && !turn.error && (
+                <div className="keep-row">
+                  {!turn.kept && <button type="button" className="btn xs" onClick={() => keep(i)}>{t("Garder dans le wiki")}</button>}
+                  {turn.kept?.state === "pending" && <span className="status-line"><IconSpinner /> {t("Je range la réponse dans le wiki…")}</span>}
+                  {turn.kept?.state === "done" && <span className="hint">{t("Gardée :")} <Link to={`/wiki/${turn.kept.slug}`}>{turn.kept.title}</Link></span>}
+                  {turn.kept?.state === "error" && <span className="hint">{turn.kept.message}</span>}
+                </div>
+              )}
               {turn.done && turn.sources && turn.sources.length > 0 && (() => {
                 const cited = new Set(Array.from(turn.content.matchAll(/\[(\d{1,2})\]/g), (x) => Number(x[1])));
                 const used = turn.sources.filter((s) => cited.has(s.n));
@@ -220,11 +288,18 @@ export default function Ask() {
                   <div key={s.n} id={`src-${i}-${s.n}`} className={`source${flash === `${i}-${s.n}` ? " flash" : ""}`} data-kind={s.kind ?? undefined}
                        data-space={s.space === "perso" ? "perso" : undefined}>
                     <span className="n">{s.n}</span>
-                    <span className="body">
-                      <Link to={`/item/${s.id}`} className="st">{localized(s).title || t("Sans titre")}</Link>
-                      <span className="sm">{headLabel(s)}{s.author ? ` · ${s.author}` : ""}
-                        {s.source_url && <> · <a href={s.source_url} target="_blank" rel="noreferrer">{t("source ↗")}</a></>}</span>
-                    </span>
+                    {s.kind === "wiki" ? (
+                      <span className="body">
+                        <Link to={`/wiki/${s.slug}`} className="st">{s.title || t("Sans titre")}</Link>
+                        <span className="sm">{t("Page du wiki")}{s.section ? ` · ${sectionLabel(s.section)}` : ""}</span>
+                      </span>
+                    ) : (
+                      <span className="body">
+                        <Link to={`/item/${s.id}`} className="st">{localized(s).title || t("Sans titre")}</Link>
+                        <span className="sm">{headLabel({ ...s, kind: s.kind })}{s.author ? ` · ${s.author}` : ""}
+                          {s.source_url && <> · <a href={s.source_url} target="_blank" rel="noreferrer">{t("source ↗")}</a></>}</span>
+                      </span>
+                    )}
                   </div>
                 );
                 return (

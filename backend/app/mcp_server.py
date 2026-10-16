@@ -8,6 +8,7 @@ import anyio
 from mcp.server.mcpserver import MCPServer
 
 from . import chat, db, folders, pipeline, search
+from .config import get_settings
 from .formatting import item_markdown
 from .search import ITEM_FIELDS
 from .taxonomy import normalize_category, normalize_space
@@ -32,7 +33,16 @@ Outils :
 - get_digest : son digest tech du jour (kind="daily") ou de la semaine (kind="weekly"), avec les projets proposés ;
   get_interests : ce que son agent de veille a compris de ses goûts et les ingénieurs qu'il suit.
 - add_to_kb ajoute un lien ou une note (space="perso" et une catégorie pour une note de développement personnel) ;
-  ne l'utilise que si l'utilisateur le demande."""
+  ne l'utilise que si l'utilisateur le demande.
+
+Son wiki : des pages de synthèse par thème (Personnel, Recherche, Lectures, Business, Concurrence) que Claude écrit et
+tient à jour à partir de tout ce qu'il sauvegarde, reliées par des [[liens]], avec leurs sources [src:…].
+- Pour une question de synthèse (« que sais-je de… », « où en est ma réflexion sur… »), commence par wiki_index puis
+  read_wiki_page sur les pages utiles ; search_wiki pour une recherche plein texte dans les pages. Complète avec
+  search_kb pour le détail d'une source.
+- write_wiki_page crée ou réécrit une page (en entier, mêmes conventions : synthèse puis sections ##, [[Titre exact]],
+  références [src:xxxxxxxx] conservées) : quand l'utilisateur te demande de garder une analyse ou une réponse dans son
+  wiki, ou de corriger une page."""
 
 mcp = MCPServer("Knowledge base", instructions=INSTRUCTIONS)
 
@@ -414,3 +424,90 @@ def resurface_items(count: int = 5, space: str | None = None) -> list[dict]:
             (seen, space, space, count - len(rows)),
         )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Wiki
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def wiki_index() -> str:
+    """Index du wiki : toutes les pages par section, avec leur résumé d'une ligne et leur nombre de sources."""
+    from . import wiki
+
+    def load():
+        pages = wiki.all_pages()
+        return pages, wiki.suggestions().get("items") or []
+
+    pages, ideas = await _run(load)
+    if not pages:
+        return "Le wiki est vide pour l'instant : il se remplit à mesure que les éléments sont intégrés."
+    text = await _run(wiki.index_text, pages)
+    if ideas:
+        text += "\n\n## Pistes de la dernière relecture\n" + "\n".join(f"- {i['text']}" for i in ideas)
+    return text
+
+
+@mcp.tool()
+async def read_wiki_page(title: str) -> str:
+    """Une page du wiki en entier (par son titre exact, tel que dans wiki_index), avec ses sources et les pages qui
+    renvoient vers elle."""
+    from . import wiki
+
+    page = await _run(wiki.page_detail, title)
+    if not page or page.get("archived"):
+        hits = await _run(wiki.search_pages, title, 5)
+        near = ", ".join(h["title"] for h in hits)
+        return f"Page introuvable : {title}." + (f" Pages proches : {near}." if near else "")
+    s_url = get_settings().wiki_url(page["slug"])
+    lines = [f"# {page['title']}", f"Section : {wiki.section_label(page['section'])} · type : {page['kind']} · "
+             f"mise à jour le {str(page['updated_at'])[:10]} par {'l’utilisateur' if page['updated_by'] == 'user' else 'Claude'}"
+             f" · révision {page['revision']} · page : {s_url}", "", page["content"]]
+    if page["sources"]:
+        lines += ["", "## Sources"] + [
+            f"- [src:{wiki.ref(s['id'])}] {s['title'] or '(sans titre)'} — {s['source_url'] or s['kb_url']} (id : {s['id']})"
+            for s in page["sources"]]
+    if page["backlinks"]:
+        lines += ["", "Pages qui y renvoient : " + ", ".join(b["title"] for b in page["backlinks"])]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def search_wiki(query: str, limit: int = 8) -> str:
+    """Recherche plein texte dans les pages du wiki (titres, résumés, contenus)."""
+    from . import wiki
+
+    hits = await _run(wiki.search_pages, query, max(1, min(limit, 20)))
+    if not hits:
+        return "Aucune page du wiki ne correspond. Essaie wiki_index, ou search_kb pour les éléments."
+    return "\n".join(f"- {h['title']} ({wiki.section_label(h['section'])}) — {h['summary'] or ''}" for h in hits)
+
+
+@mcp.tool()
+async def write_wiki_page(title: str, content: str, section: str | None = None, summary: str | None = None,
+                          revision: int | None = None) -> str:
+    """Crée une page du wiki, ou réécrit en entier une page existante (même titre). Ne l'utilise que si l'utilisateur
+    le demande (garder une analyse, corriger une page).
+
+    Args:
+        title: titre exact de la page (court, canonique ; sans / \\ : * ? " < > | # ^ [ ]).
+        content: la page entière en Markdown : un paragraphe de synthèse, puis des sections ## ; [[Titre exact]] vers
+            les autres pages ; garde les références [src:xxxxxxxx] existantes.
+        section: personal, research, reading, business ou competitive (par défaut : celle de la page, sinon research).
+        summary: une ligne pour l'index.
+        revision: pour réécrire une page existante, la révision lue avec read_wiki_page : si la page a changé entre-temps
+            (une source intégrée, une modification dans Obsidian), rien n'est écrit et il faut la relire.
+    """
+    from . import wiki
+
+    sec = wiki.section_from_label(section) if section else None
+    if section and not sec:
+        return "Section inconnue : personal, research, reading, business ou competitive."
+    if not (content or "").strip():
+        return "Contenu vide."
+    try:
+        row = await _run(wiki.write_from_chat, title=title, content=content, section=sec, summary=summary,
+                         revision=revision)
+    except wiki.Conflict as exc:
+        return f"Impossible : {exc}"
+    return f"Page enregistrée : {row['title']} (révision {row['revision']}) — {get_settings().wiki_url(row['slug'])}"

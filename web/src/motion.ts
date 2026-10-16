@@ -14,7 +14,7 @@ export const edgeSwipe = () => standalone() && touchScreen();
 
 /** The tab a page belongs to. An item page or a note belongs to the tab it was opened from; Réglages to none. */
 export function tabOf(path: string, previous: string): string {
-  if (path === "/" || path.startsWith("/todo") || path.startsWith("/folders")) return "/";
+  if (path === "/" || path.startsWith("/todo") || path.startsWith("/folders") || path.startsWith("/wiki")) return "/";
   if (path.startsWith("/perso") || path.startsWith("/journal")) return "/perso";
   if (path.startsWith("/digest")) return "/digest";
   if (path.startsWith("/ask")) return "/ask";
@@ -26,7 +26,7 @@ export function tabOf(path: string, previous: string): string {
 /** How deep a page sits: a tab's first screen, a page opened from it, a page opened from that. */
 function depth(path: string): number {
   if (["/", "/perso", "/digest", "/ask", "/add"].includes(path) || /^\/digest\/\d+$/.test(path)) return 0;
-  if (/^\/(folders|todo|journal|settings)$/.test(path) || path.startsWith("/journal/") || path === "/digest/interets") return 1;
+  if (/^\/(folders|todo|journal|settings|wiki)$/.test(path) || path.startsWith("/journal/") || path === "/digest/interets") return 1;
   return 2;
 }
 

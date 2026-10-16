@@ -10,7 +10,8 @@ Partage n'importe quoi depuis ton iPhone ou ton Mac (un tweet ou un thread, un a
 - **Tous les formats** : posts et threads X, articles web, arXiv, GitHub, YouTube, TikTok/Instagram/Vimeo, podcasts, audio, vidéo, PDF (scannés aussi), images, Word/PowerPoint/Excel, notes.
 - **Sources gardées** : chaque fiche garde le lien d'origine, l'auteur, la date et le fichier. Chaque réponse cite ses sources, avec les liens.
 - **Dossiers** : tes propres rayons (ML, Entretien…, à ajouter et renommer dans l'app). Claude range chaque nouvel élément dans celui qui lui correspond ; choisis-le toi-même en partageant, le Raccourci propose toujours tes dossiers du moment.
-- **Interroge ta KB** : « Qu'est-ce que j'ai sauvegardé sur… ? », ou « Je commence ce projet, qu'est-ce qui peut m'aider ? », qui renvoie une note sourcée.
+- **Un wiki qui s'écrit tout seul** (le [LLM Wiki de Karpathy](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)) : Claude range chaque élément dans des pages par thème, une par sujet, concept, personne ou livre, jamais une par élément, dans cinq sections (Personnel, Recherche, Lectures, Business, Concurrence). Les pages sont reliées entre elles et citent leurs sources ; chaque partage met à jour les pages qu'il concerne, et chaque nuit Claude relit le wiki (contradictions, infos périmées, doublons, liens manquants) et propose des pistes à creuser. Il s'ouvre dans Obsidian avec son graphe, modifications comprises (synchro dans les deux sens par un dépôt GitHub privé).
+- **Interroge ta KB** : « Qu'est-ce que j'ai sauvegardé sur… ? », avec une réponse tirée des synthèses du wiki ou des éléments que trouve la recherche (un bouton), ou « Je commence ce projet, qu'est-ce qui peut m'aider ? », qui renvoie une note sourcée. Une bonne réponse peut devenir une page du wiki.
 - **Espace perso** : écris tes principes, tes valeurs, tes leçons, tes objectifs et un journal quotidien (avec un calendrier). Tes mots restent tels que tu les as écrits. Le **mode Conseil** répond à une décision à partir de *tes* principes, et les cite.
 - **Digest tech du matin** (facultatif) : Hacker News, les papiers Hugging Face, les dépôts GitHub qui montent, des blogs et les personnes que tu suis sur X, classés selon ce que tu sauvegardes. Le lundi, la semaine en bref et des idées de projets.
 - **Dans Claude** : un connecteur (MCP) permet à Claude de chercher et de lire ta KB sur le web, l'ordinateur, le téléphone et dans Claude Code.
@@ -62,14 +63,14 @@ Si Railway ne redéploie pas, donne accès à ton fork à son app GitHub (GitHub
 
 ## Ce que ça coûte
 
-Avec un usage quotidien, compte 5 à 15 $ par mois : environ 5 $ de Railway, puis Claude. Claude, c'est environ un tiers de centime par élément sauvegardé (Claude Haiku 5.5), 0,3 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que chaque service a coûté, ce mois-ci et en tout, en dollars US : synchronisé avec le service quand il a une API pour ça (le solde X, et le chiffre de la Console Claude avec une clé Admin facultative), estimé ailleurs à partir des appels de la KB ([SETUP.fr.md](SETUP.fr.md), étape 12). Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
+Avec un usage quotidien, compte 5 à 15 $ par mois, ou 10 à 30 $ avec le wiki : environ 5 $ de Railway, puis Claude. Claude, c'est environ un tiers de centime par élément sauvegardé (Claude Haiku 5.5), 0,3 à 20 centimes par question selon le modèle, et 0,10 à 0,20 $ par jour pour le digest. Le wiki ajoute environ 10 à 30 centimes par élément avec Sonnet 5.5 (il réécrit les pages que l'élément concerne), et une relecture la nuit seulement après une journée qui l'a changé ; `WIKI_MODEL=claude-haiku-5-5` coûte environ quatre fois moins. Au premier déploiement, les éléments que tu as déjà y sont intégrés aussi, l'un après l'autre. Ajoute X si tu sauvegardes des tweets. **Réglages → Coûts** montre ce que chaque service a coûté, ce mois-ci et en tout, en dollars US : synchronisé avec le service quand il a une API pour ça (le solde X, et le chiffre de la Console Claude avec une clé Admin facultative), estimé ailleurs à partir des appels de la KB ([SETUP.fr.md](SETUP.fr.md), étape 12). Les questions posées par le connecteur Claude passent par ton abonnement Claude, pas par les crédits API.
 
 ## Confidentialité
 
 Le dépôt est public, tes données ne le sont pas.
 
 - **Le code et les données sont séparés.** Tes éléments vivent dans ton projet Supabase (sécurité au niveau des lignes activée, aucun accès public), tes clés dans les variables Railway. L'app ne répond à rien sans ton jeton et demande aux moteurs de recherche de ne pas l'indexer.
-- **Ce qui sort de ton serveur.** Pour traiter un élément, son contenu part vers l'API Anthropic (résumés, réponses ; les données de l'API ne servent pas à l'entraînement par défaut) et vers Voyage AI (recherche ; refuse l'entraînement dans son tableau de bord, voir [SETUP.fr.md](SETUP.fr.md)). L'audio et la vidéo partent chez ton service de transcription, les tweets sont lus par l'API X, et la copie Notion écrit dans ton propre espace. Le digest lit des sources publiques et envoie à Claude un résumé de tes centres d'intérêt.
+- **Ce qui sort de ton serveur.** Pour traiter un élément, son contenu part vers l'API Anthropic (résumés, réponses ; les données de l'API ne servent pas à l'entraînement par défaut) et vers Voyage AI (recherche ; refuse l'entraînement dans son tableau de bord, voir [SETUP.fr.md](SETUP.fr.md)). L'audio et la vidéo partent chez ton service de transcription, les tweets sont lus par l'API X, la copie Notion écrit dans ton propre espace, et la synchro Obsidian dans ton propre dépôt GitHub privé. Le digest lit des sources publiques et envoie à Claude un résumé de tes centres d'intérêt.
 - **Sauvegardes.** L'offre gratuite de Supabase n'en fait pas : voir [SETUP.fr.md](SETUP.fr.md), étape 9.
 
 ## Limites connues
@@ -97,13 +98,16 @@ Claude (connecteur MCP) ── /mcp/<secret> ───────────�
                                               │
                         Notion (facultatif) : une page par élément, tenue à jour
 
+Wiki (dans le worker, un job à la fois) : chaque élément prêt ▸ Claude ▸ les pages par thème qu'il concerne, reliées, sourcées
+             chaque nuit : une relecture ▸ corrections, fusions, pistes │ synchro facultative ⇄ dépôt GitHub privé ⇄ Obsidian
+
 Agent du digest (dans le worker, chaque matin) : HN · papiers HF · GitHub · blogs · X ──▶ Claude ──▶ app / e-mail / Claude
 ```
 
 | Dossier | Contenu |
 |---|---|
-| `backend/app/` | API FastAPI, worker, un extracteur par source, enrichissement, chat, agent du digest, serveur MCP, export |
-| `web/` | l'app React (fils, fiche, notes, journal, chat, digest, réglages) |
+| `backend/app/` | API FastAPI, worker, un extracteur par source, enrichissement, chat, wiki et sa synchro Obsidian, agent du digest, serveur MCP, export |
+| `web/` | l'app React (fils, fiche, notes, journal, wiki, chat, digest, réglages) |
 | `supabase/migrations/` | le schéma de la base, appliqué à chaque démarrage |
 | `shortcuts/` | le générateur des Raccourcis iPhone et Mac |
 

@@ -171,6 +171,7 @@ def test_every_page_opens(site, viewport):
         ("/ask", page.get_by_role("heading", name="Demande à ta KB")),
         ("/add", page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")),
         ("/folders", page.get_by_role("heading", name="Dossiers", exact=True)),
+        ("/wiki", page.get_by_role("heading", name="Wiki", exact=True)),
         ("/todo", page.get_by_text("Tester l'outil mentionné").first),
         ("/settings", page.get_by_role("heading", name="Réglages")),
         (f"/item/{ids['article']}", page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")),
@@ -910,3 +911,130 @@ def test_ticked_actions_stay_in_place_and_a_deleted_item_goes(site):
     expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
     expect(page.locator(f"a[href='/item/{ids['article']}']")).to_have_count(0)
     assert not _exists(ids["article"])
+
+
+def _seed_wiki(page: Page) -> dict:
+    """The seeded items, integrated into the wiki (its queue worked here: no worker runs in the tests)."""
+    from app import wiki
+
+    ids = _seed(page)
+    wiki.drain()
+    return ids
+
+
+def test_wiki_pages_links_and_log(site):
+    """The wiki: pages by section, a page with its links to the other pages and its numbered sources, the pages that
+    link to it, and the log of what Claude did."""
+    page = site("/")
+    ids = _seed_wiki(page)
+    page.reload()
+    page.locator(".page-head").get_by_role("link", name="Wiki").click()
+    expect(page.get_by_role("heading", name="Wiki", exact=True)).to_be_visible()
+    expect(page.locator(".tabbar a[aria-current='page']")).to_have_text("Veille")     # the wiki belongs to Veille
+    research = page.locator(".wiki-section", has=page.get_by_role("heading", name="Recherche"))
+    expect(research.locator(".wiki-card .t")).to_have_text(["Agents IA", "Andrej Karpathy", "Évaluation des agents"])
+    personal = page.locator(".wiki-section", has=page.get_by_role("heading", name="Personnel"))
+    expect(personal.locator(".wiki-card .t")).to_have_text(["Journal de bord", "Mes principes"])
+
+    # a section, then a page
+    page.get_by_role("button", name="Personnel").click()
+    expect(page.locator(".wiki-card")).to_have_count(2)
+    page.get_by_role("button", name="Tout").click()
+    page.get_by_label("Filtrer les pages").fill("évaluation")
+    expect(page.locator(".wiki-card")).to_have_count(1)
+    page.get_by_label("Filtrer les pages").fill("")
+    page.locator(".wiki-card", has_text="Agents IA").click()
+    expect(page.get_by_role("heading", name="Agents IA", exact=True)).to_be_visible()
+    body = page.locator(".wiki-body")
+    expect(body).to_contain_text("Mesurer un agent sur de vraies tâches")
+    expect(page.locator(".item-aside .source")).to_have_count(1)
+    expect(body.locator(".src-ref")).to_have_text("1")
+
+    # a [[link]] opens the other page in the app, which lists who links to it
+    body.locator("a.wikilink", has_text="Évaluation des agents").click()
+    expect(page.get_by_role("heading", name="Évaluation des agents", exact=True)).to_be_visible()
+    expect(page.locator(".item-aside .related .t")).to_have_text(["Agents IA"])
+    page.locator(".item-aside .related", has_text="Agents IA").click()
+    expect(page.get_by_role("heading", name="Agents IA", exact=True)).to_be_visible()
+    # a source number opens the item
+    page.locator(".wiki-body .src-ref").first.click()
+    expect(page.locator(".item-title")).to_have_text("Mesurer un agent sur de vraies tâches")
+    assert f"/item/{ids['article']}" in page.url
+
+    # the log, then a review now (worked here), whose ideas show on the wiki's home
+    page.goto("/wiki")
+    page.get_by_role("button", name="Journal").click()
+    expect(page.locator(".wiki-log li").first).to_contain_text("Intégré")
+    page.get_by_role("button", name="Pages").click()
+    page.get_by_role("button", name="Relire maintenant").click()
+    expect(page.get_by_role("status")).to_contain_text("Relecture lancée")
+    from app import wiki
+    wiki.drain()
+    page.reload()
+    expect(page.locator(".wiki-ideas")).to_contain_text("Creuser l'évaluation des agents")
+    expect(page.locator(".wiki-status")).to_contain_text("Relu")
+
+
+def test_wiki_on_a_computer_and_its_settings(site):
+    page = site("/", viewport=DESKTOP)
+    _seed_wiki(page)
+    page.reload()
+    page.locator(".rail").get_by_role("link", name="Wiki").click()
+    expect(page.get_by_role("heading", name="Wiki", exact=True)).to_be_visible()
+    expect(page.locator(".rail .nav.active")).to_have_text("Wiki")
+    page.locator(".wiki-card", has_text="Mes principes").click()
+    expect(page.locator(".rail .nav.active")).to_have_text("Wiki")
+    expect(page.locator(".item-meta")).to_contain_text("Personnel")
+
+    # Réglages > Wiki et Obsidian: not synced yet, the conventions saved for Claude
+    page.goto("/settings/wiki")
+    card = page.locator("#wiki")
+    expect(card).to_contain_text("Synchro Obsidian pas encore activée")
+    expect(card.locator("code")).to_have_text(["WIKI_GIT_REPO", "WIKI_GIT_TOKEN"])
+    card.get_by_label("Tes conventions pour Claude").fill("Une page par livre.")
+    card.get_by_role("button", name="Enregistrer les conventions").click()
+    expect(card).to_contain_text("Enregistré")
+    assert _api(page, "GET", "/api/wiki/schema")["body"]["text"] == "Une page par livre."
+
+
+def test_ask_the_wiki_and_keep_the_answer(site):
+    """A question answered from the wiki's pages (the default), a source that opens its page, the answer kept as a new
+    page; and the items search (RAG) one switch away."""
+    from app import wiki
+
+    page = site("/ask", viewport=DESKTOP)
+    _seed_wiki(page)
+    page.reload()
+    switch = page.get_by_role("group", name="Répondre à partir de")
+    expect(switch.get_by_role("button", name="Wiki")).to_have_attribute("aria-pressed", "true")
+    page.get_by_label("Ta question").fill("Que sais-je des agents IA ?")
+    page.get_by_role("button", name="Envoyer").click()
+    expect(page.locator(".answer")).to_contain_text("Réponse sourcée")
+    expect(page.locator(".answered-by")).to_contain_text("d'après ton wiki")
+    source = page.locator(".sources .source").first
+    expect(source).to_contain_text("Page du wiki · Recherche")
+    expect(source.locator(".st")).to_have_text("Agents IA")
+
+    page.get_by_role("button", name="Garder dans le wiki").click()
+    expect(page.locator(".keep-row")).to_contain_text("Je range la réponse dans le wiki")
+    for _ in range(40):          # the answer reaches the wiki's queue, worked here
+        if wiki.drain():
+            break
+        page.wait_for_timeout(100)
+    kept = page.locator(".keep-row a")
+    expect(kept).to_have_text("Réponse Que sais-je des agents IA", timeout=15_000)
+    kept.click()
+    expect(page.get_by_role("heading", name="Réponse Que sais-je des agents IA", exact=True)).to_be_visible()
+    expect(page.locator(".item-meta")).to_contain_text("Réponse gardée")
+    expect(page.locator(".wiki-body a.wikilink")).to_have_text(["Agents IA"])
+
+    # the items, one switch away; the choice is remembered
+    page.goto("/ask")             # a new load: a new conversation
+    page.get_by_role("group", name="Répondre à partir de").get_by_role("button", name="Éléments").click()
+    page.get_by_label("Ta question").fill("agents")
+    page.get_by_role("button", name="Envoyer").click()
+    expect(page.locator(".answered-by")).to_contain_text("d'après tes éléments")
+    expect(page.locator(".sources .source .st").first).to_have_text("Mesurer un agent sur de vraies tâches")
+    page.reload()
+    expect(page.get_by_role("group", name="Répondre à partir de").get_by_role("button", name="Éléments")) \
+        .to_have_attribute("aria-pressed", "true")

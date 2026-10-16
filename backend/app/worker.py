@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 
-from . import db, folders, notion, pipeline
+from . import db, folders, notion, pipeline, wiki
 from .config import get_settings
 
 log = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ class Worker:
         self._threads: list[threading.Thread] = []
         self._notion: notion.Syncer | None = None
         self._digest = None
+        self._wiki: wiki.WikiWorker | None = None
 
     def start(self) -> None:
         for i in range(self.concurrency):
@@ -38,6 +39,9 @@ class Worker:
 
             self._digest = Scheduler()
             self._digest.start()
+        if wiki.enabled():
+            self._wiki = wiki.WikiWorker()
+            self._wiki.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -46,6 +50,8 @@ class Worker:
             self._notion.stop()
         if self._digest:
             self._digest.stop()
+        if self._wiki:
+            self._wiki.stop()
 
     def _loop(self) -> None:
         while not self._stop.is_set():

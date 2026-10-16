@@ -159,6 +159,31 @@ Weigh it first: an Admin key has full admin rights over the organization (member
 
 The spend limit set in the Console can't be read through the API: enter it with the pencil on the Claude line (**Limite de dépenses mensuelle**), and the app shows what's left this month. A balance shown on a console works the same way: note it, and the app subtracts what the KB spends afterwards.
 
+## 13. The wiki, and Obsidian (optional sync)
+
+The wiki needs nothing to set up. Once deployed, every item that becomes ready is integrated into the wiki's pages, and the items you already had are integrated too, one after the other (the **Wiki** page shows the queue). Each page is a theme, a concept, a person or a book, in one of five sections (Personal, Research, Reading, Business, Competitive analysis), and cites its sources. Every night after `WIKI_LINT_HOUR` (if the wiki changed that day), Claude reviews it: contradictions, stale claims, duplicates, missing links, orphan pages, and a few ideas of what to dig next, also given to the weekly project ideas. In **Demander**, the **Wiki / Éléments** switch picks where an answer comes from; **Garder dans le wiki** turns a good answer into a page. **Réglages → Wiki et Obsidian** holds your conventions for Claude ("one page per book with its best quotes"…).
+
+**A first look in Obsidian**: **Wiki → Ouvrir dans Obsidian (zip)**, unzip, and in [Obsidian](https://obsidian.md) **Open folder as vault** on the `KB Wiki` folder. The graph view comes coloured by section.
+
+**Two-way sync**, so that the vault on your Mac stays up to date and your edits come back to the app:
+
+1. On GitHub, create a **private** repository, e.g. `kb-wiki`, and leave it empty: the KB fills it (don't push the zip into it, its notes would count as older than the KB's).
+2. Create a token: GitHub → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Repository access: **Only select repositories** → `kb-wiki`. Permissions → Repository permissions → **Contents: Read and write** (Metadata read-only comes with it). Pick an expiry and set yourself a reminder: when it expires, the sync stops and **Réglages** says why.
+3. In Railway: `WIKI_GIT_REPO=<you>/kb-wiki` and `WIKI_GIT_TOKEN=github_pat_…` (`WIKI_GIT_BRANCH` if it isn't `main`). Railway redeploys; within two minutes the whole vault is committed. **Réglages → Wiki et Obsidian** shows the last sync and any error.
+4. On the Mac, clone it: `git clone https://github.com/<you>/kb-wiki ~/Documents/KB-Wiki` (or with GitHub Desktop), then in Obsidian **Open folder as vault** on that folder.
+5. In Obsidian: **Settings → Community plugins → Browse**, install and enable **Git** (the community plugin formerly called Obsidian Git). In its settings, set the auto commit-and-sync interval and the auto pull interval to a few minutes, and turn on pull on startup.
+
+How the two sides meet:
+
+- Edit a page in Obsidian: once the plugin has pushed, the KB reads it within `WIKI_GIT_INTERVAL` seconds and **your version replaces the page** in the app (the previous one stays in the page's history). Renaming a note, moving it to another section's folder, or deleting it does the same in the app. A new note in a section's folder becomes a page.
+- If Claude updated a page while you were editing your copy, your version still wins, and the next nightly review puts back the facts of Claude's update that you hadn't seen.
+- `index.md`, `log.md` and the notes in `Sources/` are rewritten by the KB: edits there are replaced. `SCHEMA.md` holds your conventions for Claude: edit it there or in the app.
+- The KB only overwrites or removes the notes it wrote: your other notes (another folder, a note of yours in `Sources/`) are never touched. A note it can't take, such as a second note with a page's name, is left as it is and listed in **Réglages → Wiki et Obsidian** until you rename it.
+- If the repository already had notes the first time: the notes of pages the wiki has get the KB's version (git history keeps yours), the others become pages, and nothing is deleted.
+- On iPhone, the app's **Wiki** page reads the same pages; Obsidian on iOS can also use the Git plugin, more slowly.
+
+In Claude, the connector has the wiki too: `wiki_index`, `read_wiki_page`, `search_wiki`, and `write_wiki_page` when you ask Claude to keep an analysis in your wiki.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -172,6 +197,8 @@ The spend limit set in the Console can't be read through the API: enter it with 
 | Search is empty although the item exists | The item isn't "ready" yet, or `VOYAGE_API_KEY` is missing (check the logs). |
 | Notion: "page parente introuvable" | The page isn't connected to the integration (step 7.2), or `NOTION_PARENT_PAGE_ID` points to another page. |
 | No digest in the morning | `DIGEST_ENABLED=true`? The logs show `Digest activé` at startup and `Digest … prêt` each morning. **Régénérer** shows the error if there is one. |
+| The wiki doesn't fill | `WIKI_ENABLED=true`? The logs show `Wiki activé` at startup; **Wiki** shows the queue and failed integrations. |
+| Obsidian sync: "GitHub 401" or "404" | The token expired, or doesn't have Contents read and write on `WIKI_GIT_REPO`. |
 | « Tes ingénieurs » stays empty | Followed people need an X handle, `X_BEARER_TOKEN` and `DIGEST_X_MAX_POSTS` > 0, and X credits. |
 | Notion: nothing appears | Check **Réglages → Copie dans Notion**: it lists the missing variable or the last error. |
 

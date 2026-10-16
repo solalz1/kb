@@ -6,7 +6,7 @@ import { Fiche, ResurfaceCard, ResurfaceNote } from "../components/Fiche";
 import { CardsSkeleton } from "../components/Skeleton";
 import { SwipeRow, type SwipeAction, type SwipeSide } from "../components/Swipe";
 import { t } from "../i18n";
-import { IconArchive, IconBack, IconCalendar, IconClose, IconEdit, IconFolder, IconPin, IconSearch, IconSettings, IconTodo, IconTrash } from "../icons";
+import { IconArchive, IconBack, IconCalendar, IconClose, IconEdit, IconFolder, IconPin, IconSearch, IconSettings, IconTodo, IconTrash, IconWiki } from "../icons";
 import { KIND_FILTERS, kindsOf } from "../kinds";
 import { useDesktop } from "../layout";
 import { useFlip } from "../motion";
@@ -256,6 +256,7 @@ export default function Feed({ space }: { space?: Space }) {
           <header className="page-head">
             <h1 className="title">{t("Veille")}</h1>
             {headCount && <span className="feed-count desk-only">{headCount}</span>}
+            <Link className="icon-link" to="/wiki" aria-label={t("Wiki")}><IconWiki size={22} /></Link>
             <Link className="icon-link" to="/folders" aria-label={t("Dossiers")}><IconFolder size={22} /></Link>
             <Link className="icon-link" to="/todo" aria-label={pending > 0 ? t("À faire, {n} en attente", { n: pending }) : t("À faire")}>
               <IconTodo size={22} />{pending > 0 && <span className="badge">{pending}</span>}

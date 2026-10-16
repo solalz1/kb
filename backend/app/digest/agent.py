@@ -280,13 +280,31 @@ def _project_context(since: date) -> str:
         """select title from items where 'projet' = any(tags) and status = 'ready' order by created_at desc limit 20""")
     verdict = {2: "il l'a fait", 1: "intéressé", -1: "pas pour lui"}
     goals = _goals()
+    wiki_pages, wiki_ideas = _wiki_context()
     return "\n\n".join([
         "Ses objectifs (espace Perso) :\n" + ("\n".join(f"- {g['title']} : {g['summary']}" for g in goals) or "(aucun)"),
         "Ce qu'il a sauvegardé récemment :\n" + ("\n".join(f"- {r['title']}" for r in saved) or "(rien)"),
+        "Son wiki (synthèses par thème de tout ce qu'il a lu), pages mises à jour récemment :\n"
+        + ("\n".join(f"- {p['title']} : {p['summary'] or ''}" for p in wiki_pages) or "(vide)"),
+        "Pistes de la dernière relecture de son wiki :\n" + ("\n".join(f"- {i}" for i in wiki_ideas) or "(aucune)"),
         "Projets déjà proposés :\n" + ("\n".join(
             f"- {r['title']}" + (f" ({verdict[r['vote']]})" if r["vote"] in verdict else "") for r in past) or "(aucun)"),
         "Projets déjà dans sa KB :\n" + ("\n".join(f"- {r['title']}" for r in projects_kb) or "(aucun)"),
     ])
+
+
+def _wiki_context() -> tuple[list[dict], list[str]]:
+    """The wiki's latest syntheses and the ideas of its last review: what to build on, from everything he read."""
+    try:
+        from .. import wiki
+
+        pages = db.fetchall("""select title, summary from wiki_pages where not archived and kind <> 'answer'
+                               order by updated_at desc limit 15""")
+        ideas = [i["text"] for i in wiki.suggestions().get("items") or []]
+        return pages, ideas
+    except Exception:  # noqa: BLE001 — the digest never fails because of the wiki
+        log.warning("Contexte du wiki indisponible pour les projets", exc_info=True)
+        return [], []
 
 
 def _project(p: dict) -> dict:
