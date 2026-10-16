@@ -204,8 +204,9 @@ function Shortcuts({ origin }: { origin: string }) {
       <code className="code">{origin}/api/ingest</code>
       <div className="btn-row">
         <button className="btn small" onClick={() => copy("url", `${origin}/api/ingest`)}>{copied === "url" ? t("Copié") : t("Copier l'adresse")}</button>
-        <button className="btn small" onClick={() => copy("token", auth.token)}>{copied === "token" ? t("Copié") : t("Copier le jeton")}</button>
+        {auth.token && <button className="btn small" onClick={() => copy("token", auth.token)}>{copied === "token" ? t("Copié") : t("Copier le jeton")}</button>}
       </div>
+      {!auth.token && <p className="hint">{t("Le jeton est la variable KB_API_TOKEN de ton serveur : cet appareil n'en a pas besoin, il passe par la connexion commune.")}</p>}
       <p className="hint">{t("« Où le ranger ? » propose tes dossiers tels qu'ils sont dans l'app : un dossier ajouté ici y apparaît tout seul. Le pas-à-pas complet est dans SHORTCUT.md, à la racine du dépôt.")}</p>
     </>
   );

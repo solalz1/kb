@@ -5,6 +5,7 @@ pydantic-settings>=2.4
 psycopg[binary]>=3.2
 psycopg-pool>=3.2
 httpx>=0.27
+cryptography>=42      # checks the shared sign-in's Ed25519 signatures (app/sso.py)
 curl_cffi>=0.7          # reads pages as a browser would (TLS fingerprint) when a site refuses Python
 anthropic>=1.11
 mcp>=2.2,<3

@@ -159,6 +159,21 @@ Weigh it first: an Admin key has full admin rights over the organization (member
 
 The spend limit set in the Console can't be read through the API: enter it with the pencil on the Claude line (**Limite de dépenses mensuelle**), and the app shows what's left this month. A balance shown on a console works the same way: note it, and the app subtracts what the KB spends afterwards.
 
+## 13. One sign-in for several apps (optional)
+
+If you run other private apps on the same domain (say `jobs.example.com` and `tickets.example.com`) behind a shared
+sign-in service, the KB can accept its session instead of asking for the token on each device:
+
+1. Set `SSO_URL` in Railway to the service's address (e.g. `https://auth.example.com`). Also set `SSO_EMAIL` to the
+   only account it may open the KB for (required: without it the shared sign-in stays off).
+2. Open the KB on a device that has no token stored (or **Settings → This device → Sign out**): it sends you to the
+   sign-in page and back.
+
+The service must publish its Ed25519 public keys at `<SSO_URL>/api/keys` (`{"domain": …, "keys": [{"kid", "pub"}]}`),
+renew sessions at `<SSO_URL>/api/renew`, and set the session in a `__Secure-sso` cookie on the parent domain;
+`backend/app/sso.py` describes the token. The KB only checks signatures: it can't create a session. The Shortcut and the
+Claude connector keep using `KB_API_TOKEN` and `KB_MCP_SECRET`. Leave `SSO_URL` empty to keep the token only.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
