@@ -28,6 +28,10 @@ update both.
   - `pipeline.py`: `ingest()` (queueing + dedup, `#perso`/`#leçon` hashtag routing), `create_note()` (hand-written
     notes, kept verbatim) and `process()` (extract → `llm.enrich` → chunks → embeddings → links). A title, tags or a
     folder set by the user (`metadata.manual_title`, `metadata.user_tags`, `metadata.manual_folder`) survive reprocessing.
+    Titles, for any source (`choose_title`): a clean headline (`titles.looks_like_title`) stays word for word; what
+    isn't one (a LinkedIn or X post's first words, a file name, « … | Site ») takes Claude's title, written by the rule
+    in `llm._title_rule` (keep a real headline without the site's name, else write one). `fix_titles` retitled the
+    cards saved before, once, at worker start (`kb_settings` `titles_fixed`, `llm.retitle`).
   - `folders.py`: the user's folders (`folders` table, one `items.folder_id` per item). Defaults are created once
     (`kb_settings` flag `folders_seeded`) at start; `llm.enrich` picks the folder of each new item, `sort_items`
     (`llm.classify_folders`, batches of 20) files the rest once at start (`folders_sorted`) and from the app. The

@@ -14,6 +14,7 @@ from .chunking import chunk_text
 from .config import get_settings
 from .extractors import ExtractionError, Extracted, extract_item
 from .extractors.web import blocks_servers as web_blocks_servers
+from .titles import looks_like_title
 from .taxonomy import (KIND_LABELS, category_from_word, category_label, normalize_category, normalize_space,
                        space_from_word)
 
@@ -383,9 +384,7 @@ def process(item: dict) -> None:
         category=item.get("category"),
         folders=None if manual_folder else folders.for_enrich(),
     )
-    title = ex.title if (ex.title and ex.kind in KEEP_SOURCE_TITLE) else (enr.get("title") or ex.title)
-    if ex.kind == "tweet" and ex.title:  # Article X : on garde son titre
-        title = ex.title
+    title = choose_title(ex.kind, ex.title, enr.get("title"))
     if metadata.get("manual_title") and item.get("title"):  # titre écrit ou corrigé à la main
         title = item["title"]
     category = item.get("category")
@@ -497,6 +496,59 @@ def process(item: dict) -> None:
         wiki.enqueue_item(item_id)      # the wiki integrates it into its pages, in its own queue
     except Exception:
         log.warning("Wiki : %s non mis en file", item_id, exc_info=True)
+
+
+def choose_title(kind: str, source_title: str | None, claude_title: str | None) -> str | None:
+    """The card's title, for any source. A clean headline (an article's, a video's, a paper's, an X Article's) stays
+    word for word; anything else a source calls a title (a LinkedIn post's first words, a file name, a headline with
+    the site's name after it) gives way to Claude's, who keeps a real headline and writes one otherwise."""
+    if source_title and looks_like_title(source_title) and kind in KEEP_SOURCE_TITLE | {"tweet"}:
+        return source_title
+    return claude_title or source_title
+
+
+TITLES_FIXED = "titles_fixed"
+
+
+def fix_titles() -> int:
+    """Once (worker start): the cards saved before titles were checked, whose title is what their source gave and not
+    a real one (a LinkedIn post's first words…), get one from Claude, here and in the second language. A title the
+    user wrote is never touched. Returns how many were fixed."""
+    if db.fetchone("select 1 from kb_settings where key = %s", (TITLES_FIXED,)):
+        return 0
+    rows = db.fetchall(
+        """select id::text, kind, title, summary, author, source_url, translations from items
+            where status = 'ready' and title is not null and kind = any(%s)
+              and not coalesce((metadata->>'manual_title')::boolean, false)""",
+        (sorted(KEEP_SOURCE_TITLE | {"tweet"}),))
+    fixed = 0
+    for row in rows:
+        if looks_like_title(row["title"]):
+            continue
+        new = llm.retitle(kind=row["kind"], title=row["title"], summary=row["summary"], author=row["author"],
+                          source_url=row["source_url"])
+        if not new.get("title"):
+            continue
+        translations = db.loads(row["translations"]) or {}
+        second = get_settings().second_language
+        if second and second in translations:
+            translations[second] = {**translations[second], "title": new.get("translation") or new["title"]}
+        db.execute("update items set title = %s, translations = %s where id = %s",
+                   (new["title"][:300], db.jsonb(translations), row["id"]))
+        fixed += 1
+    db.execute("""insert into kb_settings (key, value) values (%s, %s)
+                  on conflict (key) do update set value = excluded.value, updated_at = now()""",
+               (TITLES_FIXED, db.jsonb({"fixed": fixed})))
+    if fixed:
+        log.info("%d titres refaits", fixed)
+    return fixed
+
+
+def startup_titles() -> None:
+    try:
+        fix_titles()
+    except Exception:  # noqa: BLE001 — tried again at the next start
+        log.warning("Titres non refaits", exc_info=True)
 
 
 def _translations(enr: dict, title: str | None) -> dict:

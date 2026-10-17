@@ -16,6 +16,7 @@ import anthropic
 from . import costs, db
 from .config import get_settings
 from .taxonomy import CATEGORIES
+from .titles import looks_like_title
 
 log = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ def stream_text(*, system: str, messages: list[dict], model: str | None = None, 
 ENRICH_SCHEMA = {
     "type": "object",
     "properties": {
-        "title": {"type": "string", "description": "Titre informatif, 90 caractères max."},
+        "title": {"type": "string", "description": "Titre de la fiche (règle « title »), 90 caractères max."},
         "summary": {"type": "string"},
         "key_points": {"type": "array", "items": {"type": "string"}},
         "tags": {"type": "array", "items": {"type": "string"}},
@@ -279,6 +280,18 @@ TRANSLATION_SCHEMA = {
 }
 
 
+def _title_rule() -> str:
+    """How Claude titles a card, whatever the source: the source's own headline when it has one, else its own."""
+    return f"""- title : ce qui dira, dans la liste, de quoi parle l'élément.
+  - S'il a un vrai titre (titre d'article, de vidéo, de podcast, de papier, de livre, de dépôt, d'Article X), garde-le
+    mot pour mot dans sa langue d'origine, sans ce que le site ajoute autour (« | Medium », « - YouTube »,
+    « | Jane Doe », « sur LinkedIn »).
+  - Sinon, écris-en un en {lang_name()} : c'est le cas d'un post (LinkedIn, X, Threads, Instagram, Facebook,
+    Reddit…) dont le « titre » n'est que le début du texte, d'un titre coupé (« … »), d'un nom de fichier, d'une
+    adresse, d'un titre générique (« LinkedIn », « Accueil ») ou d'un élément sans titre. 4 à 12 mots, précis : l'idée,
+    le sujet ou l'outil, et qui parle quand c'est un post ; ni guillemets ni point final ; 90 caractères maximum."""
+
+
 def _enrich_system() -> str:
     lang = lang_name()
     return f"""Tu es l'archiviste de la knowledge base personnelle de l'utilisateur.
@@ -288,6 +301,7 @@ Pour chaque élément capturé, tu produis une fiche qui servira plus tard à : 
 Règles :
 - Écris en {lang}. Exception : si l'élément a déjà un bon titre dans sa langue d'origine, garde-le tel quel.
 - Factuel et dense. Pas de remplissage ni de formules du type « Cet article explique… » : va droit au contenu.
+{_title_rule()}
 - summary : 2 à 5 phrases sur ce que l'élément affirme, montre ou propose, avec les chiffres, noms et conclusions qui comptent.
 - key_points : 3 à 7 points autonomes et précis, compréhensibles sans le reste.
 - tags : 3 à 8 tags EN ANGLAIS, quelle que soit la langue du contenu (ils servent à la recherche) : minuscules,
@@ -405,7 +419,8 @@ def enrich(
         f"Type : {kind}" + (" (note écrite par l'utilisateur)" if kind == "note" else ""),
         f"Espace : {'Perso (développement personnel)' if perso else 'Veille'}"
         + (f" ; catégorie choisie : {CATEGORIES[category][0]}" if category in CATEGORIES else ""),
-        f"Titre actuel : {title or '(aucun)'}",
+        f"Titre actuel : {title or '(aucun)'}"
+        + ("" if not title or looks_like_title(title) else " (pas forcément un vrai titre : vois la règle « title »)"),
         f"Auteur : {author or '(inconnu)'}",
         f"Source : {source_url or '(fichier ou note)'}",
         f"Date de publication : {published_at or '(inconnue)'}",
@@ -450,7 +465,47 @@ def enrich(
     out["translations"] = {second: _clean_translation(out.pop("translation", None))} if second else {}
     if second and not out["translations"][second]:
         out["translations"] = {}
+    out["title"] = _one_line(out.get("title"))
     return out
+
+
+def _one_line(value: Any, limit: int = 300) -> str | None:
+    """A title as one clean line: no quotes around it, no final period, no line breaks."""
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"\s+", " ", value).strip().strip("\"“”«» ").rstrip(".").strip()
+    return text[:limit] or None
+
+
+def retitle(*, kind: str, title: str | None, summary: str | None, author: str | None,
+            source_url: str | None) -> dict:
+    """A title for a card that was saved with what its source gave as one (a LinkedIn post's first words, a file
+    name…), from its summary. Returns {"title"} and, when a second language is set, {"translation": its title there}."""
+    second = get_settings().second_language
+    properties = {"title": {"type": "string"}}
+    if second:
+        properties["translation"] = {"type": "string",
+                                     "description": f"Le même titre en {LANG_NAMES.get(second, second)}."}
+    prompt = "\n".join([
+        f"Type : {kind}",
+        f"Titre donné par la source : {title or '(aucun)'}",
+        f"Auteur : {author or '(inconnu)'}",
+        f"Source : {source_url or '(fichier ou note)'}",
+        f"Résumé de l'élément : {summary or '(aucun)'}",
+    ])
+    out = call_tool(
+        system="Tu es l'archiviste de la knowledge base personnelle de l'utilisateur. Donne à cet élément le titre "
+               "de sa fiche, selon cette règle :\n" + _title_rule()
+               + ("\n- translation : ce titre en " + LANG_NAMES.get(second, second)
+                  + " ; un vrai titre propre à la source se garde tel quel." if second else ""),
+        content=prompt,
+        tool_name="save_title",
+        tool_description="Enregistre le titre de la fiche.",
+        schema={"type": "object", "properties": properties, "required": list(properties)},
+        max_tokens=300,
+    )
+    return {k: v for k, v in (("title", _one_line(out.get("title"))),
+                              ("translation", _one_line(out.get("translation")) if second else None)) if v}
 
 
 _CARD_LISTS = ("key_points", "use_cases", "tags", "entities", "action_items")

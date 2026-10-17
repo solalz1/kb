@@ -31,6 +31,8 @@ class Worker:
         log.info("Worker démarré (%d threads)", self.concurrency)
         # the items saved before folders existed are filed once, in the background
         threading.Thread(target=folders.startup, name="kb-folders", daemon=True).start()
+        # and the cards saved with a post's first words as a title get a real one, once
+        threading.Thread(target=pipeline.startup_titles, name="kb-titles", daemon=True).start()
         if notion.enabled():
             self._notion = notion.Syncer()
             self._notion.start()
