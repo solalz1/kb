@@ -39,7 +39,7 @@ def test_brings_an_old_database_up_to_date(old_database):
     from app import migrate
 
     assert {"translations", "entry_date"} - _columns(old_database) == {"translations", "entry_date"}
-    assert migrate.run(old_database) == ["20261002000000_init.sql"]
+    assert migrate.run(old_database) == ["20261002000000_init.sql", "20261016000000_wiki.sql"]
     assert {"translations", "entry_date"} <= _columns(old_database)
     with psycopg.connect(old_database) as c:
         assert c.execute("select title, translations from items").fetchall() == [("Une note d'avant", {})]

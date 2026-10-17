@@ -706,3 +706,266 @@ def plan_project_queries(description: str) -> dict:
         schema=PLAN_SCHEMA,
         max_tokens=1000,
     )
+
+
+# ---------------------------------------------------------------------------
+# Wiki (app/wiki.py): pages written and kept up to date by Claude
+# ---------------------------------------------------------------------------
+
+WIKI_SECTIONS = ["personal", "research", "reading", "business", "competitive"]
+WIKI_KINDS = ["theme", "entity", "book", "synthesis"]
+
+_WIKI_PAGE = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "section": {"type": "string", "enum": WIKI_SECTIONS},
+        "kind": {"type": "string", "enum": WIKI_KINDS},
+        "summary": {"type": "string", "description": "Une ligne : ce que couvre la page (pour l'index)."},
+        "content": {"type": "string", "description": "La page entière, en Markdown."},
+    },
+    "required": ["title", "section", "kind", "summary", "content"],
+}
+
+WIKI_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "takeaways": {"type": "array", "items": {"type": "string"}},
+        "pages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "action": {"type": "string", "enum": ["update", "create"]},
+                    "section": {"type": "string", "enum": WIKI_SECTIONS},
+                    "kind": {"type": "string", "enum": WIKI_KINDS},
+                    "why": {"type": "string"},
+                },
+                "required": ["title", "action", "section", "kind", "why"],
+            },
+        },
+    },
+    "required": ["takeaways", "pages"],
+}
+
+WIKI_WRITE_SCHEMA = {
+    "type": "object",
+    "properties": {"pages": {"type": "array", "items": _WIKI_PAGE}},
+    "required": ["pages"],
+}
+
+WIKI_LINT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pages": {
+            "type": "array",
+            "items": {**_WIKI_PAGE, "properties": {**_WIKI_PAGE["properties"],
+                                                   "reason": {"type": "string"}},
+                      "required": [*_WIKI_PAGE["required"], "reason"]},
+        },
+        "merges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"from": {"type": "string"}, "into": {"type": "string"}, "reason": {"type": "string"}},
+                "required": ["from", "into", "reason"],
+            },
+        },
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"text": {"type": "string"},
+                               "kind": {"type": "string", "enum": ["question", "source", "action", "link"]}},
+                "required": ["text", "kind"],
+            },
+        },
+    },
+    "required": ["pages", "merges", "suggestions"],
+}
+
+WIKI_PICK_SCHEMA = {
+    "type": "object",
+    "properties": {"pages": {"type": "array", "items": {"type": "string"}}},
+    "required": ["pages"],
+}
+
+WIKI_ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "section": {"type": "string", "enum": WIKI_SECTIONS},
+        "summary": {"type": "string"},
+    },
+    "required": ["title", "section", "summary"],
+}
+
+_WIKI_TITLE_RULE = ("un titre court et canonique (« Andrej Karpathy », « Évaluation des LLM »), sans les caractères "
+                    "/ \\ : * ? \" < > | # ^ [ ]")
+
+_WIKI_WRITING = """Règles d'écriture d'une page :
+- Écris en {lang}. Dense, factuel, bien structuré : un court paragraphe de synthèse en tête, puis des sections ## par
+  sous-thème. Jamais de liste de sources ni de « Cet article dit… » : l'information est rangée par thème, comme dans un
+  bon livre, quelle que soit la source d'où elle vient.
+- Chaque fait tiré d'une source porte sa référence [src:xxxxxxxx] (fournie avec la source). Garde telles quelles les
+  références déjà présentes.
+- Quand une source contredit ou nuance ce que dit une page, ne l'écrase pas : écris les deux avec leurs références et
+  signale-le par « **Contradiction** : … ». Date les affirmations quand la date compte.
+- Relie les pages : [[Titre exact]] vers une autre page du wiki dès qu'un sujet y est traité (titres fournis). Pas de
+  lien vers une page qui n'existe pas, sauf vers une page écrite dans la même passe.
+- Section Personnel : fidèle à ses mots et à sa pensée, au tutoiement, sans jugement ni conseil non demandé.
+- Une page reste lisible : au-delà d'environ 12 000 caractères, condense ce qui se répète et renvoie le détail d'un
+  sous-thème vers sa propre page ([[lien]]) plutôt que d'allonger.
+- summary : une ligne qui dit ce que couvre la page."""
+
+
+def _wiki_system(intro: str, schema_text: str, rules: str) -> str:
+    return f"{intro}\n\n{schema_text}\n\n{rules}"
+
+
+WIKI_MAX_TOKENS = 24_000     # with structured outputs the request gets twice this (thinking included)
+
+
+def wiki_budget(contents: list[str], per_page: int = 2500) -> int:
+    """Output tokens for pages returned in full: what they hold now (about 3 characters a token) plus room for what
+    gets added, within WIKI_MAX_TOKENS."""
+    return min(WIKI_MAX_TOKENS, 2000 + sum(len(c or "") // 3 + per_page for c in contents))
+
+
+def wiki_plan(*, source: str, index: str, schema_text: str, max_pages: int, model: str | None = None) -> dict:
+    """Which pages a new item should enrich (existing ones, by their exact title) and which to create."""
+    rules = f"""Règles :
+- Range l'information par thème : une page = un thème, un concept, une méthode, une entité importante (personne,
+  outil, entreprise) ou un livre. Jamais une page par source, jamais une page « résumé de l'article ».
+- Enrichis de préférence une page existante plutôt que d'en créer une voisine. Crée une page seulement pour un sujet
+  qui mérite la sienne et n'existe pas encore.
+- 1 à {max_pages} pages ; une source courte (un tweet) en touche souvent une ou deux.
+- Page existante : recopie son titre exact de l'index (action « update »). Nouvelle page (action « create ») :
+  {_WIKI_TITLE_RULE}.
+- section : la section où la page vit. kind : theme, entity, book ou synthesis.
+- why : ce que la source apporte à cette page, en une phrase.
+- takeaways : 2 à 5 points que la source apporte, une ligne chacun (pour le journal du wiki), en {lang_name()}.
+- Si la source n'apporte rien de durable (lien mort, contenu vide, blague), renvoie une liste de pages vide."""
+    return call_tool(
+        system=_wiki_system(
+            "Tu tiens le wiki personnel de l'utilisateur : des pages Markdown reliées entre elles, que tu écris et "
+            "mets à jour toi-même à partir de ce qu'il sauvegarde dans sa knowledge base. Une source vient d'arriver : "
+            "décide quelles pages elle doit enrichir.", schema_text, rules),
+        content=f"<index>\n{index or '(wiki vide pour l’instant)'}\n</index>\n\n<source>\n{source}\n</source>",
+        tool_name="plan_wiki_update",
+        tool_description="Enregistre les pages à mettre à jour ou à créer.",
+        schema=WIKI_PLAN_SCHEMA,
+        model=model or get_settings().wiki_model,
+        max_tokens=2500,
+    )
+
+
+def wiki_write(*, source: str, ref: str, pages: list[dict], titles: list[str], schema_text: str,
+               model: str | None = None) -> dict:
+    """The planned pages rewritten in full with the new source integrated. `pages`: title, section, kind, why and the
+    current content ('' for a new page)."""
+    blocks = []
+    for p in pages:
+        current = p.get("content") or "(nouvelle page : à écrire)"
+        blocks.append(f'<page title="{p["title"]}" section="{p["section"]}" kind="{p["kind"]}">\n'
+                      f"Ce que la source lui apporte : {p.get('why') or '-'}\n\n{current}\n</page>")
+    content = (f'<source ref="[src:{ref}]">\n{source}\n</source>\n\n'
+               f"<titres_du_wiki>\n{chr(10).join(titles) or '(aucun)'}\n</titres_du_wiki>\n\n"
+               f"<pages_a_ecrire>\n{chr(10).join(blocks)}\n</pages_a_ecrire>")
+    rules = (_WIKI_WRITING.format(lang=lang_name())
+             + f"\n- La référence de la nouvelle source est [src:{ref}]."
+             + "\n- Intègre la source là où elle a sa place : complète une section, ajoutes-en une, reformule la synthèse"
+               " si elle change. Garde tout ce qui reste vrai ; ne supprime rien sans raison."
+             + f"\n- Si une page cite déjà [src:{ref}] (la source a été modifiée puis renvoyée), mets à jour ce qu'elle"
+               " en disait au lieu de le répéter."
+             + "\n- Renvoie exactement les pages demandées, chacune en entier, avec son titre exact.")
+    return call_tool(
+        system=_wiki_system("Tu tiens le wiki personnel de l'utilisateur. Intègre la nouvelle source dans les pages "
+                            "ci-dessous et renvoie chacune réécrite en entier.", schema_text, rules),
+        content=content,
+        tool_name="write_wiki_pages",
+        tool_description="Enregistre les pages réécrites.",
+        schema=WIKI_WRITE_SCHEMA,
+        model=model or get_settings().wiki_model,
+        max_tokens=wiki_budget([p.get("content") or "" for p in pages]),
+    )
+
+
+def wiki_lint(*, pages: list[dict], findings: str, titles: list[str], sources: str, schema_text: str,
+              model: str | None = None) -> dict:
+    """The nightly review of a batch of pages: corrected pages, merges, new pages, ideas for what to dig next."""
+    blocks = []
+    for p in pages:
+        extra = ""
+        if p.get("lost_update"):
+            extra = f"\n<mise_a_jour_ecrasee>\n{p['lost_update']}\n</mise_a_jour_ecrasee>"
+        who = "modifiée par toi (l'utilisateur)" if p.get("updated_by") == "user" else "écrite par Claude"
+        blocks.append(f'<page title="{p["title"]}" section="{p["section"]}" kind="{p["kind"]}" '
+                      f'maj="{str(p.get("updated_at") or "")[:10]}" auteur="{who}">\n{p["content"]}{extra}\n</page>')
+    rules = (_WIKI_WRITING.format(lang=lang_name()) + """
+
+À vérifier et corriger :
+- Contradictions entre pages ou dans une page : rends-les explicites ; tranche quand une source plus récente le permet,
+  en gardant la trace de l'ancienne affirmation et de ses références.
+- Affirmations périmées (une source plus récente les dépasse) : mets-les à jour ou date-les.
+- Doublons : deux pages sur le même sujet → merges (from = la page à fondre, into = celle qui reste). La page qui
+  reste doit être renvoyée dans pages, réécrite avec le contenu des deux.
+- Liens : ajoute les [[liens]] manquants entre pages liées ; un lien vers une page inexistante → crée la page si le
+  sujet le mérite (dans pages, avec un titre nouveau), sinon retire le lien.
+- Pages orphelines (aucun lien entrant) : relie-les depuis les pages concernées.
+- Concept important cité dans plusieurs pages mais sans page : crée-la à partir de ce que disent les pages, avec
+  leurs références.
+- Page « modifiée par toi » : le texte de l'utilisateur fait foi. Si elle a une <mise_a_jour_ecrasee> (une mise à
+  jour de Claude qu'il n'a pas vue avant de la remplacer), réintègre seulement les faits qu'elle apportait et qui
+  manquent, sans revenir sur ce qu'il a écrit.
+
+Règles :
+- pages : uniquement les pages à changer ou à créer, réécrites en entier ; un titre existant = la page existante.
+  Laisse les autres telles quelles. Ne change pas le titre d'une page existante (pour renommer : merges).
+- reason : une phrase qui dit ce que tu as corrigé.
+- suggestions : 3 à 6 pistes pour la suite, une ligne chacune : question à creuser (question), source à chercher
+  (source), action concrète tirée de ses lectures (action), lien entre deux de ses sujets à explorer (link).
+- S'il n'y a rien à corriger, renvoie des listes pages et merges vides.""")
+    content = (f"<constats_automatiques>\n{findings or '(aucun)'}\n</constats_automatiques>\n\n"
+               f"<tous_les_titres>\n{chr(10).join(titles)}\n</tous_les_titres>\n\n"
+               f"<sources_citees>\n{sources or '(aucune)'}\n</sources_citees>\n\n"
+               f"<pages>\n{chr(10).join(blocks)}\n</pages>")
+    return call_tool(
+        system=_wiki_system("Tu relis, comme chaque nuit, le wiki personnel de l'utilisateur pour qu'il reste juste et "
+                            "cohérent. Corrige ce qui doit l'être, sans réécrire ce qui va bien.", schema_text, rules),
+        content=content,
+        tool_name="review_wiki",
+        tool_description="Enregistre les corrections du wiki.",
+        schema=WIKI_LINT_SCHEMA,
+        model=model or get_settings().wiki_lint_model,
+        max_tokens=wiki_budget([p.get("content") or "" for p in pages], per_page=300),
+    )
+
+
+def wiki_pick(*, question: str, index: str, limit: int = 8) -> list[str]:
+    """The titles of the pages to read to answer a question (from the index only)."""
+    out = call_tool(
+        system=(f"Tu choisis, dans l'index du wiki personnel de l'utilisateur, les pages à lire pour répondre à sa "
+                f"question : au plus {limit} titres exacts, les plus utiles d'abord. Liste vide si aucune ne convient."),
+        content=f"<index>\n{index}\n</index>\n\nQuestion : {question}",
+        tool_name="pick_pages",
+        tool_description="Enregistre les pages à lire.",
+        schema=WIKI_PICK_SCHEMA,
+        max_tokens=600,
+    )
+    return _text_list(out.get("pages"))[:limit]
+
+
+def wiki_file_answer(*, question: str, answer: str, index: str) -> dict:
+    """Title, section and summary of a page made from an answer worth keeping."""
+    return call_tool(
+        system=(f"L'utilisateur garde une réponse dans son wiki personnel, comme une nouvelle page. Donne-lui "
+                f"{_WIKI_TITLE_RULE}, différent des titres de l'index, la section où elle vit, et une ligne de résumé, "
+                f"en {lang_name()}."),
+        content=f"<index>\n{index or '(vide)'}\n</index>\n\nQuestion : {question}\n\nRéponse :\n{answer[:12000]}",
+        tool_name="file_answer",
+        tool_description="Enregistre le titre, la section et le résumé de la page.",
+        schema=WIKI_ANSWER_SCHEMA,
+        max_tokens=600,
+    )

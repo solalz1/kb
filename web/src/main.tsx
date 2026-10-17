@@ -14,6 +14,8 @@ import Journal from "./pages/Journal";
 import NoteEditor from "./pages/NoteEditor";
 import Settings from "./pages/Settings";
 import Todo from "./pages/Todo";
+import Wiki from "./pages/Wiki";
+import WikiPage from "./pages/WikiPage";
 import { noteNavigation, skipNextAnimation } from "./motion";
 import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
@@ -61,6 +63,8 @@ const router = createBrowserRouter([{
     { path: "/note/new", element: <NoteEditor key="new" /> },
     { path: "/note/:id/edit", element: <NoteEditor key="edit" /> },
     { path: "/item/:id", element: <ItemPage /> },
+    { path: "/wiki", element: <Wiki /> },
+    { path: "/wiki/:slug", element: <WikiPage /> },
     { path: "/ask", element: <Ask /> },
     { path: "/digest", element: <Digest /> },
     { path: "/digest/interets", element: <Interests /> },

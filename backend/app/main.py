@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, folders, llm, migrate, notion, pipeline, search, sso, storage
+from . import chat, costs, db, export, folders, llm, migrate, notion, obsidian, pipeline, search, sso, storage, wiki
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -769,6 +769,7 @@ class ChatRequest(BaseModel):
     tags: list[str] | None = None
     model: str | None = None     # un des modèles de /api/models ; défaut : CHAT_MODEL
     lang: str | None = None      # langue de l'app (fr, en) : celle de la réponse ; défaut : KB_LANGUAGE
+    source: str = "rag"          # mode ask: "wiki" answers from the wiki's pages, "rag" from the items search finds
 
 
 @api.get("/api/models", dependencies=auth)
@@ -801,6 +802,8 @@ def chat_endpoint(req: ChatRequest):
     model = req.model or settings.chat_model
     if req.mode not in ("ask", "project", "advice"):
         raise HTTPException(400, f"Mode inconnu : {req.mode}")
+    if req.source not in ("wiki", "rag"):
+        raise HTTPException(400, f"Source inconnue : {req.source}")
     lang = req.lang if req.lang in llm.LANG_NAMES else None
 
     def events():
@@ -809,6 +812,8 @@ def chat_endpoint(req: ChatRequest):
                 gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model, lang=lang)
             elif req.mode == "advice":
                 gen = chat.advise(req.messages, model=model, lang=lang)
+            elif req.source == "wiki":
+                gen = chat.ask_wiki(req.messages, model=model, lang=lang)
             else:
                 gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model, lang=lang)
             for event in gen:
@@ -1071,6 +1076,89 @@ def delete_watch(watch_id: int):
     db.execute("delete from watch where id = %s and kind = 'feed'", (watch_id,))
     db.execute("update watch set status = 'muted' where id = %s and kind = 'person'", (watch_id,))
     return {"ok": True}
+
+# ---------------------------------------------------------------------------
+# Wiki: pages written and kept up to date by Claude (app/wiki.py), Obsidian copy (app/obsidian.py)
+# ---------------------------------------------------------------------------
+
+@api.get("/api/wiki", dependencies=auth)
+def wiki_overview():
+    """The index (every page, by section), the queue, the last review and its ideas, the Obsidian sync."""
+    return wiki.overview()
+
+
+@api.get("/api/wiki/log", dependencies=auth)
+def wiki_log(limit: int = 60):
+    return wiki.recent_log(limit)
+
+
+@api.get("/api/wiki/pages/{key}", dependencies=auth)
+def wiki_page(key: str):
+    page = wiki.page_detail(key)
+    if not page:
+        raise HTTPException(404, "Page introuvable")
+    return page
+
+
+class WikiAnswerIn(BaseModel):
+    question: str = ""
+    answer: str
+    sources: list[dict] = []
+
+
+@api.post("/api/wiki/answers", dependencies=auth)
+def wiki_file_answer(body: WikiAnswerIn):
+    """Keep an answer: it becomes a page (in the wiki's queue, a few seconds)."""
+    if not body.answer.strip():
+        raise HTTPException(400, "Réponse vide")
+    job = wiki.enqueue("answer", {"question": body.question[:2000], "answer": body.answer[:30_000],
+                                  "sources": body.sources[:40]})
+    return {"job_id": job}
+
+
+@api.post("/api/wiki/lint", dependencies=auth)
+def wiki_lint_now():
+    """« Relire maintenant »: the review that runs every night, now."""
+    return {"job_id": wiki.enqueue("lint", {"reason": "manual"})}
+
+
+@api.get("/api/wiki/jobs/{job_id}", dependencies=auth)
+def wiki_job(job_id: int):
+    job = wiki.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Tâche introuvable")
+    return job
+
+
+class WikiSchemaIn(BaseModel):
+    text: str
+
+
+@api.get("/api/wiki/schema", dependencies=auth)
+def wiki_schema():
+    return {"text": wiki.user_schema(), "sections": wiki.overview()["sections"]}
+
+
+@api.put("/api/wiki/schema", dependencies=auth)
+def put_wiki_schema(body: WikiSchemaIn):
+    return {"text": wiki.set_user_schema(body.text)}
+
+
+@api.get("/api/wiki/export", dependencies=auth)
+def wiki_export():
+    """The wiki as an Obsidian vault (zip): unzip it, open the folder in Obsidian."""
+    path = obsidian.export_zip_file()
+    return FileResponse(path, media_type="application/zip", filename="kb-wiki.zip",
+                        background=BackgroundTask(os.unlink, path))
+
+
+@api.post("/api/wiki/sync", dependencies=auth)
+def wiki_sync():
+    if not obsidian.enabled():
+        raise HTTPException(400, "Synchro Obsidian non configurée : ajoute WIKI_GIT_REPO et WIKI_GIT_TOKEN")
+    obsidian.request_sync()
+    return {"ok": True}
+
 
 # ---------------------------------------------------------------------------
 # Export & fichiers locaux (dev)

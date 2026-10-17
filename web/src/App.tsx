@@ -6,23 +6,24 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { EdgeSwipeBack, PullToRefresh, settleSwipe } from "./components/Gestures";
 import { LangSwitch } from "./components/LangSwitch";
 import { t } from "./i18n";
-import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconPlus, IconSettings, IconTodo } from "./icons";
+import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconPlus, IconSettings, IconTodo, IconWiki } from "./icons";
 import { scrollKey, tabOf } from "./motion";
 import { Link, NavLink, useNavigate } from "./nav";
 import { keys, prefetchTabs } from "./queries";
 
 // The sidebar (desktop). "Ajouter" is the primary button above it; on phones it is the + in the middle of the tab bar,
-// the folders and À faire are icons at the top of Veille, and the journal an icon at the top of Perso.
+// the wiki, the folders and À faire are icons at the top of Veille, and the journal an icon at the top of Perso.
 const NAV = [
   { to: "/", label: t("Veille"), Icon: IconFeed, end: true },
   { to: "/perso", label: t("Perso"), Icon: IconLeaf },
+  { to: "/wiki", label: t("Wiki"), Icon: IconWiki },
   { to: "/folders", label: t("Dossiers"), Icon: IconFolder },
   { to: "/journal", label: t("Journal"), Icon: IconCalendar },
   { to: "/digest", label: "Digest", Icon: IconDigest },
   { to: "/ask", label: t("Demander"), Icon: IconChat },
   { to: "/todo", label: t("À faire"), Icon: IconTodo },
 ];
-const TABS = [NAV[0], NAV[1], { to: "/add", label: t("Ajouter"), Icon: IconPlus }, NAV[4], NAV[5]];
+const TABS = [NAV[0], NAV[1], { to: "/add", label: t("Ajouter"), Icon: IconPlus }, NAV[5], NAV[6]];
 const RAIL_STEP = 50;     // px between two sidebar links (44 + the 6 px gap): the selection slides by that much
 
 const hostOf = (base: string) => { try { return new URL(base).host; } catch { return base; } };

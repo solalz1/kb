@@ -10,7 +10,8 @@ Share anything from your iPhone or Mac (a tweet or thread, an article, a YouTube
 - **Every format**: X posts and threads, web articles, arXiv, GitHub, YouTube, TikTok/Instagram/Vimeo, podcasts, audio, video, PDFs (scanned ones too), images, Word/PowerPoint/Excel, plain notes.
 - **Sources kept**: each card keeps the original link, author, date and file. Every answer cites its sources with links.
 - **Folders**: your own shelves (ML, Interviews…, add and rename them in the app). Claude files each new item in the one that fits; pick one yourself when you share, and the Shortcut always offers your current folders.
-- **Ask your KB**: "What did I save about…?", or "I'm starting this project, what can help?", which returns a sourced brief.
+- **A wiki that writes itself** ([Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)): Claude files every item into theme pages, one per topic, concept, person or book, never one per item, in five sections (Personal, Research, Reading, Business, Competitive analysis). Pages link to each other and cite their sources; each share updates the pages it concerns, and every night Claude reviews the wiki for contradictions, stale claims, duplicates and missing links, then suggests what to dig next. Open it in Obsidian with its graph, edits included (two-way sync through a private GitHub repository).
+- **Ask your KB**: "What did I save about…?" answered from the wiki's syntheses or from the items search finds (one switch), or "I'm starting this project, what can help?", which returns a sourced brief. A good answer can be kept as a new page of the wiki.
 - **Personal space**: write your principles, values, lessons, goals and a daily journal (with a calendar). Your words are kept as written. **Advice mode** answers a decision from *your* principles and cites them.
 - **Morning tech digest** (optional): Hacker News, Hugging Face papers, rising GitHub repos, blogs and the people you follow on X, ranked by what you save. On Mondays, the week in review and project ideas.
 - **In Claude**: a connector (MCP) lets Claude search and read your KB on web, desktop, mobile and Claude Code.
@@ -62,14 +63,14 @@ If Railway doesn't redeploy, give its GitHub app access to your fork (GitHub →
 
 ## What it costs
 
-With daily use, expect $5–15 a month: about $5 of Railway, then Claude, which is about a third of a cent per saved item (Claude Haiku 5.5), 0.3 to 20 cents per question depending on the model, and $0.10–0.20 a day for the digest. Add X if you save tweets. **Settings → Costs** shows what each service cost, this month and in all, in US dollars: synced with the service where it has an API for it (the X balance, and the Claude Console's own figure with an optional Admin key), estimated from the KB's own calls elsewhere ([SETUP.md](SETUP.md), step 12). Questions asked through the Claude connector run on your Claude plan, not on API credits.
+With daily use, expect $5–15 a month, or $10–30 with the wiki on: about $5 of Railway, then Claude, which is about a third of a cent per saved item (Claude Haiku 5.5), 0.3 to 20 cents per question depending on the model, and $0.10–0.20 a day for the digest. The wiki adds roughly 10–30 cents per saved item with Sonnet 5.5 (it rewrites the pages the item concerns), and a nightly review only after a day that changed it; `WIKI_MODEL=claude-haiku-5-5` costs about a quarter of that. When you first deploy it, the items you already have are integrated too, one after the other. Add X if you save tweets. **Settings → Costs** shows what each service cost, this month and in all, in US dollars: synced with the service where it has an API for it (the X balance, and the Claude Console's own figure with an optional Admin key), estimated from the KB's own calls elsewhere ([SETUP.md](SETUP.md), step 12). Questions asked through the Claude connector run on your Claude plan, not on API credits.
 
 ## Privacy
 
 The repository is public, your data is not.
 
 - **Code and data are separate.** Your items live in your Supabase project (row-level security on, no public access) and your keys in Railway's variables. The app answers nothing without your token, and asks search engines not to index it.
-- **What leaves your server.** To process an item, its content goes to the Anthropic API (summaries, answers; API data isn't used for training by default) and to Voyage AI (search; opt out of training in its dashboard, see [SETUP.md](SETUP.md)). Audio and video go to your transcription provider, tweets are read through the X API, and the Notion copy writes to your own workspace. The digest reads public sources and sends Claude a summary of your interests.
+- **What leaves your server.** To process an item, its content goes to the Anthropic API (summaries, answers; API data isn't used for training by default) and to Voyage AI (search; opt out of training in its dashboard, see [SETUP.md](SETUP.md)). Audio and video go to your transcription provider, tweets are read through the X API, the Notion copy writes to your own workspace, and the Obsidian sync to your own private GitHub repository. The digest reads public sources and sends Claude a summary of your interests.
 - **Backups.** The Supabase free plan has none: see [SETUP.md](SETUP.md), step 9.
 
 ## Known limits
@@ -97,13 +98,16 @@ Claude (MCP connector) ── /mcp/<secret> ────────────
                                               │
                         Notion (optional): one page per item, kept in sync
 
+Wiki (in the worker, one job at a time): each ready item ▸ Claude ▸ the theme pages it concerns, linked, with sources
+             every night: a review ▸ fixes, merges, ideas │ optional two-way sync ⇄ private GitHub repo ⇄ Obsidian
+
 Digest agent (in the worker, every morning): HN · HF papers · GitHub · blogs · X ──▶ Claude ──▶ app / e-mail / Claude
 ```
 
 | Folder | What's inside |
 |---|---|
-| `backend/app/` | FastAPI API, worker, one extractor per source, enrichment, chat, digest agent, MCP server, export |
-| `web/` | the React app (feeds, item page, notes, journal, chat, digest, settings) |
+| `backend/app/` | FastAPI API, worker, one extractor per source, enrichment, chat, wiki and its Obsidian sync, digest agent, MCP server, export |
+| `web/` | the React app (feeds, item page, notes, journal, wiki, chat, digest, settings) |
 | `supabase/migrations/` | the database schema, applied at every start |
 | `shortcuts/` | the generator of the iPhone and Mac Shortcuts |
 

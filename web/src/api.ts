@@ -85,7 +85,10 @@ export interface SourceCard {
   n: number;
   id: string;
   title: string | null;
-  kind: Kind | null;
+  kind: Kind | "wiki" | null;
+  /** a page of the wiki (kind "wiki"): where it opens, its section */
+  slug?: string;
+  section?: WikiSection;
   author: string | null;
   source_url: string | null;
   kb_url: string;
@@ -119,6 +122,77 @@ export interface NotionStatus {
 }
 
 export type ChatMode = "ask" | "project" | "advice";
+/** Where a question's answer comes from: the wiki's pages, or the items search finds (RAG). */
+export type AskSource = "wiki" | "rag";
+
+export type WikiSection = "personal" | "research" | "reading" | "business" | "competitive";
+export type WikiKind = "theme" | "entity" | "book" | "synthesis" | "answer";
+
+export interface WikiPageSummary {
+  id: string;
+  title: string;
+  slug: string;
+  section: WikiSection;
+  kind: WikiKind;
+  summary: string | null;
+  updated_at: string;
+  updated_by: "claude" | "user";
+  n_sources: number;
+}
+
+export interface WikiLogEntry {
+  id: number;
+  at: string;
+  kind: "ingest" | "lint" | "answer" | "edit" | "sync";
+  title: string;
+  detail: { pages?: string[]; created?: string[]; takeaways?: string[]; fixed?: { title: string; reason: string }[];
+            merged?: { from: string; into: string }[]; question?: string; deleted?: boolean | string[]; source?: string;
+            nothing?: boolean; replaced_claude_update?: boolean };
+}
+
+export interface WikiSuggestion { text: string; kind: "question" | "source" | "action" | "link" }
+
+export interface ObsidianStatus {
+  configured: boolean;
+  missing?: string[];
+  repo?: string;
+  branch?: string;
+  url?: string;
+  last_sync_at?: string | null;
+  last_error?: string | null;
+  last_error_at?: string | null;
+  /** notes the sync couldn't take (a title clash…): left as they are in the repository */
+  skipped?: { path: string; reason: string }[];
+}
+
+export interface WikiOverview {
+  enabled: boolean;
+  sections: { key: WikiSection; label: string; label_en: string; count: number }[];
+  pages: WikiPageSummary[];
+  queue: { pending: number; running: number; errors: number; current: { kind: string; title: string | null } | null };
+  last_lint: { at: string; title: string; detail: WikiLogEntry["detail"] } | null;
+  suggestions: { at: string | null; items: WikiSuggestion[] };
+  obsidian: ObsidianStatus;
+}
+
+export interface WikiPageDetail extends WikiPageSummary {
+  content: string;
+  links: string[];
+  revision: number;
+  archived: boolean;
+  created_at: string;
+  sources: SourceCard[];
+  refs: Record<string, { id: string; title: string | null }>;
+  links_resolved: Record<string, string>;
+  backlinks: { id: string; title: string; slug: string; section: WikiSection; summary: string | null }[];
+  history: { revision: number; author: "claude" | "user"; reason: string | null; created_at: string }[];
+  merged_into: { slug: string; title: string } | null;
+  /** its note's path in the Obsidian vault, without .md */
+  vault_path: string;
+}
+
+export interface WikiJob { id: number; kind: string; status: "pending" | "running" | "done" | "error"; error: string | null;
+                           result: { slug?: string; title?: string } }
 
 // --- Agent de veille (digests) ---
 export type DigestKind = "daily" | "weekly";
@@ -488,6 +562,22 @@ export const api = {
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/api/folders/${id}`, { method: "DELETE" }),
   sortFolders: () =>
     request<{ sorted: number; filed: number; folders: Folder[]; unfiled: number }>("/api/folders/sort", { method: "POST" }),
+  wiki: () => request<WikiOverview>("/api/wiki"),
+  wikiPage: (key: string) => request<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(key)}`),
+  wikiLog: () => request<WikiLogEntry[]>("/api/wiki/log"),
+  wikiLint: () => request<{ job_id: number }>("/api/wiki/lint", { method: "POST" }),
+  wikiJob: (id: number) => request<WikiJob>(`/api/wiki/jobs/${id}`),
+  keepAnswer: (body: { question: string; answer: string; sources: SourceCard[] }) =>
+    request<{ job_id: number }>("/api/wiki/answers", { method: "POST", body: JSON.stringify(body) }),
+  wikiSchema: () => request<{ text: string }>("/api/wiki/schema"),
+  setWikiSchema: (text: string) =>
+    request<{ text: string }>("/api/wiki/schema", { method: "PUT", body: JSON.stringify({ text }) }),
+  wikiSync: () => request<{ ok: boolean }>("/api/wiki/sync", { method: "POST" }),
+  wikiZip: async () => {
+    const res = await fetch(`${auth.base}/api/wiki/export`, { headers: authHeaders() });
+    if (!res.ok) throw new ApiError(res.status, t("Export impossible"));
+    return res.blob();
+  },
   exportZip: async (files = false, language: string = lang) => {
     const res = await fetch(`${auth.base}/api/export${qs({ files: files || undefined, lang: language })}`,
                             { headers: authHeaders() });
@@ -502,10 +592,12 @@ export type ChatEvent =
   | { type: "sources"; sources: SourceCard[]; query?: string }
   | { type: "delta"; text: string }
   | { type: "error"; text: string }
+  | { type: "fallback"; source: AskSource }
   | { type: "done" };
 
 export async function streamChat(
-  body: { messages: { role: "user" | "assistant"; content: string }[]; mode: ChatMode; kinds?: string[]; model?: string },
+  body: { messages: { role: "user" | "assistant"; content: string }[]; mode: ChatMode; kinds?: string[]; model?: string;
+          source?: AskSource },
   onEvent: (e: ChatEvent) => void,
   signal?: AbortSignal,
 ) {
