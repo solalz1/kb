@@ -145,3 +145,26 @@ def test_article_blocks_to_markdown():
     assert md == "# Titre\n\nCorps\n\n- point"
     text, title = twitter._article_text({"article": {"title": "T", "plain_text": "x" * 300}})
     assert title == "T" and len(text) == 300
+
+
+def test_github_rate_limit_falls_back_to_the_repo_page(monkeypatch):
+    import httpx
+
+    from app import extractors
+    from app.extractors import github
+
+    api_calls = []
+
+    def api(request):
+        api_calls.append(str(request.url))
+        return httpx.Response(403, json={"message": "API rate limit exceeded"})
+
+    monkeypatch.setattr(github, "http_client", lambda **kw: httpx.Client(transport=httpx.MockTransport(api),
+                                                                          headers=kw.get("headers")))
+    page = extractors.Extracted(kind="article", title="psf/requests", content="README", source_url="x")
+    read = []
+    monkeypatch.setattr(web, "extract", lambda url, canonical: read.append(canonical) or page)
+
+    assert extractors.extract_url("https://github.com/psf/requests") is page
+    assert api_calls == ["https://api.github.com/repos/psf/requests"]
+    assert read == ["https://github.com/psf/requests"]

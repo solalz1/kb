@@ -14,6 +14,10 @@ def extract(owner: str, repo: str, canonical: str) -> Extracted:
         r = c.get(f"https://api.github.com/repos/{owner}/{repo}")
         if r.status_code == 404:
             raise ExtractionError("Dépôt GitHub introuvable ou privé")
+        if r.status_code in (403, 429):
+            # rate limit (60 requests an hour without GITHUB_TOKEN, shared by the server's IP): retrying a few
+            # minutes later would fail the same way, so extract_url reads the repo's page instead
+            raise ExtractionError("API GitHub indisponible (limite de requêtes)")
         r.raise_for_status()
         info = r.json()
         rd = c.get(f"https://api.github.com/repos/{owner}/{repo}/readme", headers={"Accept": "application/vnd.github.raw"})
