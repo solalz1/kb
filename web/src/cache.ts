@@ -13,6 +13,7 @@ const store = new Map<string, Entry>();         // oldest written first: what go
 const inflight = new Map<string, { promise: Promise<unknown>; epoch: number; id: number }>();
 const latest = new Map<string, number>();       // the last request started for each key
 const shownKeys = new Map<string, number>();    // keys a page on screen uses (never evicted)
+const retries = new Map<string, () => Promise<void>>();   // their pages' own loads, to ask again what failed
 const listeners = new Set<() => void>();
 const steady: string[] = [];                    // key prefixes a change doesn't touch (they age out by themselves)
 const changes = new Map<number, number>();      // changes on their way to the API, and when each started
@@ -120,8 +121,12 @@ export const cache = {
    *  `max` ms), so the spinner stays until then. Nothing is emptied: the page keeps showing what it had meanwhile. */
   async refreshShown(max = 8_000): Promise<void> {
     cache.staleAll();
+    // what failed to load has nothing to mark stale: it is asked for again (a pull is how you retry on an iPhone)
+    const retried = [...shownKeys.keys()].filter((key) => !store.has(key) && !inflight.has(key))
+      .map((key) => retries.get(key)?.().catch(() => {}));
     await new Promise((r) => window.setTimeout(r, 80));       // the pages on screen start their requests
     const running = [...inflight.entries()].filter(([key]) => shownKeys.has(key)).map(([, v]) => v.promise.catch(() => {}));
+    running.push(...retried.filter((p): p is Promise<void> => Boolean(p)));
     await Promise.race([Promise.all(running), new Promise((r) => window.setTimeout(r, max))]);
   },
   /** A change is being sent to the API (api.ts). Returns what to hand to changeDone. */
@@ -213,6 +218,11 @@ export function useQuery<T>(key: string | null, fetcher: () => Promise<T>,
       if (n > 0) shownKeys.set(key, n); else shownKeys.delete(key);
     };
   }, [key]);
+  useEffect(() => {
+    if (!key) return;
+    retries.set(key, refresh);
+    return () => { if (retries.get(key) === refresh) retries.delete(key); };
+  }, [key, refresh]);
   // on opening, or when the key changes: load what is missing or too old
   useEffect(() => {
     if (key && !cache.fresh(key, maxAge)) refresh();

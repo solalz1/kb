@@ -26,7 +26,8 @@ export function TitleBar() {
     let frame = 0;
     const check = () => {
       frame = 0;
-      const heading = document.querySelector<HTMLElement>(".main h1");
+      // the page's own title, not a heading inside an answer, a wiki page or an item's text
+      const heading = document.querySelector<HTMLElement>(".main h1:not(.answer h1, .wiki-body h1, .content-box h1, .md h1)");
       if (!heading || !bar.current || window.matchMedia(WIDE).matches) { setShown(false); return; }
       const gone = heading.getBoundingClientRect().bottom < bar.current.getBoundingClientRect().bottom - 4;
       if (gone) {

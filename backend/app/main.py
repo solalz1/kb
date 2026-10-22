@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
@@ -161,7 +162,9 @@ async def health():
     return {"ok": db_ok, "db": db_ok, "auth_configured": bool(settings.kb_api_token),
             "schema": migrate.status, "storage": await run_in_threadpool(storage.check),
             # where the web app sends you to sign in when the shared sign-in is on (it adds ?next=)
-            "sso_login": sso.login_url() if sso.enabled() else None}
+            "sso_login": sso.login_url() if sso.enabled() else None,
+            # a dev copy: where the real KB is (its Settings send the Shortcut and the connector there)
+            **({"real_url": settings.public_base_url.rstrip("/")} if settings.dev_copy and settings.public_base_url else {})}
 
 
 @api.post("/api/logout")
@@ -871,21 +874,45 @@ def get_digest(digest_id: int):
     return _digest_out(row)
 
 
+def _on_the_real_kb(request: Request, path: str, body: dict | None = None) -> dict | None:
+    """On a dev copy (DEV_COPY), a job that runs for a while or a sync is asked of the real KB (PUBLIC_BASE_URL, with
+    KB_API_TOKEN): it runs there, where the background work lives, and outlives the copy's redeploys. Its answer, or None
+    when this isn't a copy (or a forwarded request, or the copy doesn't know the real KB): then it runs here."""
+    if not settings.dev_copy or request.headers.get("x-kb-forwarded") or not settings.public_base_url or not settings.kb_api_token:
+        return None
+    try:
+        r = httpx.post(settings.public_base_url.rstrip("/") + path, json=body or {}, timeout=15,
+                       headers={"Authorization": f"Bearer {settings.kb_api_token}", "x-kb-forwarded": "1"})
+    except httpx.HTTPError:
+        raise HTTPException(503, "La KB principale ne répond pas : réessaie dans un instant.")
+    try:
+        data = r.json()
+    except ValueError:
+        data = {}
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, (data.get("detail") if isinstance(data, dict) else None) or "La KB principale a refusé.")
+    return data if isinstance(data, dict) else {"ok": True}
+
+
 class DigestRequest(BaseModel):
     kind: str = "daily"
 
 
 @api.post("/api/digests/generate", dependencies=auth)
-def generate_digest(req: DigestRequest):
+def generate_digest(req: DigestRequest, request: Request):
     if req.kind not in ("daily", "weekly"):
         raise HTTPException(400, "kind : daily ou weekly")
+    if (forwarded := _on_the_real_kb(request, "/api/digests/generate", {"kind": req.kind})) is not None:
+        return forwarded
     if not settings.anthropic_api_key:
         raise HTTPException(400, "ANTHROPIC_API_KEY manquant")
     return {"ok": True, "id": digest_agent.start_now(req.kind)}
 
 
 @api.post("/api/digests/{digest_id}/projects", dependencies=auth)
-def more_projects(digest_id: int):
+def more_projects(digest_id: int, request: Request):
+    if (forwarded := _on_the_real_kb(request, f"/api/digests/{digest_id}/projects")) is not None:
+        return forwarded
     if not digest_agent.get(digest_id):
         raise HTTPException(404, "Digest introuvable")
     if not digest_agent.start_more_projects(digest_id):
@@ -894,7 +921,9 @@ def more_projects(digest_id: int):
 
 
 @api.post("/api/digests/{digest_id}/regenerate", dependencies=auth)
-def regenerate_digest(digest_id: int):
+def regenerate_digest(digest_id: int, request: Request):
+    if (forwarded := _on_the_real_kb(request, f"/api/digests/{digest_id}/regenerate")) is not None:
+        return forwarded
     if not digest_agent.get(digest_id):
         raise HTTPException(404, "Digest introuvable")
     if not settings.anthropic_api_key:
@@ -1153,9 +1182,11 @@ def wiki_export():
 
 
 @api.post("/api/wiki/sync", dependencies=auth)
-def wiki_sync():
+def wiki_sync(request: Request):
     if not obsidian.enabled():
         raise HTTPException(400, "Synchro Obsidian non configurée : ajoute WIKI_GIT_REPO et WIKI_GIT_TOKEN")
+    if (forwarded := _on_the_real_kb(request, "/api/wiki/sync")) is not None:
+        return forwarded
     obsidian.request_sync()
     return {"ok": True}
 
@@ -1192,9 +1223,11 @@ def notion_language(body: NotionLanguage):
 
 
 @api.post("/api/notion/sync", dependencies=auth)
-def notion_sync():
+def notion_sync(request: Request):
     if not notion.enabled():
         raise HTTPException(400, "Copie Notion non configurée : ajoute NOTION_TOKEN et NOTION_PARENT_PAGE_ID")
+    if (forwarded := _on_the_real_kb(request, "/api/notion/sync")) is not None:
+        return forwarded
     notion.request_sync()
     return {"ok": True}
 

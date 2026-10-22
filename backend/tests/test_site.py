@@ -937,6 +937,84 @@ def test_tabs_dont_stack_and_bring_their_first_screen_back(site):
     assert page.evaluate("document.documentElement.dataset.nav") == "back"
 
 
+def test_swipe_back_after_a_link_and_twice_in_a_row(site):
+    """A page reached by a link can be swiped back even when it is a tab's first screen (Ask from an item); two swipes in
+    quick succession never leave the screen empty; the + opens Add over the page, which « Annuler » comes back to."""
+    page = site("/", touch=True)
+    _seed(page)
+    page.context.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true });")
+    page.reload()
+    expect(page.locator(".fiche")).to_have_count(1)
+    cdp = page.context.new_cdp_session(page)
+
+    def swipe(steps=4):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": 6, "y": 420}]})
+        for i in range(1, steps + 1):
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 6 + 280 * i / steps, "y": 420}]})
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+
+    page.locator(".fiche").first.click()
+    expect(page.locator(".item-title")).to_be_visible()
+    _settled(page)
+    page.get_by_role("link", name="Poser une question").click()
+    page.wait_for_url(re.compile(r"/ask\?about="))
+    _settled(page)
+    swipe()
+    expect(page.locator(".item-title")).to_be_visible()
+    _settled(page)
+    swipe()
+    swipe()                                              # a second swipe right away, while the first is landing
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    page.wait_for_function("() => document.querySelector('.main').style.transform === ''")
+    _settled(page)
+    page.locator(".tabbar").get_by_role("link", name="Perso").click()
+    expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+    page.locator(".tabbar").get_by_role("link", name="Ajouter").click()
+    expect(page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")).to_be_visible()
+    page.get_by_role("button", name="Annuler").click()
+    expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+
+
+def test_a_new_conversation_while_an_answer_streams(site, monkeypatch):
+    """« Nouvelle conversation » while an answer is still being written starts afresh, without breaking the page."""
+    import time
+
+    from app import llm
+
+    def slow(*, system, messages, model=None, max_tokens=4000):
+        yield "Le début "
+        time.sleep(1.5)
+        yield "et la fin."
+
+    monkeypatch.setattr(llm, "stream_text", slow)
+    page = site("/ask")
+    page.locator("#ask-input").fill("Une question")
+    page.locator("#ask-input").press("Enter")
+    expect(page.locator(".answer")).to_contain_text("Le début")
+    page.get_by_role("button", name="Nouvelle conversation").click()
+    expect(page.locator(".answer")).to_have_count(0)
+    page.wait_for_timeout(2000)                         # the stopped answer's last words never come back
+    expect(page.locator(".answer")).to_have_count(0)
+    expect(page.locator("#ask-input")).to_be_visible()
+
+
+def test_pull_to_refresh_retries_what_failed(site):
+    """In the installed app, a page that couldn't load is asked for again by a pull, as an iPhone app retries."""
+    page = site("/", touch=True, expected_errors=("ERR_FAILED", "Failed to fetch"))
+    _seed(page)
+    page.context.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true });")
+    page.route(re.compile(r".*/api/items\?.*"), lambda route: route.abort())
+    page.reload()
+    expect(page.locator(".error-box")).to_be_visible()
+    page.unroute(re.compile(r".*/api/items\?.*"))
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": 200, "y": 300}]})
+    for i in range(1, 15):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 200, "y": 300 + 260 * i / 14}]})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    expect(page.locator(".fiche")).to_have_count(1)
+
+
 def test_title_folds_into_a_bar_on_a_phone(site):
     """On a phone, once a page's title has scrolled away, a glass bar at the top shows it small with the page's way
     back; a tap on the title goes back to the top, and the way back works from there."""
@@ -971,6 +1049,13 @@ def test_keys_and_taps_answer_at_once(site):
     expect(page.get_by_role("heading", name="Wiki", exact=True)).to_be_visible()
     page.keyboard.press("Control+k")
     expect(page.locator(".main .search input")).to_be_focused()
+    # …but never while something is being typed elsewhere: the draft stays where it is
+    page.goto("/ask")
+    page.locator("#ask-input").fill("Une question en cours")
+    page.keyboard.press("Control+k")
+    page.wait_for_timeout(300)
+    expect(page).to_have_url(re.compile(r"/ask"))
+    expect(page.locator("#ask-input")).to_have_value("Une question en cours")
     phone = site("/", touch=True)
     _seed(phone)
     phone.reload()
@@ -999,6 +1084,16 @@ def test_a_card_menu_on_long_press_and_right_click(site):
     expect(page.locator(".item-title")).to_have_count(0)                  # the card didn't open
     page.keyboard.press("Escape")
     expect(menu).to_have_count(0)
+    # a tap outside closes it, and opens nothing under the finger (nor the menu again a moment later)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": box["x"] + 60, "y": box["y"] + 40}]})
+    page.wait_for_timeout(700)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    expect(menu).to_be_visible()
+    page.touchscreen.tap(30, 30)                       # outside the menu: over the page's head
+    expect(menu).to_have_count(0)
+    page.wait_for_timeout(800)
+    expect(menu).to_have_count(0)
+    expect(page.locator(".item-title")).to_have_count(0)
 
     desk = site("/", viewport=DESKTOP)
     desk.locator(".fiche").first.click(button="right")

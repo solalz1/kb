@@ -12,10 +12,14 @@ export const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: r
  *  mistaken for the real one. */
 export const devCopy = () => /^[^.]+-dev\./.test(window.location.hostname) || /^dev\./.test(window.location.hostname);
 
-/** This app's address, or on a copy the real KB's (kb-dev.example.com → kb.example.com, dev.kb… → kb…). */
+/** On a copy, the real KB's address as its server knows it (PUBLIC_BASE_URL, from /api/health: App sets it). */
+export const realKb = { url: "" };
+
+/** This app's address, or on a copy the real KB's (its server's word, else kb-dev.example.com → kb.example.com). */
 export function realOrigin(): string {
   const { protocol, host } = window.location;
   if (!devCopy()) return window.location.origin;
+  if (realKb.url) return realKb.url;
   return `${protocol}//${host.replace(/^([^.]+)-dev\./, "$1.").replace(/^dev\./, "")}`;
 }
 
@@ -122,6 +126,15 @@ let last = { path: "", tab: "/", idx: 0 };
 let skip = false;
 // where each tab's first screen sits in the history, so that tapping the tab from deeper in it goes back there
 const roots = new Map<string, { idx: number; path: string }>();
+// history entries a tab bar tap put in place (tabs replace, they don't stack): no swipe back from there
+const byTab = new Set<number>();
+
+/** A swipe from the left edge may take this page back: there is a page of the app before it, and it wasn't reached by
+ *  switching tabs (a page opened by a link, even a tab's first screen such as Ask from an item, can go back). */
+export function swipeBackAllowed(): boolean {
+  const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+  return idx > 0 && !byTab.has(idx);
+}
 
 /** How many steps back the first screen of `tab` is from here (0: not in reach, go there instead). */
 export function stepsToRoot(tab: string): number {
@@ -170,6 +183,8 @@ export function noteNavigation(path: string, action: "POP" | "PUSH" | "REPLACE")
     if ((root.idx === idx && root.path !== path) || (action === "PUSH" && root.idx > idx)) roots.delete(key);
   }
   if (depth(path) === 0) roots.set(tab, { idx, path });
+  if (action === "PUSH") { for (const i of [...byTab]) if (i >= idx) byTab.delete(i); }
+  else if (action === "REPLACE") { if (depth(path) === 0) byTab.add(idx); else byTab.delete(idx); }
   let nav: Nav;
   if (skip || !last.path) nav = "none";
   else if (action === "POP") nav = idx < last.idx ? "back" : "push";

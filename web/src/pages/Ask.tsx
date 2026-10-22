@@ -104,6 +104,7 @@ export default function Ask() {
   const pending = useRef("");
   const frame = useRef(0);
   const follow = useRef(false);
+  const run = useRef(0);          // the question being answered: what an earlier, stopped one still sends is dropped
   const box = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { saved = { turns, mode }; }, [turns, mode]);
@@ -130,7 +131,8 @@ export default function Ask() {
   }, [input]);
 
   const patchLast = (fn: (turn: Turn) => Turn) =>
-    setTurns((prev) => [...prev.slice(0, -1), fn(prev[prev.length - 1])]);
+    setTurns((prev) => (prev.length && prev[prev.length - 1].role === "assistant"
+      ? [...prev.slice(0, -1), fn(prev[prev.length - 1])] : prev));
   const flush = () => {
     window.cancelAnimationFrame(frame.current);
     frame.current = 0;
@@ -164,8 +166,10 @@ export default function Ask() {
       : history.filter((x) => x.mode === mode && x.content && !x.error).map((x) => ({ role: x.role, content: x.content }));
 
     abort.current = new AbortController();
+    const mine = ++run.current;
     try {
       await streamChat({ messages, mode, model: model || undefined, source: from }, (e) => {
+        if (mine !== run.current) return;
         if (e.type === "delta") {
           pending.current += e.text;
           if (!frame.current) frame.current = window.requestAnimationFrame(flush);
@@ -180,10 +184,9 @@ export default function Ask() {
         if (e.type === "done") patchLast((x) => ({ ...x, done: true, status: undefined }));
       }, abort.current.signal);
     } catch (err) {
-      if ((err as Error).name !== "AbortError") patchLast((x) => ({ ...x, error: (err as Error).message, status: undefined }));
+      if (mine === run.current && (err as Error).name !== "AbortError") patchLast((x) => ({ ...x, error: (err as Error).message, status: undefined }));
     } finally {
-      flush();
-      setBusy(false);
+      if (mine === run.current) { flush(); setBusy(false); }
     }
   };
 
@@ -196,7 +199,15 @@ export default function Ask() {
     setTimeout(() => setFlash(null), 1600);
   };
 
-  const reset = () => { abort.current?.abort(); setTurns([]); setBusy(false); };
+  const reset = () => {
+    run.current++;
+    window.cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    pending.current = "";
+    abort.current?.abort();
+    setTurns([]);
+    setBusy(false);
+  };
 
   // "Garder dans le wiki": the answer becomes a page (filed in the wiki's queue, a few seconds)
   const patchTurn = (idx: number, fn: (turn: Turn) => Turn) =>

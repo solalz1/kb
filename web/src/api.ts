@@ -493,7 +493,7 @@ export function cleanDetail(item: ItemDetail): ItemDetail {
 }
 
 export const api = {
-  health: () => request<{ ok: boolean; sso_login?: string | null }>("/api/health"),
+  health: () => request<{ ok: boolean; sso_login?: string | null; real_url?: string | null }>("/api/health"),
   items: (params: { q?: string; kind?: string; tag?: string; entity?: string; space?: Space; category?: string;
                     folder?: string; limit?: number; offset?: number; archived?: boolean }) =>
     request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`)

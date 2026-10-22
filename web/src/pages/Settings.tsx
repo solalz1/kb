@@ -74,13 +74,13 @@ function Card({ id, title, children }: { id: string; title: string; children: Re
 }
 
 /** The four tiles' place, kept while their figures arrive: the page doesn't jump when they do. */
-// iPhone (Safari 17.4+): the checkbox is drawn as the system's switch, with its haptic; elsewhere a checkbox.
-const SWITCH = { switch: "" } as Record<string, string>;
+// iPhone and Mac Safari (17.4+): the checkbox is drawn as the system's switch, with its haptic; elsewhere a checkbox.
+const SWITCH = (typeof HTMLInputElement !== "undefined" && "switch" in HTMLInputElement.prototype ? { switch: "" } : {}) as Record<string, string>;
 
 function StatTilesSkeleton() {
   return (
     <section className="stat-tiles" aria-hidden="true">
-      {[0, 1, 2, 3].map((i) => <div key={i}><b><span className="sk" style={{ width: 44, height: 22 }} /></b><span>&nbsp;</span></div>)}
+      {[0, 1, 2, 3].map((i) => <div key={i}><b><span className="sk" style={{ width: 44, height: 26 }} /></b><span>&nbsp;</span></div>)}
     </section>
   );
 }

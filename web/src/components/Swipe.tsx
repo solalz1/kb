@@ -50,7 +50,7 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const hold = useRef(0);
   const cancelHold = () => { window.clearTimeout(hold.current); hold.current = 0; };
-  const closeMenu = useCallback(() => setMenuAt(null), []);
+  const closeMenu = useCallback(() => { cancelHold(); gesture.current = null; setMenuAt(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const menuItems = [...(start ? [{ action: start, side: "start" as const }] : []),
                      ...[...end].reverse().map((action) => ({ action, side: "end" as const }))];
   const setOffset = (x: number) => {

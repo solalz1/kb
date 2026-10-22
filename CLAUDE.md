@@ -146,8 +146,10 @@ update both.
   - **Dev copy** (`motion.ts` `devCopy()`): on a host whose first label ends in `-dev` (or starts with `dev.`), the app
     shows a DEV tag, names itself "KB dev", and Settings give the real KB's address (`realOrigin()`) for the Shortcut
     and the connector. The backend side is `DEV_COPY=true` (or a Railway service named `…-dev`, `config.py`): no
-    worker, no migration, `db_pool_max` ≤ 3, and « Synchroniser maintenant » (Notion, Obsidian) left to the real KB's
-    background work (SETUP.md, step 15; `tests/test_dev_copy.py`). Such a copy must never need a schema change.
+    worker, no migration, `db_pool_max` ≤ 5; digest jobs and « Synchroniser maintenant » (Notion, Obsidian) are
+    forwarded to the real KB (`main._on_the_real_kb`: PUBLIC_BASE_URL + KB_API_TOKEN, `x-kb-forwarded` against loops),
+    and `/api/health` gives the copy the real KB's address (`real_url`). SETUP.md step 15, `tests/test_dev_copy.py`.
+    Such a copy must never need a schema change.
 
 ## Commands
 

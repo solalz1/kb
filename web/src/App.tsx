@@ -8,7 +8,7 @@ import { LangSwitch } from "./components/LangSwitch";
 import { TitleBar } from "./components/TitleBar";
 import { t } from "./i18n";
 import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconPlus, IconSettings, IconTodo, IconWiki } from "./icons";
-import { devCopy, pressFeedback, scrollKey, stepsToRoot, tabOf } from "./motion";
+import { devCopy, pressFeedback, realKb, scrollKey, stepsToRoot, tabOf } from "./motion";
 import { Link, NavLink, useNavigate } from "./nav";
 import { keys, prefetchTabs } from "./queries";
 
@@ -108,7 +108,12 @@ export default function App() {
     let live = true;
     (async () => {
       let reached = false;
-      try { sso.login = (await api.health()).sso_login ?? ""; reached = true; } catch { /* offline: the token form */ }
+      try {
+        const health = await api.health();
+        sso.login = health.sso_login ?? "";
+        realKb.url = health.real_url ?? "";
+        reached = true;
+      } catch { /* offline: the token form */ }
       if (!live || auth.token) return;
       if (!sso.login) { if (reached || !ssoSeen()) { rememberSso(false); setAuthed(false); } return; }
       try { await api.stats(); if (live) { rememberSso(true); setAuthed(true); } }
@@ -154,11 +159,24 @@ export default function App() {
   // what a finger presses answers it once it is clearly a tap (motion.ts)
   useEffect(() => pressFeedback(), []);
 
-  // ⌘K (or Ctrl+K, or / when nothing is being typed), from any page: the search of the feed, as in a Mac app
+  // a phone's keyboard is up (the visible part of the page shrank): the tab bar steps aside (styles.css)
   useEffect(() => {
+    const view = window.visualViewport;
+    if (!view) return;
+    const check = () => document.documentElement.classList.toggle("keyboard", window.innerHeight - view.height > 150);
+    view.addEventListener("resize", check);
+    return () => { view.removeEventListener("resize", check); document.documentElement.classList.remove("keyboard"); };
+  }, []);
+
+  // ⌘K (Ctrl+K off a Mac, or / ), from any page: the search of the feed, as in a Mac app. Never while something is
+  // being typed elsewhere (on a Mac, Ctrl+K deletes to the end of the line; a draft must not be left behind).
+  useEffect(() => {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
     const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true']");
-      const wanted = ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") || (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey);
+      const typing = e.target instanceof Element ? e.target.closest("input, textarea, select, [contenteditable='true']") : null;
+      if (typing && !typing.closest(".search")) return;
+      const command = (mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && e.key.toLowerCase() === "k";
+      const wanted = command || (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey);
       if (!wanted) return;
       e.preventDefault();
       const field = () => document.querySelector<HTMLInputElement>(".main .search input");
@@ -183,6 +201,7 @@ export default function App() {
     : location.pathname === to || location.pathname.startsWith(`${to}/`)));
   const railLens = here >= 0 ? here : opened ? NAV.findIndex(({ to }) => to === tab.current) : -1;
   const onTab = (e: React.MouseEvent, to: string) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;     // a new tab or window: the browser's
     if (location.pathname === to && !location.search) {
       e.preventDefault();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -224,7 +243,7 @@ export default function App() {
       <nav className="tabbar" aria-label="Navigation" style={{ "--i": Math.max(0, lens) } as React.CSSProperties}>
         <span className={`tab-lens${lens < 0 ? " off" : ""}`} aria-hidden="true" />
         {TABS.map(({ to, label, Icon }) => to === "/add"
-          ? <Link key={to} to={to} className={`add${tab.current === to ? " active" : ""}`} aria-label={label} viewTransition={false} replace
+          ? <Link key={to} to={to} className={`add${tab.current === to ? " active" : ""}`} aria-label={label} viewTransition={false}
                   aria-current={tab.current === to ? "page" : undefined}><span><Icon size={24} stroke={2.25} /></span></Link>
           : <Link key={to} to={to} className={tab.current === to ? "active" : undefined} onClick={(e) => onTab(e, to)}
                   viewTransition={false} replace

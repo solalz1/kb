@@ -38,15 +38,22 @@ if (typeof document.startViewTransition === "function") {
 }
 // While a page slides, the browser shows pictures of the pages and every tap lands on <html>, lost. As in an iPhone
 // app, a finger that comes down ends the slide at once, and its tap reaches what is under it.
-document.addEventListener("pointerdown", () => { sliding?.skipTransition(); }, { capture: true });
+let pressedDuringSlide: { x: number; y: number } | null = null;
+document.addEventListener("pointerdown", (e) => {
+  pressedDuringSlide = sliding ? { x: e.clientX, y: e.clientY } : null;
+  sliding?.skipTransition();
+}, { capture: true });
 document.addEventListener("click", (e) => {
-  if (!e.isTrusted || e.target !== document.documentElement) return;
+  const down = pressedDuringSlide;
+  pressedDuringSlide = null;
+  // only the tap that ended the slide, where it started (not a selection dragged across the page)
+  if (!e.isTrusted || e.target !== document.documentElement || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) return;
   const target = document.elementFromPoint(e.clientX, e.clientY)
     ?.closest<HTMLElement>("a[href], button, [role='button'], [role='menuitem'], [role='tab'], label, summary");
   if (!target) return;
   e.preventDefault();
   e.stopPropagation();
-  target.click();
+  target.dispatchEvent(new MouseEvent("click", e));     // the same click, its keys (⌘ for a new tab) and button kept
 }, { capture: true });
 window.addEventListener("unhandledrejection", (e) => {
   const reason = e.reason as { name?: string; message?: string } | null;

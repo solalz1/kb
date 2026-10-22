@@ -141,7 +141,13 @@ img { max-width: 100%; display: block; }
   align-self: center; padding: 3px 6px; border-radius: 6px; background: #c2410c; color: #fff;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; line-height: 1;
 }
-.dev-tag.floating { position: fixed; z-index: 30; top: max(10px, calc(env(safe-area-inset-top) + 4px)); left: 14px; pointer-events: none; }
+.dev-tag.floating {
+  position: fixed; z-index: 30; top: max(10px, calc(env(safe-area-inset-top) + 4px)); right: 14px; pointer-events: none;
+  view-transition-name: dev-tag;
+}
+::view-transition-group(dev-tag) { animation: none; z-index: 11; }
+::view-transition-old(dev-tag) { animation: none; opacity: 0; }
+::view-transition-new(dev-tag) { animation: none; }
 @media (min-width: 900px) { .dev-tag.floating { display: none; } }
 
 /* phone: the page's title, small in a glass bar at the top once the large one has scrolled away (TitleBar.tsx) */
@@ -257,12 +263,10 @@ img { max-width: 100%; display: block; }
   .rail { display: flex; }
   .tabbar { display: none; }
 }
-/* a phone's keyboard is up: the tab bar slides away under it, as in an iPhone app */
-@media (max-width: 899px) and (pointer: coarse) {
+/* a phone's keyboard is up (html.keyboard, App.tsx): the tab bar slides away under it, as in an iPhone app */
+@media (max-width: 899px) {
   .tabbar { transition: transform 0.35s var(--ease-ios), opacity 0.2s; }
-  body:has(:is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), textarea, [contenteditable="true"]):focus) .tabbar {
-    transform: translateY(calc(100% + 24px)); opacity: 0; pointer-events: none;
-  }
+  html.keyboard .tabbar { transform: translateY(calc(100% + 24px)); opacity: 0; pointer-events: none; }
 }
 
 /* ---------- Pages ---------- */
@@ -924,6 +928,8 @@ label.group-row { cursor: pointer; }
 .check-row { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; cursor: pointer; }
 .check-row.top { min-height: 48px; padding-top: 4px; }
 .check-row input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+/* the system switch (Safari, Settings.tsx SWITCH) takes its own size */
+.group-row input[switch], .check-row input[switch] { width: auto; height: auto; }
 .check-row .txt { display: flex; flex-direction: column; gap: 2px; }
 .check-row .txt span { font-size: 13px; color: var(--ink-3); }
 @media (min-width: 900px) {

@@ -9,6 +9,12 @@ export type MenuItem = { id: string; label: string; icon?: ReactNode; danger?: b
  */
 export function ContextMenu({ at, items, onClose }: { at: { x: number; y: number }; items: MenuItem[]; onClose: () => void }) {
   const box = useRef<HTMLDivElement>(null);
+  const opener = useRef<Element | null>(document.activeElement);
+  // keyboard and VoiceOver go back where they were when the menu goes
+  useEffect(() => () => {
+    const el = opener.current;
+    if (el instanceof HTMLElement && el.isConnected && el !== document.body) el.focus({ preventScroll: true });
+  }, []);
   const [place, setPlace] = useState<{ left: number; top: number; origin: string } | null>(null);
 
   useLayoutEffect(() => {
@@ -41,10 +47,14 @@ export function ContextMenu({ at, items, onClose }: { at: { x: number; y: number
     return () => { window.removeEventListener("keydown", key); window.removeEventListener("scroll", scroll); };
   }, [onClose]);
 
+  // A tap outside closes the menu on its click, so that the tap ends on the catcher and opens nothing under it; no
+  // pointer event reaches the card's own gestures (the menu is a child of the card in React's tree).
+  const stop = (e: React.PointerEvent) => e.stopPropagation();
   return createPortal(
     <>
-      <div className="menu-catcher" onPointerDown={(e) => { e.preventDefault(); onClose(); }} onContextMenu={(e) => e.preventDefault()} />
-      <div ref={box} className="menu context" role="menu"
+      <div className="menu-catcher" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onPointerUp={stop}
+           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }} onContextMenu={(e) => e.preventDefault()} />
+      <div ref={box} className="menu context" role="menu" onPointerDown={stop} onPointerUp={stop}
            style={place ? { left: place.left, top: place.top, transformOrigin: place.origin } : { left: at.x, top: at.y, visibility: "hidden" }}>
         {items.map((it) => (
           <button key={it.id} type="button" role="menuitem" className={it.danger ? "danger" : undefined}

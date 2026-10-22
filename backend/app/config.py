@@ -146,7 +146,7 @@ class Settings(BaseSettings):
             self.dev_copy = True
             self.run_worker = False
             self.auto_migrate = False
-            self.db_pool_max = min(self.db_pool_max, 3)
+            self.db_pool_max = min(self.db_pool_max, 5)
         return self
 
     @property

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { cache } from "../cache";
 import { t } from "../i18n";
 import { IconDown, IconSpinner } from "../icons";
-import { EDGE, depth, edgeSwipe, haptic, pageBelow, reducedMotion, skipNextAnimation, standalone, touchScreen, update } from "../motion";
+import { EDGE, edgeSwipe, haptic, pageBelow, reducedMotion, skipNextAnimation, standalone, swipeBackAllowed, touchScreen, update } from "../motion";
 
 const PULL = 72;          // px to pull before letting go refreshes
 const MAX = 120;
@@ -71,6 +71,7 @@ export function PullToRefresh() {
       stop();
       start = null;
       if (reloading || e.touches.length !== 1 || window.scrollY > 0 || ownedElsewhere(e.target)) return;
+      if (edgeSwipe() && e.touches[0].clientX <= EDGE) return;       // the left edge belongs to the swipe back
       start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       pulling = false;
       stop = track(onMove, onEnd);
@@ -143,8 +144,6 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
     let g: { x: number; y: number; t: number; dragging: boolean; lastX: number; lastT: number; v: number } | null = null;
 
     const index = () => (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    // a tab's first screen has nothing to go back to (tabs don't stack, App.tsx)
-    const canGoBack = () => index() > 0 && depth(window.location.pathname) > 0;
     const showBelow = () => {
       const box = under.current;
       const copy = pageBelow(index() - 1);
@@ -170,13 +169,20 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
         under.current.style.transition = animate ? `transform ${ease}` : "none";
         under.current.style.transform = `translateX(${-0.3 * Math.max(0, w - dx)}px)`;
       }
+      // the small title at the top belongs to the page going away: it fades with it
+      const bar = document.querySelector<HTMLElement>(".title-bar");
+      if (bar) {
+        bar.style.transition = animate ? `opacity ${ease}` : "none";
+        bar.style.opacity = dx > 0 ? String(Math.max(0, 1 - (dx / w) * 1.6)) : "";
+      }
     };
 
     let stop = () => {};
     const onStart = (e: TouchEvent) => {
       stop();
       const touch = e.touches[0];
-      g = e.touches.length === 1 && touch.clientX <= EDGE && canGoBack()
+      // one swipe at a time: a second one while the first is still taking the page back would go back twice
+      g = !leaving && e.touches.length === 1 && touch.clientX <= EDGE && swipeBackAllowed()
         ? { x: touch.clientX, y: touch.clientY, t: e.timeStamp, dragging: false, lastX: touch.clientX, lastT: e.timeStamp, v: 0 }
         : null;
       if (g) stop = track(onMove, onEnd);
@@ -203,15 +209,18 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
       if (!g?.dragging) { g = null; return; }
       const dx = g.lastX - g.x;
       const w = window.innerWidth;
-      const go = !cancelled && (dx > w * 0.35 || (dx > 40 && g.v > 0.35));
+      const go = !cancelled && swipeBackAllowed() && (dx > w * 0.35 || (dx > 40 && g.v > 0.35));
       g = null;
-      if (!go) {
-        set(0, true);
-        window.setTimeout(hideBelow, 340);
-        return;
-      }
+      const back = () => { set(0, true); window.setTimeout(hideBelow, 340); };
+      if (!go) { back(); return; }
+      leaving = true;
       set(w, !reducedMotion());
-      window.setTimeout(() => { skipNextAnimation(); onBack(); }, reducedMotion() ? 0 : 230);
+      window.setTimeout(() => {
+        skipNextAnimation();
+        onBack();
+        // the history had nothing to go back to after all: the page comes back instead of staying off screen
+        window.setTimeout(() => { if (leaving) { leaving = false; back(); } }, 600);
+      }, reducedMotion() ? 0 : 230);
     };
     window.addEventListener("touchstart", onStart, { passive: true });
     return () => { window.removeEventListener("touchstart", onStart); stop(); };
@@ -222,6 +231,8 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
     <div className="swipe-shade" ref={shade} aria-hidden="true" />
   </>;
 }
+
+let leaving = false;   // a swipe let go far enough: the page is on its way back
 
 /** The copy of the page below goes once the real one is back (or the swipe was let go). */
 function hideBelow() {
@@ -236,6 +247,9 @@ function hideBelow() {
 export function settleSwipe() {
   const main = mainEl();
   if (!main?.classList.contains("swiping")) return;
+  leaving = false;
+  const bar = document.querySelector<HTMLElement>(".title-bar");
+  if (bar) { bar.style.transition = "none"; bar.style.opacity = ""; }
   main.style.transition = "none";
   main.style.transform = "";
   main.classList.remove("swiping");
