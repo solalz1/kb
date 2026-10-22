@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, streamChat, type AskSource, type ChatMode, type ItemDetail, type SourceCard } from "../api";
 import { cache, useQuery } from "../cache";
@@ -11,6 +11,7 @@ import { keys } from "../queries";
 import { renderAnswer } from "../markdown";
 import { headLabel } from "../perso";
 import { sectionLabel } from "../wiki";
+import { Toast } from "../components/Toast";
 
 type Mode = ChatMode;
 interface Turn {
@@ -71,6 +72,13 @@ const MODES: { id: Mode; label: string; short: string; tag: string; title: strin
     placeholder: t("Décris la situation ou la décision…") },
 ];
 
+/** An answer's Markdown, parsed once per change of its text: earlier answers aren't parsed again while one streams. */
+function AnswerBody({ content, onActivate }: { content: string; onActivate: (e: React.MouseEvent | React.KeyboardEvent) => void }) {
+  const html = useMemo(() => renderAnswer(content), [content]);
+  return <div className="answer" role="article" onClick={onActivate} onKeyDown={(e) => e.key === "Enter" && onActivate(e)}
+              dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 export default function Ask() {
   const [params] = useSearchParams();
   const desktop = useDesktop();
@@ -91,6 +99,11 @@ export default function Ask() {
   const setSource = (v: AskSource) => { setSourceState(v); saveSource(v); };
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  // Streamed text is shown once per frame, and the page follows it down while you are at the bottom (scroll up to
+  // read and it stops following), as in Messages.
+  const pending = useRef("");
+  const frame = useRef(0);
+  const follow = useRef(false);
   const box = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { saved = { turns, mode }; }, [turns, mode]);
@@ -118,6 +131,21 @@ export default function Ask() {
 
   const patchLast = (fn: (turn: Turn) => Turn) =>
     setTurns((prev) => [...prev.slice(0, -1), fn(prev[prev.length - 1])]);
+  const flush = () => {
+    window.cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    const text = pending.current;
+    if (!text) return;
+    pending.current = "";
+    const doc = document.documentElement;
+    follow.current = window.innerHeight + window.scrollY >= doc.scrollHeight - 160;
+    patchLast((x) => ({ ...x, content: x.content + text, status: undefined }));
+  };
+  useLayoutEffect(() => {
+    if (!follow.current) return;
+    follow.current = false;
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  }, [turns]);
 
   const send = async (text = input) => {
     const content = text.trim();
@@ -138,17 +166,23 @@ export default function Ask() {
     abort.current = new AbortController();
     try {
       await streamChat({ messages, mode, model: model || undefined, source: from }, (e) => {
+        if (e.type === "delta") {
+          pending.current += e.text;
+          if (!frame.current) frame.current = window.requestAnimationFrame(flush);
+          return;
+        }
+        flush();          // what came before this event shows first
         if (e.type === "status") patchLast((x) => ({ ...x, status: tServer(e.text) }));
         if (e.type === "fallback") patchLast((x) => ({ ...x, source: e.source }));
         if (e.type === "plan") patchLast((x) => ({ ...x, plan: e.queries, status: t("Je croise les résultats…") }));
         if (e.type === "sources") patchLast((x) => ({ ...x, sources: e.sources, status: e.sources.length ? t("Je rédige…") : t("Je rédige (rien de pertinent trouvé)…") }));
-        if (e.type === "delta") patchLast((x) => ({ ...x, content: x.content + e.text, status: undefined }));
         if (e.type === "error") patchLast((x) => ({ ...x, error: e.text, status: undefined }));
         if (e.type === "done") patchLast((x) => ({ ...x, done: true, status: undefined }));
       }, abort.current.signal);
     } catch (err) {
       if ((err as Error).name !== "AbortError") patchLast((x) => ({ ...x, error: (err as Error).message, status: undefined }));
     } finally {
+      flush();
       setBusy(false);
     }
   };
@@ -262,11 +296,7 @@ export default function Ask() {
             <div key={i} className="turn">
               {turn.plan && turn.plan.length > 0 && <p className="plan">{t("Pistes explorées :")} {turn.plan.join(" · ")}</p>}
               {turn.status && <div className="status-line"><IconSpinner /> {turn.status}</div>}
-              {turn.content && (
-                <div className="answer" role="article"
-                     onClick={(e) => onAnswerClick(e, i)} onKeyDown={(e) => e.key === "Enter" && onAnswerClick(e, i)}
-                     dangerouslySetInnerHTML={{ __html: renderAnswer(turn.content) }} />
-              )}
+              {turn.content && <AnswerBody content={turn.content} onActivate={(e) => onAnswerClick(e, i)} />}
               {turn.error && <div className="error-box">{turn.error}</div>}
               {turn.done && turn.model && (
                 <p className="answered-by">{t("Réponse de {model}", { model: turn.model })}
@@ -342,7 +372,7 @@ export default function Ask() {
           </p>
         )}
       </div>
-      {notice && <div className="toast" role="status">{notice}</div>}
+      <Toast>{notice}</Toast>
     </div>
   );
 }

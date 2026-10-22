@@ -16,7 +16,7 @@ Partage n'importe quoi depuis ton iPhone ou ton Mac (un tweet ou un thread, un a
 - **Digest tech du matin** (facultatif) : Hacker News, les papiers Hugging Face, les dépôts GitHub qui montent, des blogs et les personnes que tu suis sur X, classés selon ce que tu sauvegardes. Le lundi, la semaine en bref et des idées de projets.
 - **Dans Claude** : un connecteur (MCP) permet à Claude de chercher et de lire ta KB sur le web, l'ordinateur, le téléphone et dans Claude Code.
 - **Jamais enfermé** : une copie dans Notion tenue à jour (facultative), et un export Markdown complet (prêt pour Obsidian) avec tes fichiers d'origine.
-- **Pensé pour le téléphone** : une app à installer qui se comporte comme une app, en français ou en anglais. Les pages glissent, celles où tu reviens sont là tout de suite (tire vers le bas pour recharger), les barres sont en Liquid Glass d'Apple, un glissement depuis le bord de l'écran revient en arrière et un glissement sur une fiche l'épingle, l'archive ou la supprime. Elle te montre ce que coûte chaque service, mois par mois.
+- **Pensé pour le téléphone** : une app à installer qui se comporte comme une app, en français ou en anglais. Les pages glissent, celles où tu reviens sont là tout de suite (tire vers le bas pour actualiser, sur place), les barres sont en Liquid Glass d'Apple, le titre d'une page se replie dans une barre de verre quand tu fais défiler, un glissement depuis le bord de l'écran revient en arrière, un glissement sur une fiche l'épingle, l'archive ou la supprime avec un petit retour haptique, et ce que tu touches répond à ton doigt, pas au début d'un défilement. Elle te montre ce que coûte chaque service, mois par mois.
 
 ## Ce qu'il te faut
 

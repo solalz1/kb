@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ItemDetail } from "../api";
 import { localized, t } from "../i18n";
 
@@ -39,6 +39,16 @@ function TweetEmbed({ id }: { id: string }) {
   return <div ref={ref} />;
 }
 
+/** An image that holds its place while it loads (nothing under it jumps), then fades in. */
+function LoadingImage({ src, alt }: { src: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <span className={`img-box${loaded ? " loaded" : ""}`}>
+      <img src={src} alt={alt} decoding="async" onLoad={() => setLoaded(true)} onError={() => setLoaded(true)} />
+    </span>
+  );
+}
+
 export function Embed({ item }: { item: ItemDetail }) {
   const m = item.metadata || {};
   const { title } = localized(item);
@@ -51,7 +61,7 @@ export function Embed({ item }: { item: ItemDetail }) {
       </div>
     );
   }
-  if (item.file_url && item.kind === "image") return <div className="embed"><img src={item.file_url} alt={title ?? ""} /></div>;
+  if (item.file_url && item.kind === "image") return <div className="embed"><LoadingImage src={item.file_url} alt={title ?? ""} /></div>;
   if (item.file_url && item.kind === "video") return <div className="embed"><video src={item.file_url} controls preload="metadata" /></div>;
   if (item.file_url && item.kind === "audio") return <div className="embed"><audio src={item.file_url} controls preload="metadata" /></div>;
   return null;

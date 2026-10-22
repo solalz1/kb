@@ -116,6 +116,14 @@ export const cache = {
     }
     emit();
   },
+  /** Pull to refresh: everything is checked again, and this resolves once what the page shows came back (at most
+   *  `max` ms), so the spinner stays until then. Nothing is emptied: the page keeps showing what it had meanwhile. */
+  async refreshShown(max = 8_000): Promise<void> {
+    cache.staleAll();
+    await new Promise((r) => window.setTimeout(r, 80));       // the pages on screen start their requests
+    const running = [...inflight.entries()].filter(([key]) => shownKeys.has(key)).map(([, v]) => v.promise.catch(() => {}));
+    await Promise.race([Promise.all(running), new Promise((r) => window.setTimeout(r, max))]);
+  },
   /** A change is being sent to the API (api.ts). Returns what to hand to changeDone. */
   changeStarted(): number {
     const id = ++requests;

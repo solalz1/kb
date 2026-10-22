@@ -53,7 +53,7 @@ export default function Settings() {
       <SectionNav />
       <div className="settings-cards">
         <Card id="langue" title={t("Langue")}><SectionBody id="langue" origin={origin} onLogout={onLogout} /></Card>
-        {stats && <StatTiles stats={stats} all />}
+        {stats ? <StatTiles stats={stats} all /> : <StatTilesSkeleton />}
         {stats && stats.by_kind.length > 0 && (
           <p className="hint stats-note">{stats.by_kind.map((k) => `${k.n} ${((k.n > 1 ? KINDS[k.kind]?.plural : KINDS[k.kind]?.label) ?? k.kind).toLowerCase()}`).join(", ")}</p>
         )}
@@ -70,6 +70,18 @@ export default function Settings() {
 
 function Card({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return <section className="card" id={id}><h2>{title}</h2>{children}</section>;
+}
+
+/** The four tiles' place, kept while their figures arrive: the page doesn't jump when they do. */
+// iPhone (Safari 17.4+): the checkbox is drawn as the system's switch, with its haptic; elsewhere a checkbox.
+const SWITCH = { switch: "" } as Record<string, string>;
+
+function StatTilesSkeleton() {
+  return (
+    <section className="stat-tiles" aria-hidden="true">
+      {[0, 1, 2, 3].map((i) => <div key={i}><b><span className="sk" style={{ width: 44, height: 22 }} /></b><span>&nbsp;</span></div>)}
+    </section>
+  );
 }
 
 function StatTiles({ stats, all = false }: { stats: Stats; all?: boolean }) {
@@ -109,17 +121,17 @@ function PhoneSettings({ stats, origin, onLogout }: { stats: Stats | null; origi
     <div className="page tight">
       <Link className="back" to="/"><IconBack size={20} /> {t("Veille")}</Link>
       <h1 className="title">{t("Réglages")}</h1>
-      {stats && <StatTiles stats={stats} />}
+      {stats ? <StatTiles stats={stats} /> : <StatTilesSkeleton />}
       <div className="group">
         <div className="group-row"><span className="txt"><b>{t("Langue")}</b></span><LangSwitch /></div>
         <label className="group-row">
           <span className="txt"><b>{t("Réflexion de Claude")}</b><span>{t("Réfléchir avant de répondre")}</span></span>
-          <input type="checkbox" checked={thinking ?? true} disabled={thinking === null} onChange={(e) => toggleThinking(e.target.checked)}
+          <input type="checkbox" {...SWITCH} checked={thinking ?? true} disabled={thinking === null} onChange={(e) => toggleThinking(e.target.checked)}
                  aria-label={t("Laisser Claude réfléchir avant de répondre")} />
         </label>
         <label className="group-row">
           <span className="txt"><b>{t("Ouvrir dans l'app Claude pour Mac")}</b><span>{t("À laisser décoché sur iPhone")}</span></span>
-          <input type="checkbox" checked={desktopApp} onChange={(e) => { claudePrefs.desktop = e.target.checked; setDesktopApp(e.target.checked); }} />
+          <input type="checkbox" {...SWITCH} checked={desktopApp} onChange={(e) => { claudePrefs.desktop = e.target.checked; setDesktopApp(e.target.checked); }} />
         </label>
       </div>
       <nav className="group" aria-label={t("Sections des réglages")}>
@@ -186,7 +198,7 @@ function Thinking() {
   return (
     <>
       <label className="check-row">
-        <input type="checkbox" checked={thinking ?? true} disabled={thinking === null} onChange={(e) => toggle(e.target.checked)} />
+        <input type="checkbox" {...SWITCH} checked={thinking ?? true} disabled={thinking === null} onChange={(e) => toggle(e.target.checked)} />
         <span>{t("Laisser Claude réfléchir avant de répondre")}</span>
       </label>
       <p className="hint" style={{ fontSize: 14 }}>{t("Pour les réponses du chat, le digest et la lecture des PDF scannés et des vidéos : plus solide, un peu plus lent et plus cher. Décoché, Haiku 5.5 et Sonnet 5.5 répondent directement ; Opus 5.5 et Fable 5.1 réfléchissent toujours.")}</p>
@@ -227,7 +239,7 @@ function Connector({ origin }: { origin: string }) {
       <code className="code">{origin}/mcp/{t("TON_SECRET_MCP")}</code>
       <p className="hint">{t("Tu pourras alors interroger ta KB depuis Claude sur iPhone, Mac et le web, et depuis Claude Code.")}</p>
       <label className="check-row top">
-        <input type="checkbox" checked={desktopApp} onChange={(e) => { claudePrefs.desktop = e.target.checked; setDesktopApp(e.target.checked); }} />
+        <input type="checkbox" {...SWITCH} checked={desktopApp} onChange={(e) => { claudePrefs.desktop = e.target.checked; setDesktopApp(e.target.checked); }} />
         <span className="txt"><span style={{ fontSize: 15, color: "var(--ink)" }}>{t("Ouvrir « Demander dans Claude » dans l'app Claude pour Mac plutôt que dans le navigateur")}</span>
           <span>{t("Réglage propre à cet appareil. À laisser décoché sur iPhone.")}</span></span>
       </label>

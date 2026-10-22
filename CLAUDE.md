@@ -126,8 +126,17 @@ update both.
   - **Liquid Glass**: the tab bar is a floating glass capsule whose lens slides to the current tab (`--i`), the desktop
     sidebar a floating glass pane; toasts, menus and the composer are glass too (`--glass*` tokens). Hover styles live
     in `@media (hover: hover)`; pressed controls scale down with a spring.
-  - **Installed app gestures** (`components/Gestures.tsx`, standalone + touch only): pull down from the top to reload,
-    swipe from the left edge (`EDGE`) to go back; `SwipeRow` ignores touches starting in that edge.
+  - **Installed app gestures** (`components/Gestures.tsx`, standalone + touch only): pull down from the top to refresh in
+    place (`cache.refreshShown()`: what the page shows is asked for again, the spinner turns until it is back, nothing
+    reloads), swipe from the left edge (`EDGE`) to go back; `SwipeRow` ignores touches starting in that edge.
+  - **Feel** (`motion.ts`): `pressFeedback()` (installed once in `App`) sets `.is-pressed` on what a finger presses only
+    once the touch is clearly a tap, not the start of a scroll (a mouse uses `:active` under `@media (pointer: fine)`);
+    `haptic()` ticks under the finger (iOS 18+: the system switch's haptic) when a gesture is about to act (a long card
+    swipe, the pull to refresh). Phone pages get `components/TitleBar.tsx`: once the page's `h1` has scrolled under the
+    top of the screen, a glass bar shows it small (tap: back to the top).
+  - **Dev copy** (`motion.ts` `devCopy()`): on a host whose first label ends in `-dev` (or starts with `dev.`), the app
+    shows a DEV tag and names itself "KB dev". Such a copy runs with `RUN_WORKER=false` and `AUTO_MIGRATE=false`
+    (SETUP.md, step 15): it must never need a schema change.
 
 ## Commands
 

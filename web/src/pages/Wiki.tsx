@@ -10,6 +10,7 @@ import { Link } from "../nav";
 import { obsidianOpen, obsidianSearch } from "../obsidian";
 import { keys } from "../queries";
 import { KIND_LABEL, SECTIONS } from "../wiki";
+import { Toast } from "../components/Toast";
 
 type View = "pages" | "journal";
 
@@ -161,7 +162,7 @@ export default function Wiki() {
       ) : (
         <PageList pages={pages} grouped={!section && !filter.trim()} />
       )}
-      {notice && <div className="toast" role="status">{notice}</div>}
+      <Toast>{notice}</Toast>
     </div>
   );
 }

@@ -202,6 +202,26 @@ Comment les deux côtés se rejoignent :
 
 Dans Claude, le connecteur a aussi le wiki : `wiki_index`, `read_wiki_page`, `search_wiki`, et `write_wiki_page` quand tu demandes à Claude de garder une analyse dans ton wiki.
 
+## 15. Essayer une nouvelle version sur une copie avant de la mettre en prod (facultatif)
+
+Une modification qui attend sur une branche (une nouvelle interface, par exemple) peut s'utiliser pour de vrai, sur ton téléphone, avant d'arriver dans ta KB : un deuxième service Railway, la **copie dev**, sert l'app de cette branche à sa propre adresse, avec les mêmes données, pendant que ta KB continue de faire tout le travail de fond.
+
+1. Railway → ton projet → **+ Create** → **GitHub Repo** → ton fork. Le premier déploiement du nouveau service ne peut rien faire (il n'a pas encore de variables) : laisse-le échouer.
+2. Le nouveau service → **Settings** : nomme-le `kb-dev` et, dans **Source**, choisis la branche à essayer.
+3. Ton service KB → **Variables → Raw Editor** → copie tout. `kb-dev` → **Variables → Raw Editor** → colle, puis mets ces trois lignes et déploie :
+
+   ```
+   RUN_WORKER=false
+   AUTO_MIGRATE=false
+   PUBLIC_BASE_URL=https://kb-dev.example.com
+   ```
+
+   `RUN_WORKER=false` limite la copie à l'app et à l'API : les traitements, le wiki, le digest et la copie Notion restent à ta KB, faits une seule fois. Un élément ajouté depuis la copie est traité par ta KB en quelques secondes. `AUTO_MIGRATE=false` : la copie ne touche jamais au schéma, donc n'essaie ainsi que des branches qui ne le changent pas (`supabase/migrations/` intact).
+4. **Settings → Networking → Custom Domain** → `kb-dev.example.com` (un sous-domaine du même domaine, pour que la connexion commune de l'étape 13 y marche aussi), avec son CNAME et son TXT comme à l'étape 3.
+5. `https://kb-dev.example.com/api/health` répond `"ok": true, "schema": "off"`. Sur une adresse dont la première partie finit par `-dev` (ou qui commence par `dev.`), l'app affiche un badge orange **DEV** et se nomme « KB dev » : son icône sur l'écran d'accueil ne se confond pas avec la vraie.
+
+Chaque modification poussée sur la branche redéploie la copie. Pour mettre la nouveauté en prod, fusionne la branche : ta KB se redéploie. Ensuite, supprime `kb-dev` (Settings → Delete service) et son enregistrement DNS, ou fais-lui suivre la branche suivante.
+
 ## Dépannage
 
 | Symptôme | Cause probable |

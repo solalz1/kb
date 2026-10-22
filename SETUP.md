@@ -201,6 +201,26 @@ How the two sides meet:
 
 In Claude, the connector has the wiki too: `wiki_index`, `read_wiki_page`, `search_wiki`, and `write_wiki_page` when you ask Claude to keep an analysis in your wiki.
 
+## 15. Try a new version on a copy before shipping it (optional)
+
+A change waiting on a branch (a new interface, say) can be used for real, on your phone, before it reaches your KB: a second Railway service, the **dev copy**, serves that branch's app on its own address, with the same data, while your KB keeps doing all the background work.
+
+1. Railway → your project → **+ Create** → **GitHub Repo** → your fork. The new service's first deploy can't do anything yet (it has no variables): let it fail.
+2. The new service → **Settings**: name it `kb-dev`, and under **Source** pick the branch to try.
+3. Your KB service → **Variables → Raw Editor** → copy everything. `kb-dev` → **Variables → Raw Editor** → paste, then set these three and deploy:
+
+   ```
+   RUN_WORKER=false
+   AUTO_MIGRATE=false
+   PUBLIC_BASE_URL=https://kb-dev.example.com
+   ```
+
+   `RUN_WORKER=false` keeps the copy to the app and the API: processing, the wiki, the digest and the Notion copy stay with your KB, run once. An item added from the copy is processed by your KB within seconds. `AUTO_MIGRATE=false`: the copy never touches the schema, so only try branches that don't change it (`supabase/migrations/` untouched).
+4. **Settings → Networking → Custom Domain** → `kb-dev.example.com` (a sub-domain of the same domain, so that a shared sign-in, step 13, works there too), with its CNAME and TXT records as in step 3.
+5. `https://kb-dev.example.com/api/health` answers `"ok": true, "schema": "off"`. On an address whose first part ends in `-dev` (or starts with `dev.`), the app shows an orange **DEV** tag and names itself "KB dev", so its home-screen icon is never mistaken for the real one.
+
+Every push to the branch redeploys the copy. To ship the change, merge the branch: your KB redeploys. Then delete `kb-dev` (Settings → Delete service) and its DNS record, or point it at the next branch.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

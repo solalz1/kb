@@ -7,6 +7,8 @@ import { IconClip, IconSpinner } from "../icons";
 import { Link, useNavigate } from "../nav";
 import { CATEGORIES } from "../perso";
 import { keys } from "../queries";
+import { Toast } from "../components/Toast";
+import { canGoBack } from "../motion";
 
 export default function Add() {
   const [params] = useSearchParams();
@@ -80,7 +82,7 @@ export default function Add() {
   return (
     <form className="page roomy add-page" onSubmit={submit}>
       <div className="add-top">
-        <button type="button" className="back" onClick={() => (history.length > 1 ? nav(-1) : nav("/"))}>{t("Annuler")}</button>
+        <button type="button" className="back" onClick={() => (canGoBack() ? nav(-1) : nav("/"))}>{t("Annuler")}</button>
         <button className="btn primary" type="submit" disabled={busy}>
           {busy && <IconSpinner size={15} />}
           {progress === null ? t("Ajouter") : progress < 1 ? t("Envoi… {pct} %", { pct: Math.round(progress * 100) }) : t("Enregistrement…")}
@@ -162,11 +164,7 @@ export default function Add() {
       </div>
       <p className="hint">{t("Pour un texte long, ")}<Link to={`/note/new${space === "perso" ? "" : "?space=main"}`}>{t("écris une note")}</Link>.</p>
 
-      {done && (
-        <div className="toast" role="status">
-          {done.message} <Link to={`/item/${done.id}`}>{t("Voir")}</Link>
-        </div>
-      )}
+      <Toast id={done?.id}>{done && <>{done.message} <Link to={`/item/${done.id}`}>{t("Voir")}</Link></>}</Toast>
     </form>
   );
 }

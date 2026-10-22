@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { EDGE, edgeSwipe } from "../motion";
+import { EDGE, edgeSwipe, haptic } from "../motion";
 
 /** One action revealed behind a card. */
 export type SwipeAction = {
@@ -165,6 +165,8 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
 
   const armedEnd = end.length > 0 && offset < -longEnd();
   const armedStart = !!start && offset > longStart();
+  // a tick under the finger the moment a long swipe will run the action, as in Mail
+  useEffect(() => { if (dragging && (armedEnd || armedStart)) haptic(); }, [dragging, armedEnd, armedStart]);
   const shown = (side: "start" | "end") => open === side || (side === "start" ? offset > 0 : offset < 0);
 
   return (

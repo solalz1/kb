@@ -119,4 +119,5 @@ export default {
     "The rest of the app still works. Go back, or reload the page.",
   "Revenir en arrière": "Go back",
   "Recharger": "Reload",
+  "{title} : revenir en haut": "{title}: back to top",
 } as Record<string, string>;

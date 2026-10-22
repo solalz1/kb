@@ -9,6 +9,7 @@ import { IconClose, IconDown, IconSpinner } from "../icons";
 import { useDesktop } from "../layout";
 import { Link, useNavigate } from "../nav";
 import { keys } from "../queries";
+import { Toast } from "../components/Toast";
 
 // Same order as backend/app/digest/render.py: from the most general to the most technical.
 const SECTIONS: [string, string][] = [
@@ -275,7 +276,7 @@ export default function Digest() {
         )}
         {!desktop && <div className="btn-row">{tools}</div>}
       </div>
-      {toast && <div className="toast" role="status">{toast}</div>}
+      <Toast>{toast}</Toast>
     </div>
   );
 }

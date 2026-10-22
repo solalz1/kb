@@ -839,8 +839,8 @@ def test_pages_come_back_from_memory_and_slide(site):
 
 
 def test_installed_app_gestures(site):
-    """In the app installed on an iPhone (no browser bar): pulling the page down from its top reloads it, and a finger
-    from the left edge of the screen takes a page back."""
+    """In the app installed on an iPhone (no browser bar): pulling the page down from its top refreshes it in place
+    (nothing reloads or blanks), and a finger from the left edge of the screen takes a page back."""
     page = site("/", touch=True)
     _seed(page)
     page.context.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true });")
@@ -855,16 +855,17 @@ def test_installed_app_gestures(site):
                                                   "touchPoints": [{"x": x0 + dx * i / steps, "y": y0 + dy * i / steps}]})
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
 
-    # a short pull springs back; a long one reloads
+    # a short pull springs back; a long one asks for the page again, the spinner turning until it is back
     page.evaluate("window.__stayed = true")
     drag(200, 300, 0, 60)
     page.wait_for_timeout(500)
     assert page.evaluate("window.__stayed") is True
     assert page.locator(".main").evaluate("el => el.style.transform") == ""
-    with page.expect_event("load"):
+    with page.expect_request(lambda r: "/api/items?" in r.url):
         drag(200, 300, 0, 260)
+    page.wait_for_function("() => document.querySelector('.main').style.transform === ''")
     expect(page.locator(".fiche")).to_have_count(1)
-    assert page.evaluate("window.__stayed") is None
+    assert page.evaluate("window.__stayed") is True          # the same page: nothing reloaded
 
     # from the left edge, a finger drags the item page away, back to the feed
     page.locator(".fiche").first.click()
@@ -880,6 +881,104 @@ def test_installed_app_gestures(site):
     drag(120, 420, 200, 4)
     page.wait_for_timeout(500)
     expect(page.locator(".item-title")).to_be_visible()
+
+
+def test_edge_swipe_shows_the_page_below(site):
+    """In the installed app, the page a finger drags away from the left edge uncovers the page it goes back to (a still
+    copy of it, where it was scrolled), as on an iPhone; the copy goes once the real page is back."""
+    from app import db
+
+    for i in range(10):
+        db.execute("insert into items (kind, title, summary, status) values ('article', %s, 'Un résumé.', 'ready')",
+                   (f"Lecture {i:02d}",))
+    page = site("/", touch=True)
+    page.context.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true });")
+    page.reload()
+    expect(page.locator(".fiche")).to_have_count(10)
+    page.evaluate("window.scrollTo(0, 500)")
+    page.locator(".fiche", has_text="Lecture 03").click()
+    expect(page.locator(".item-title")).to_have_text("Lecture 03")
+    _settled(page)
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": 6, "y": 420}]})
+    for i in range(1, 8):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 6 + i * 15, "y": 420}]})
+    under = page.locator(".swipe-under")
+    expect(under).to_be_visible()
+    expect(under.locator(".main-copy .fiche", has_text="Lecture 03")).to_have_count(1)
+    assert page.get_by_role("heading", name="Veille", exact=True).count() == 0    # the copy is never read out
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 300, "y": 420}]})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    expect(under).to_be_hidden()
+    assert under.evaluate("el => el.children.length") == 0
+    page.wait_for_function("() => Math.abs(window.scrollY - 500) < 4")
+
+
+def test_tabs_dont_stack_and_bring_their_first_screen_back(site):
+    """Tabs are switched at once and don't pile up in the history (a swipe back on a tab's first screen goes nowhere);
+    the tab you're in, tapped from a page opened in it, goes back to its first screen."""
+    page = site("/", touch=True)
+    _seed(page)
+    page.reload()
+    expect(page.locator(".fiche")).to_have_count(1)
+    start = page.evaluate("history.state.idx")
+    page.locator(".tabbar").get_by_role("link", name="Perso").click()
+    expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+    page.locator(".tabbar").get_by_role("link", name="Veille").click()
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    assert page.evaluate("history.state.idx") == start
+    page.locator(".fiche").first.click()
+    expect(page.locator(".item-title")).to_be_visible()
+    _settled(page)
+    page.locator(".tabbar").get_by_role("link", name="Veille").click()
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    assert page.evaluate("history.state.idx") == start
+    assert page.evaluate("document.documentElement.dataset.nav") == "back"
+
+
+def test_title_folds_into_a_bar_on_a_phone(site):
+    """On a phone, once a page's title has scrolled away, a glass bar at the top shows it small with the page's way
+    back; a tap on the title goes back to the top, and the way back works from there."""
+    from app import db
+
+    db.execute("insert into items (kind, title, summary, content, status) values ('article', 'Un long article', 'Un résumé.', %s, 'ready')",
+               ("Un paragraphe. " * 400,))
+    page = site("/")
+    expect(page.locator(".fiche")).to_have_count(1)
+    expect(page.locator(".title-bar.shown")).to_have_count(0)
+    page.locator(".fiche").first.click()
+    expect(page.locator(".item-title")).to_have_text("Un long article")
+    _settled(page)
+    page.evaluate("window.scrollTo(0, 700)")
+    bar = page.locator(".title-bar.shown")
+    expect(bar.locator(".compact-title")).to_have_text("Un long article")
+    bar.locator(".compact-title").click()
+    page.wait_for_function("() => window.scrollY === 0")
+    expect(page.locator(".title-bar.shown")).to_have_count(0)
+    page.evaluate("window.scrollTo(0, 700)")
+    page.locator(".title-bar .compact-back").click()
+    expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
+    desk = site("/", viewport=DESKTOP)
+    desk.evaluate("window.scrollTo(0, 700)")
+    expect(desk.locator(".title-bar")).to_be_hidden()
+
+
+def test_keys_and_taps_answer_at_once(site):
+    """⌘K opens the feed's search from any page on a computer; a tap made while a page is still sliding in is not
+    lost."""
+    page = site("/wiki", viewport=DESKTOP)
+    expect(page.get_by_role("heading", name="Wiki", exact=True)).to_be_visible()
+    page.keyboard.press("Control+k")
+    expect(page.locator(".main .search input")).to_be_focused()
+    phone = site("/", touch=True)
+    _seed(phone)
+    phone.reload()
+    expect(phone.locator(".fiche")).to_have_count(1)
+    phone.locator(".fiche").first.click()
+    phone.wait_for_url(re.compile(r"/item/"))
+    phone.locator(".tabbar").get_by_role("link", name="Perso").click()        # right away, the page still sliding
+    expect(phone.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
 
 
 def test_ticked_actions_stay_in_place_and_a_deleted_item_goes(site):

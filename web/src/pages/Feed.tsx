@@ -13,10 +13,11 @@ import { useFlip } from "../motion";
 import { Link, useNavigate } from "../nav";
 import { CATEGORIES, categoryOf } from "../perso";
 import { dropItem, fetchItems, fetchMore, forgetItem, keys, patchItem, type ItemsPage, type ItemsQuery } from "../queries";
+import { Toast } from "../components/Toast";
 
 const UNDO_MS = 5000;     // how long the undo button stays, and how long a deletion waits before it happens
 
-type Toast = { id: number; message: string; undo?: () => void };
+type Notice = { id: number; message: string; undo?: () => void };
 
 /** Veille, Perso, or one folder (`/folders/:folderId`, any space). Everything comes from the cache (cache.ts): coming
  *  back to the feed shows it at once, where it was. */
@@ -37,7 +38,7 @@ export default function Feed({ space }: { space?: Space }) {
   const [actionError, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [opened, setOpened] = useState<{ id: string; side: SwipeSide } | null>(null);
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [toast, setToast] = useState<Notice | null>(null);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());     // deleted, waiting for the undo to pass
   const [more, setMore] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
@@ -48,15 +49,6 @@ export default function Feed({ space }: { space?: Space }) {
     const timer = setTimeout(() => setQuery(q.trim()), 350);
     return () => clearTimeout(timer);
   }, [q]);
-
-  // ⌘K / Ctrl+K: the search field
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchBox.current?.focus(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const filters: ItemsQuery = {
     q: query || undefined, kind: kind ? kindsOf(kind) : undefined, tag: tag || undefined, entity: entity || undefined,
@@ -389,12 +381,12 @@ export default function Feed({ space }: { space?: Space }) {
           </div>
         )}
 
-        {toast && (
-          <div className="toast" role="status" key={toast.id}>
+        <Toast id={toast?.id}>
+          {toast && <>
             <span>{toast.message}</span>
             {toast.undo && <button type="button" className="toast-undo" onClick={() => { toast.undo?.(); setToast(null); }}>{t("Annuler|undo")}</button>}
-          </div>
-        )}
+          </>}
+        </Toast>
       </div>
 
       {!inFolder && !archived && (

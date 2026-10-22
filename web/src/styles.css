@@ -47,6 +47,7 @@
   --lens: color-mix(in srgb, var(--surface) 70%, rgba(234, 223, 207, 0.6));
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);       /* the curve of an iPhone page push */
   --spring: cubic-bezier(0.34, 1.32, 0.5, 1);        /* a little overshoot, like a spring settling */
+  --edge-shadow: -10px 0 30px rgba(43, 34, 25, 0.14);  /* the left edge of a page sliding over another */
   /* the floating tab bar: its height, its gap to the screen's bottom, and the room pages leave under their content */
   --tabbar-h: 64px;
   --tabbar-gap: max(10px, calc(env(safe-area-inset-bottom) - 14px));
@@ -83,6 +84,7 @@
     --glass-lo: rgba(255, 255, 255, 0.04);
     --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
     --lens: rgba(255, 255, 255, 0.1);
+    --edge-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
     color-scheme: dark;
   }
 }
@@ -126,13 +128,52 @@ img { max-width: 100%; display: block; }
   display: none; flex: 0 0 236px; flex-direction: column; gap: 6px;
   position: sticky; top: 12px; height: calc(100dvh - 24px); align-self: flex-start; margin: 12px 0 12px 12px;
   padding: 26px 14px 18px; border-radius: 26px;
-  background: var(--glass); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  /* nothing ever scrolls under the sidebar: the frosted colour itself, without a full-height blur on every frame */
+  background: color-mix(in srgb, var(--surface) 58%, var(--desk));
   border: 1px solid var(--glass-rim); box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
   view-transition-name: rail;
 }
 .brand { display: flex; align-items: baseline; gap: 8px; padding: 0 12px 20px; color: var(--ink); white-space: nowrap; }
 .brand b { font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
 .brand small { font-size: 13px; color: var(--ink-3); }
+/* a copy of the app to try a new version on (motion.ts devCopy): never mistaken for the real one */
+.dev-tag {
+  align-self: center; padding: 3px 6px; border-radius: 6px; background: #c2410c; color: #fff;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; line-height: 1;
+}
+.dev-tag.floating { position: fixed; z-index: 30; top: max(10px, calc(env(safe-area-inset-top) + 4px)); left: 14px; pointer-events: none; }
+@media (min-width: 900px) { .dev-tag.floating { display: none; } }
+
+/* phone: the page's title, small in a glass bar at the top once the large one has scrolled away (TitleBar.tsx) */
+.title-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 15; height: calc(env(safe-area-inset-top) + 46px);
+  padding: env(safe-area-inset-top) 96px 0; display: flex; align-items: center; justify-content: center;
+  pointer-events: none; view-transition-name: title-bar;
+}
+.title-bar::before {
+  content: ""; position: absolute; inset: 0; opacity: 0; transition: opacity 0.22s;
+  background: color-mix(in srgb, var(--desk) 90%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8);
+  border-bottom: 0.5px solid var(--line);
+}
+.title-bar.shown::before { opacity: 1; }
+.title-bar.shown { pointer-events: auto; }
+.compact-title {
+  position: relative; max-width: 100%; border: 0; background: none; padding: 8px 4px; color: var(--ink);
+  font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: title-in 0.24s var(--ease-ios) both; transition: opacity 0.2s;
+}
+@keyframes title-in { from { opacity: 0; transform: translateY(5px); } }
+.compact-back {
+  position: absolute; left: 6px; bottom: 0; height: 46px; max-width: calc(50% - 70px); display: inline-flex; align-items: center; gap: 4px;
+  border: 0; background: none; padding: 0 8px; color: var(--accent); font-size: 15px; font-weight: 500;
+  animation: title-in 0.24s var(--ease-ios) both; transition: opacity 0.2s;
+}
+.compact-back span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 900px) { .title-bar { display: none; } }
+::view-transition-group(title-bar) { animation: none; z-index: 9; }
+::view-transition-old(title-bar) { animation: none; opacity: 0; }
+::view-transition-new(title-bar) { animation: none; }
 .rail .add-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; margin: 0 0 16px;
   border-radius: 23px; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 15px;
@@ -164,8 +205,11 @@ img { max-width: 100%; display: block; }
 
 /* the page's own layer: a finger can drag it away (Gestures.tsx), uncovering the shade and the pull-to-reload badge */
 .main { flex: 1; min-width: 0; position: relative; z-index: 1; background: var(--desk); }
-.main.swiping { box-shadow: -12px 0 32px rgba(43, 34, 25, 0.18); }
+.main.swiping { box-shadow: var(--edge-shadow); }
 .swipe-shade { position: fixed; inset: 0; z-index: 0; background: rgba(43, 34, 25, 0.12); opacity: 0; pointer-events: none; }
+/* under a page swiped away from the left edge: the page it goes back to (a still copy, Gestures.tsx) */
+.swipe-under { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--desk); pointer-events: none; }
+.swipe-under > .main-copy { position: absolute; left: 0; right: 0; top: 0; }
 .ptr {
   position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top)); z-index: 0; width: 40px; height: 40px; border-radius: 20px;
   display: flex; align-items: center; justify-content: center; opacity: 0; transform: translate(-50%, -44px);
@@ -206,11 +250,19 @@ img { max-width: 100%; display: block; }
               inset 0 -1px 0 rgba(0, 0, 0, 0.08);
 }
 .tabbar a.add.active span { background: var(--ink); color: var(--desk); box-shadow: 0 6px 16px rgba(43, 34, 25, 0.3); }
-.tabbar a:active { transform: scale(0.9); }
+.tabbar a.is-pressed { transform: scale(0.9); }
+@media (pointer: fine) { .tabbar a:active { transform: scale(0.9); } }
 
 @media (min-width: 900px) {
   .rail { display: flex; }
   .tabbar { display: none; }
+}
+/* a phone's keyboard is up: the tab bar slides away under it, as in an iPhone app */
+@media (max-width: 899px) and (pointer: coarse) {
+  .tabbar { transition: transform 0.35s var(--ease-ios), opacity 0.2s; }
+  body:has(:is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), textarea, [contenteditable="true"]):focus) .tabbar {
+    transform: translateY(calc(100% + 24px)); opacity: 0; pointer-events: none;
+  }
 }
 
 /* ---------- Pages ---------- */
@@ -374,6 +426,8 @@ select.field { height: 44px; padding: 0 12px; }
   animation: toast-in 0.42s var(--spring) both;
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 14px) scale(0.94); } }
+.toast.leaving { animation: toast-out 0.22s ease-in both; pointer-events: none; }
+@keyframes toast-out { to { opacity: 0; transform: translate(-50%, 10px) scale(0.97); } }
 @media (min-width: 900px) { .toast { bottom: 24px; } }
 .toast a { color: inherit; text-decoration: underline; }
 .toast-undo {
@@ -617,6 +671,11 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .placement select.field { height: 40px; font-size: 14px; }
 .embed iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 12px; }
 .embed img, .embed video { border-radius: 12px; max-height: 70vh; margin: 0 auto; }
+/* an image holds its place while it loads, then fades in (Embed.tsx) */
+.img-box { display: block; min-height: 200px; border-radius: 12px; background: var(--sand); transition: background-color 0.25s; }
+.img-box.loaded { min-height: 0; background: transparent; }
+.img-box img { display: block; opacity: 0; transition: opacity 0.25s; }
+.img-box.loaded img { opacity: 1; }
 .embed audio { width: 100%; }
 .warn { font-size: 14px; color: var(--ink-2); background: var(--tint); padding: 12px 14px; border-radius: 12px; }
 
@@ -827,7 +886,8 @@ code { font-family: var(--mono); font-size: 0.9em; }
 
 .stat-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .stat-tiles div { display: flex; flex-direction: column; padding: 12px 14px; border-radius: 12px; background: var(--tint); }
-.stat-tiles b { font-family: var(--serif); font-size: 26px; font-weight: 500; line-height: 1; }
+.stat-tiles b { font-family: var(--serif); font-size: 26px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.badge, .feed-count, .chip .n, .folder-card .n, .cost-nums { font-variant-numeric: tabular-nums; }
 .stat-tiles span { font-size: 12px; color: var(--ink-3); }
 .stat-tiles .err b { color: var(--accent-ink); }
 .group { display: flex; flex-direction: column; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
@@ -1190,14 +1250,23 @@ label.group-row { cursor: pointer; }
 .composer .send, .rail .add-btn, .menu button, .item-tools button, .settings-nav a {
   transition: transform 0.28s var(--spring), color 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
 }
-.fiche, .folder-card, .resurface-card, .resurface-note, .related, .group-row, .todo-item, .source, .d-entry, .check-card {
+.fiche, .folder-card, .resurface-card, .resurface-note, .related, .group-row, .todo-item, .source, .d-entry, .check-card, .wiki-card {
   transition: transform 0.32s var(--spring), border-color 0.2s, background-color 0.2s;
 }
 :is(.btn, .chip, .pill, .icon-link, .icon-btn, .seg button, .drop, .suggestions button, .cal-day, .composer .send,
-    .rail .add-btn, .menu button, .item-tools button, .settings-nav a):active:not(:disabled) { transform: scale(0.95); }
-.back:active, .linkish:active { opacity: 0.55; }
-:is(.fiche, .folder-card, .resurface-card, .resurface-note, .related, .source, .check-card):active { transform: scale(0.98); }
-a.group-row:active, label.group-row:active { background: color-mix(in srgb, var(--desk) 70%, transparent); }
+    .rail .add-btn, .menu button, .item-tools button, .settings-nav a):is(.is-pressed):not(:disabled) { transform: scale(0.95); }
+:is(.back, .linkish, .compact-title, .compact-back).is-pressed { opacity: 0.55; }
+:is(.fiche, .folder-card, .resurface-card, .resurface-note, .related, .source, .check-card, .wiki-card).is-pressed { transform: scale(0.98); }
+:is(a.group-row, label.group-row).is-pressed { background: color-mix(in srgb, var(--desk) 70%, transparent); }
+/* a finger: pressed once it is clearly a tap, not the start of a scroll (motion.ts pressFeedback); a mouse: at once */
+@media (pointer: fine) {
+  :is(.btn, .chip, .pill, .icon-link, .icon-btn, .seg button, .drop, .suggestions button, .cal-day, .composer .send,
+      .rail .add-btn, .menu button, .item-tools button, .settings-nav a):active:not(:disabled) { transform: scale(0.95); }
+  .back:active, .linkish:active { opacity: 0.55; }
+  :is(.fiche, .folder-card, .resurface-card, .resurface-note, .related, .source, .check-card, .wiki-card):active { transform: scale(0.98); }
+  a.group-row:active, label.group-row:active { background: color-mix(in srgb, var(--desk) 70%, transparent); }
+}
+.haptic { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .swipe.dragging .fiche, .swipe.leaving .fiche { transform: none; }
 
 /* ---------- Loading: shapes of what is coming, shimmering ---------- */
@@ -1230,18 +1299,16 @@ a.group-row:active, label.group-row:active { background: color-mix(in srgb, var(
 ::view-transition-group(tabbar) {
   border-radius: 32px; -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
 }
-::view-transition-group(rail) {
-  border-radius: 26px; -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
-}
+::view-transition-group(rail) { border-radius: 26px; }
 
 ::view-transition-old(root), ::view-transition-new(root) {
   animation-duration: 0.42s; animation-timing-function: var(--ease-ios); animation-fill-mode: both; mix-blend-mode: normal;
 }
 /* a page opened from another slides in from the right over it, which drifts left and dims (as on an iPhone) */
 html[data-nav="push"]::view-transition-old(root) { animation-name: vt-drift-left; }
-html[data-nav="push"]::view-transition-new(root) { animation-name: vt-in-right; box-shadow: -10px 0 30px rgba(43, 34, 25, 0.14); }
+html[data-nav="push"]::view-transition-new(root) { animation-name: vt-in-right; box-shadow: var(--edge-shadow); }
 /* going back: the page slides away to the right, uncovering the one below */
-html[data-nav="back"]::view-transition-old(root) { animation-name: vt-out-right; z-index: 2; box-shadow: -10px 0 30px rgba(43, 34, 25, 0.14); }
+html[data-nav="back"]::view-transition-old(root) { animation-name: vt-out-right; z-index: 2; box-shadow: var(--edge-shadow); }
 html[data-nav="back"]::view-transition-new(root) { animation-name: vt-from-left; }
 /* another tab, or another view of the same page: a quick cross-fade */
 html[data-nav="tab"]::view-transition-old(root), html[data-nav="fade"]::view-transition-old(root) {
@@ -1250,10 +1317,10 @@ html[data-nav="tab"]::view-transition-old(root), html[data-nav="fade"]::view-tra
 html[data-nav="tab"]::view-transition-new(root), html[data-nav="fade"]::view-transition-new(root) {
   animation: vt-fade-in 0.22s ease-out 0.05s both;
 }
-/* on a computer: the content fades and settles, nothing slides */
+/* on a computer: a quick cross-fade, nothing slides or settles (a Mac window swaps its content at once) */
 @media (min-width: 900px) {
-  html[data-nav]::view-transition-old(root) { animation: vt-fade-out 0.1s ease-out both; box-shadow: none; z-index: auto; }
-  html[data-nav]::view-transition-new(root) { animation: vt-settle 0.3s var(--ease-ios) 0.06s both; box-shadow: none; }
+  html[data-nav]::view-transition-old(root) { animation: vt-fade-out 0.08s ease-out both; box-shadow: none; z-index: auto; }
+  html[data-nav]::view-transition-new(root) { animation: vt-fade-in 0.14s ease-out both; box-shadow: none; }
 }
 /* after a swipe back, or a gesture of the browser itself: the page is already where it should be */
 html[data-nav="none"]::view-transition-old(root), html[data-nav="none"]::view-transition-new(root) { animation: none; }
@@ -1269,6 +1336,6 @@ html[data-nav="none"]::view-transition-old(root) { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
-  .sk, .appear, .toast, .menu, .sk-list { animation: none; }
+  .sk, .appear, .toast, .toast.leaving, .menu, .sk-list { animation: none; }
   .tab-lens, .rail-lens { transition: none; }
 }

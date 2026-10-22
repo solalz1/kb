@@ -13,6 +13,7 @@ import { obsidianOpen } from "../obsidian";
 import { keys } from "../queries";
 import { headLabel } from "../perso";
 import { internalTarget, KIND_LABEL, renderWiki, sectionLabel } from "../wiki";
+import { canGoBack } from "../motion";
 
 const REASON: Record<string, string> = {
   ingest: t("intégration"), lint: t("relecture"), answer: t("réponse gardée"), obsidian: t("modifiée dans Obsidian"),
@@ -69,7 +70,7 @@ export default function WikiPage() {
     <div className="page item-page wiki-page">
       <div className="item-main">
         <div className="item-top">
-          <button className="back" onClick={() => (history.length > 1 ? nav(-1) : nav("/wiki"))}>
+          <button className="back" onClick={() => (canGoBack() ? nav(-1) : nav("/wiki"))}>
             <IconBack size={desktop ? 18 : 20} /> {t("Wiki")}
           </button>
         </div>

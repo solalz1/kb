@@ -8,6 +8,7 @@ import { IconBack, IconLock, IconSpinner } from "../icons";
 import { useNavigate } from "../nav";
 import { CATEGORIES, categoryOf, isEditableNote, spaceHome } from "../perso";
 import { keys } from "../queries";
+import { canGoBack } from "../motion";
 
 const DRAFT_KEY = "kb_note_draft";
 
@@ -90,7 +91,7 @@ export default function NoteEditor() {
     }
   };
 
-  const leave = () => { if (history.length > 1) nav(-1); else nav(spaceHome(form.space)); };
+  const leave = () => { if (canGoBack()) nav(-1); else nav(spaceHome(form.space)); };
   // going back keeps the draft on the device; "Abandonner" erases it (after asking)
   const discard = () => {
     if (!editing && form.content.trim() && !window.confirm(t("Effacer ce brouillon ?"))) return;

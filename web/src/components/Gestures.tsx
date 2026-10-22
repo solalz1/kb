@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
+import { cache } from "../cache";
 import { t } from "../i18n";
 import { IconDown, IconSpinner } from "../icons";
-import { EDGE, edgeSwipe, reducedMotion, skipNextAnimation, standalone, touchScreen } from "../motion";
+import { EDGE, depth, edgeSwipe, haptic, pageBelow, reducedMotion, skipNextAnimation, standalone, touchScreen, update } from "../motion";
 
-const PULL = 72;          // px to pull before letting go reloads
+const PULL = 72;          // px to pull before letting go refreshes
 const MAX = 120;
 
 const mainEl = () => document.querySelector<HTMLElement>(".main");
@@ -35,8 +36,9 @@ function track(onMove: (e: TouchEvent) => void, onEnd: (cancelled: boolean) => v
 }
 
 /**
- * Pull the page down from its top and let go: the app reloads, fresh from the server (and its memory cache is gone).
- * Only in the installed app on a phone, which has no reload button; Safari's own pull to refresh works elsewhere.
+ * Pull the page down from its top and let go: what the page shows is asked for again, in place, the spinner turning
+ * until it is back (nothing blanks or reloads, as in an iPhone app). Only in the installed app on a phone; Safari's
+ * own pull to refresh works elsewhere.
  */
 export function PullToRefresh() {
   const badge = useRef<HTMLDivElement>(null);
@@ -49,6 +51,7 @@ export function PullToRefresh() {
     let pulling = false;
     let distance = 0;
     let reloading = false;
+    let armed = false;
 
     const paint = (d: number, animate: boolean) => {
       const main = mainEl();
@@ -83,6 +86,8 @@ export function PullToRefresh() {
       }
       if (e.cancelable) e.preventDefault();
       distance = Math.max(0, MAX * (1 - Math.exp(-(dy - 10) / 200)));
+      if (distance >= PULL && !armed) haptic();
+      armed = distance >= PULL;
       paint(distance, false);
     };
     const onEnd = (cancelled: boolean) => {
@@ -94,11 +99,23 @@ export function PullToRefresh() {
         paint(56, true);
         if (spinner.current) spinner.current.hidden = false;
         if (arrow.current) arrow.current.hidden = true;
-        window.setTimeout(() => window.location.reload(), 120);
+        // a new version is waiting (sw.js): this pull takes it
+        if (update.ready) { window.setTimeout(() => window.location.reload(), 120); return; }
+        const started = Date.now();
+        cache.refreshShown().finally(() => {
+          // the spinner turns at least a moment, so that a quick answer still reads as "refreshed"
+          window.setTimeout(() => {
+            reloading = false;
+            if (spinner.current) spinner.current.hidden = true;
+            if (arrow.current) arrow.current.hidden = false;
+            paint(0, true);
+          }, Math.max(0, 450 - (Date.now() - started)));
+        });
       } else {
         paint(0, true);
       }
       distance = 0;
+      armed = false;
     };
     window.addEventListener("touchstart", onStart, { passive: true });
     return () => { window.removeEventListener("touchstart", onStart); stop(); };
@@ -113,27 +130,45 @@ export function PullToRefresh() {
 }
 
 /**
- * From the left edge of the screen, a finger drags the page away to go back, as in any iPhone app. Only in the
- * installed app (Safari has its own gesture), and only when there is a page to go back to.
+ * From the left edge of the screen, a finger drags the page away to go back, as in any iPhone app: the page below
+ * (a still copy kept when this one was opened, motion.ts) slides back in under it, dimmed, a third of the way behind.
+ * Only in the installed app (Safari has its own gesture), and only when there is a page to go back to.
  */
 export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
   const shade = useRef<HTMLDivElement>(null);
+  const under = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!edgeSwipe()) return;
     let g: { x: number; y: number; t: number; dragging: boolean; lastX: number; lastT: number; v: number } | null = null;
 
-    const canGoBack = () => ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0;
+    const index = () => (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    // a tab's first screen has nothing to go back to (tabs don't stack, App.tsx)
+    const canGoBack = () => index() > 0 && depth(window.location.pathname) > 0;
+    const showBelow = () => {
+      const box = under.current;
+      const copy = pageBelow(index() - 1);
+      if (!box || !copy) return;
+      const node = copy.node.cloneNode(true) as HTMLElement;
+      node.style.transform = `translateY(${-copy.scrollY}px)`;
+      box.replaceChildren(node);
+      box.hidden = false;
+    };
     const set = (dx: number, animate: boolean) => {
       const main = mainEl();
       if (!main) return;
       const ease = "0.32s cubic-bezier(0.32, 0.72, 0, 1)";
+      const w = window.innerWidth;
       main.style.transition = animate ? `transform ${ease}` : "none";
       main.style.transform = dx ? `translateX(${dx}px)` : "";
       main.classList.toggle("swiping", dx > 0);
       if (shade.current) {
         shade.current.style.transition = animate ? `opacity ${ease}` : "none";
-        shade.current.style.opacity = String(Math.max(0, 1 - dx / window.innerWidth) * (dx > 0 ? 1 : 0));
+        shade.current.style.opacity = String(Math.max(0, 1 - dx / w) * (dx > 0 ? 1 : 0));
+      }
+      if (under.current && !under.current.hidden) {
+        under.current.style.transition = animate ? `transform ${ease}` : "none";
+        under.current.style.transform = `translateX(${-0.3 * Math.max(0, w - dx)}px)`;
       }
     };
 
@@ -155,6 +190,7 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
         if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }
         if (dx < 8) return;
         g.dragging = true;
+        showBelow();
       }
       if (e.cancelable) e.preventDefault();
       const dt = e.timeStamp - g.lastT;
@@ -169,7 +205,11 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
       const w = window.innerWidth;
       const go = !cancelled && (dx > w * 0.35 || (dx > 40 && g.v > 0.35));
       g = null;
-      if (!go) { set(0, true); return; }
+      if (!go) {
+        set(0, true);
+        window.setTimeout(hideBelow, 340);
+        return;
+      }
       set(w, !reducedMotion());
       window.setTimeout(() => { skipNextAnimation(); onBack(); }, reducedMotion() ? 0 : 230);
     };
@@ -177,7 +217,19 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
     return () => { window.removeEventListener("touchstart", onStart); stop(); };
   }, [onBack]);
 
-  return <div className="swipe-shade" ref={shade} aria-hidden="true" />;
+  return <>
+    <div className="swipe-under" ref={under} aria-hidden="true" hidden />
+    <div className="swipe-shade" ref={shade} aria-hidden="true" />
+  </>;
+}
+
+/** The copy of the page below goes once the real one is back (or the swipe was let go). */
+function hideBelow() {
+  const box = document.querySelector<HTMLElement>(".swipe-under");
+  if (!box || mainEl()?.classList.contains("swiping")) return;
+  box.hidden = true;
+  box.replaceChildren();
+  box.style.transform = "";
 }
 
 /** After a swipe back, the page that comes in sits in place (called once the new page is on screen). */
@@ -189,4 +241,5 @@ export function settleSwipe() {
   main.classList.remove("swiping");
   const shade = document.querySelector<HTMLElement>(".swipe-shade");
   if (shade) { shade.style.transition = "none"; shade.style.opacity = "0"; }
+  hideBelow();
 }

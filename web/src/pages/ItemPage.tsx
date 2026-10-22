@@ -13,6 +13,7 @@ import { renderMarkdown } from "../markdown";
 import { Link, useNavigate } from "../nav";
 import { CATEGORIES, headLabel, isEditableNote, spaceHome } from "../perso";
 import { dropItem, forgetItem, keys, patchItem, summaryOf } from "../queries";
+import { canGoBack } from "../motion";
 
 const PREVIEW = 1400;     // characters of the full content shown before "show everything"
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "long" });
@@ -62,8 +63,10 @@ export default function ItemPage() {
   useEffect(() => {
     if (!menu) return;
     const close = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(false); };
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", escape); };
   }, [menu]);
 
   if (error && !item) return <div className="page"><div className="error-box">{error}</div></div>;
@@ -142,7 +145,7 @@ export default function ItemPage() {
     <div className="page item-page">
       <div className="item-main">
         <div className="item-top">
-          <button className="back" onClick={() => (history.length > 1 ? nav(-1) : nav(spaceHome(item.space)))}>
+          <button className="back" onClick={() => (canGoBack() ? nav(-1) : nav(spaceHome(item.space)))}>
             <IconBack size={desktop ? 18 : 20} /> {back}
           </button>
           <div className="menu-wrap phone-only" ref={menuRef}>

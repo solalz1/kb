@@ -5,9 +5,10 @@ import { cache, useQuery } from "./cache";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { EdgeSwipeBack, PullToRefresh, settleSwipe } from "./components/Gestures";
 import { LangSwitch } from "./components/LangSwitch";
+import { TitleBar } from "./components/TitleBar";
 import { t } from "./i18n";
 import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconPlus, IconSettings, IconTodo, IconWiki } from "./icons";
-import { scrollKey, tabOf } from "./motion";
+import { devCopy, pressFeedback, scrollKey, stepsToRoot, tabOf } from "./motion";
 import { Link, NavLink, useNavigate } from "./nav";
 import { keys, prefetchTabs } from "./queries";
 
@@ -135,6 +136,25 @@ export default function App() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
+  // what a finger presses answers it once it is clearly a tap (motion.ts)
+  useEffect(() => pressFeedback(), []);
+
+  // ⌘K (or Ctrl+K, or / when nothing is being typed), from any page: the search of the feed, as in a Mac app
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true']");
+      const wanted = ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") || (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey);
+      if (!wanted) return;
+      e.preventDefault();
+      const field = () => document.querySelector<HTMLInputElement>(".main .search input");
+      if (field()) { field()!.focus(); return; }
+      navigate("/");
+      window.setTimeout(() => field()?.focus(), 120);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // a page swiped away from the left edge: the one that comes back sits in place
   useLayoutEffect(() => { settleSwipe(); }, [location.key]);
   const back = useCallback(() => navigate(-1), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -151,19 +171,23 @@ export default function App() {
     if (location.pathname === to && !location.search) {
       e.preventDefault();
       window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
     }
+    // the tab you're in, from a page opened in it: back to its first screen, as on an iPhone
+    const steps = tab.current === to ? stepsToRoot(to) : 0;
+    if (steps) { e.preventDefault(); navigate(-steps); }
   };
 
   return (
     <div className="shell">
       <ScrollRestoration getKey={scrollKey} />
       <nav className="rail" aria-label="Navigation">
-        <Link className="brand" to="/"><b>KB</b><small>{t("second cerveau")}</small></Link>
+        <Link className="brand" to="/"><b>KB</b><small>{t("second cerveau")}</small>{devCopy() && <span className="dev-tag">DEV</span>}</Link>
         <Link className="add-btn" to="/add"><IconPlus size={18} /> {t("Ajouter")}</Link>
         <div className="rail-links" style={{ "--i": Math.max(0, railLens), "--step": `${RAIL_STEP}px` } as React.CSSProperties}>
           <span className={`rail-lens${railLens < 0 ? " off" : ""}`} aria-hidden="true" />
           {NAV.map(({ to, label, Icon, end }) => (
-            <NavLink key={to} to={to} end={end} onClick={(e) => onTab(e, to)}
+            <NavLink key={to} to={to} end={end} onClick={(e) => onTab(e, to)} viewTransition={false}
                      className={({ isActive }) => `nav${isActive || (opened && tab.current === to) ? " active" : ""}`}>
               <Icon size={20} /> <span className="label">{label}</span>
               {to === "/todo" && pending > 0 && <span className="badge">{pending}</span>}
@@ -171,7 +195,7 @@ export default function App() {
           ))}
         </div>
         <div className="spacer" />
-        <NavLink to="/settings" className={({ isActive }) => `nav settings${isActive ? " active" : ""}`}>
+        <NavLink to="/settings" viewTransition={false} className={({ isActive }) => `nav settings${isActive ? " active" : ""}`}>
           <IconSettings size={20} /> <span className="label">{t("Réglages")}</span>
         </NavLink>
       </nav>
@@ -185,11 +209,14 @@ export default function App() {
       <nav className="tabbar" aria-label="Navigation" style={{ "--i": Math.max(0, lens) } as React.CSSProperties}>
         <span className={`tab-lens${lens < 0 ? " off" : ""}`} aria-hidden="true" />
         {TABS.map(({ to, label, Icon }) => to === "/add"
-          ? <Link key={to} to={to} className={`add${tab.current === to ? " active" : ""}`} aria-label={label}
+          ? <Link key={to} to={to} className={`add${tab.current === to ? " active" : ""}`} aria-label={label} viewTransition={false} replace
                   aria-current={tab.current === to ? "page" : undefined}><span><Icon size={24} stroke={2.25} /></span></Link>
           : <Link key={to} to={to} className={tab.current === to ? "active" : undefined} onClick={(e) => onTab(e, to)}
+                  viewTransition={false} replace
                   aria-current={tab.current === to ? "page" : undefined}><Icon size={24} />{label}</Link>)}
       </nav>
+      <TitleBar />
+      {devCopy() && <span className="dev-tag floating" aria-hidden="true">DEV</span>}
       <PullToRefresh />
       <EdgeSwipeBack onBack={back} />
     </div>

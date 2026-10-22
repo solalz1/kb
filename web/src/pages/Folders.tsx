@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { IconBack, IconFolder, IconPlus, IconSpark, IconSpinner } from "../icons";
 import { Link } from "../nav";
 import { keys } from "../queries";
+import { Toast } from "../components/Toast";
 
 /** Every folder with what's in it, a way to add one, and Claude to file what isn't filed by hand. */
 export default function Folders() {
@@ -108,7 +109,7 @@ export default function Folders() {
           {folders.length === 0 && <p className="hint">{t("Aucun dossier pour l'instant.")}</p>}
         </div>
       )}
-      {notice && <div className="toast" role="status">{notice}</div>}
+      <Toast>{notice}</Toast>
     </div>
   );
 }
