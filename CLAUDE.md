@@ -106,7 +106,11 @@ update both.
   `obsidian.ts` builds the `obsidian://` links (open the vault at index, a page's note by its `vault_path`, Obsidian's
   search); the vault name is per device in localStorage, `KB-Wiki` by default (= `obsidian.VAULT`, the zip's folder).
   Feed cards sit in `SwipeRow` (`components/Swipe.tsx`, touch and pen only): right to pin, left to archive or delete,
-  each with an undo toast; a deletion waits 5 s before it reaches the API.
+  each with an undo toast; a deletion waits 5 s before it reaches the API. A long press (touch) or a right click (mouse)
+  opens the same actions in `components/ContextMenu.tsx` (portalled to body, at the finger, Escape/arrow keys).
+  - **Launch**: `sw.js` serves the cached shell at once and refreshes it behind (`kb:update` message when it changed:
+    the next pull to refresh reloads). A device that opened the app with the shared sign-in before (`kb_sso_ok` in
+    localStorage) renders it at once instead of waiting for `/api/health`; a 401 still ends on the sign-in page.
   - **Data comes from an in-memory cache** (`cache.ts`, keys and fetchers in `queries.ts`): `useQuery(key, fetcher)`
     shows what is cached at once and refreshes it in the background (stale-while-revalidate); nothing is persisted, so
     a reload starts afresh. Every non-GET call in `api.ts` marks the whole cache stale (`changeStarted`/`changeDone`);
@@ -121,7 +125,12 @@ update both.
     `<Outlet/>`; descendant `<Routes>` would drop view transitions). Import `Link`, `NavLink` and `useNavigate` from
     `nav.tsx`, which turn on view transitions; `motion.ts` sets `html[data-nav]` (push, back, tab, fade, none) and
     `styles.css` animates `::view-transition-*` accordingly (the tab bar and sidebar keep their own
-    `view-transition-name`). `<ScrollRestoration getKey={scrollKey}>` keeps each tab's scroll position. Lists animate
+    `view-transition-name`). Tab bar links are `viewTransition={false} replace`: tabs switch at once and don't stack in
+    the history (tapping the tab you're in from a page opened in it goes back to its root, `stepsToRoot`); rail links
+    switch at once too, and on ≥900px pushes are a quick cross-fade. A pointerdown during a transition skips it, and a
+    click that landed on `<html>` (the browser hit-tests the snapshots) is re-sent to what is under it (`main.tsx`).
+    Before a push, `motion.ts` keeps a still copy of the page being left (`.main-copy`, by history index): the edge
+    swipe lays it under the page it drags away. `<ScrollRestoration getKey={scrollKey}>` keeps each tab's scroll position. Lists animate
     reorders with `useFlip`. Loading states are skeletons (`components/Skeleton.tsx`), never "Chargement…".
   - **Liquid Glass**: the tab bar is a floating glass capsule whose lens slides to the current tab (`--i`), the desktop
     sidebar a floating glass pane; toasts, menus and the composer are glass too (`--glass*` tokens). Hover styles live
