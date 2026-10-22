@@ -464,6 +464,8 @@ def request_sync() -> None:
     if _syncer is not None and _syncer.alive:
         wake_event.set()
         return
+    if get_settings().dev_copy:
+        return      # the real KB's Syncer copies the changes (within SWEEP_EVERY): two passes at once would double pages
 
     def run():
         try:

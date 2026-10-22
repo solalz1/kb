@@ -644,4 +644,6 @@ def request_sync() -> None:
         wiki.sync_wake.set()
         wiki.wake.set()
         return
+    if get_settings().dev_copy:
+        return      # the real KB's wiki worker syncs (every WIKI_GIT_INTERVAL), under its lease: never two writers
     threading.Thread(target=sync_safely, name="kb-obsidian-once", daemon=True).start()

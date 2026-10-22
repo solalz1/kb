@@ -12,6 +12,7 @@ import { useDesktop } from "../layout";
 import { Link } from "../nav";
 import { DEFAULT_VAULT, setVaultName, vaultName } from "../obsidian";
 import { keys } from "../queries";
+import { realOrigin } from "../motion";
 
 type Stats = Awaited<ReturnType<typeof api.stats>>;
 
@@ -215,7 +216,11 @@ function useCopy(): [string, (label: string, text: string) => void] {
   return [copied, copy];
 }
 
-function Shortcuts({ origin }: { origin: string }) {
+// The Shortcut and the Claude connector always go to the real KB, never to a copy that will be deleted (motion.ts).
+const forTools = (origin: string) => (origin === window.location.origin ? realOrigin() : origin);
+
+function Shortcuts({ origin: here }: { origin: string }) {
+  const origin = forTools(here);
   const [copied, copy] = useCopy();
   return (
     <>
@@ -231,7 +236,8 @@ function Shortcuts({ origin }: { origin: string }) {
   );
 }
 
-function Connector({ origin }: { origin: string }) {
+function Connector({ origin: here }: { origin: string }) {
+  const origin = forTools(here);
   const [desktopApp, setDesktopApp] = useState(claudePrefs.desktop);
   return (
     <>

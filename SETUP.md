@@ -203,23 +203,17 @@ In Claude, the connector has the wiki too: `wiki_index`, `read_wiki_page`, `sear
 
 ## 15. Try a new version on a copy before shipping it (optional)
 
-A change waiting on a branch (a new interface, say) can be used for real, on your phone, before it reaches your KB: a second Railway service, the **dev copy**, serves that branch's app on its own address, with the same data, while your KB keeps doing all the background work.
+A change waiting on a branch (a new interface, say) can be used for real, on your phone, before it reaches your KB: a second Railway service, the **dev copy**, serves that branch's app and API on its own address, with the same data, while your KB keeps doing all the background work.
 
-1. Railway → your project → **+ Create** → **GitHub Repo** → your fork. The new service's first deploy can't do anything yet (it has no variables): let it fail.
-2. The new service → **Settings**: name it `kb-dev`, and under **Source** pick the branch to try.
-3. Your KB service → **Variables → Raw Editor** → copy everything. `kb-dev` → **Variables → Raw Editor** → paste, then set these three and deploy:
-
-   ```
-   RUN_WORKER=false
-   AUTO_MIGRATE=false
-   PUBLIC_BASE_URL=https://kb-dev.example.com
-   ```
-
-   `RUN_WORKER=false` keeps the copy to the app and the API: processing, the wiki, the digest and the Notion copy stay with your KB, run once. An item added from the copy is processed by your KB within seconds. `AUTO_MIGRATE=false`: the copy never touches the schema, so only try branches that don't change it (`supabase/migrations/` untouched).
+1. Railway → your project → **New** → **Empty Service**. Name it `kb-dev` (**Settings**): a service whose name ends in `-dev` is always treated as a copy (below).
+2. Your KB service → **Variables → Raw Editor** → copy everything. `kb-dev` → **Variables → Raw Editor** → paste, add `DEV_COPY=true`, and save. Change nothing else (keep `PUBLIC_BASE_URL` your KB's address: it is what Notion, Obsidian and e-mails link to). Sealed variables don't show in the Raw Editor: add them by hand.
+3. `kb-dev` → **Settings → Source → Connect Repo** → your fork, then the branch to try. **Deploy** the staged changes.
 4. **Settings → Networking → Custom Domain** → `kb-dev.example.com` (a sub-domain of the same domain, so that a shared sign-in, step 13, works there too), with its CNAME and TXT records as in step 3.
-5. `https://kb-dev.example.com/api/health` answers `"ok": true, "schema": "off"`. On an address whose first part ends in `-dev` (or starts with `dev.`), the app shows an orange **DEV** tag and names itself "KB dev", so its home-screen icon is never mistaken for the real one.
+5. `https://kb-dev.example.com/api/health` answers `"ok": true, "schema": "off", "storage": "ok"`.
 
-Every push to the branch redeploys the copy. To ship the change, merge the branch: your KB redeploys. Then delete `kb-dev` (Settings → Delete service) and its DNS record, or point it at the next branch.
+With `DEV_COPY=true` (or a service named `…-dev`) the copy runs no worker (processing, the wiki, the digest and the Notion copy stay with your KB, done once; an item added from the copy is processed by your KB within seconds), never touches the schema (so only try branches that leave `supabase/migrations/` alone), holds at most 3 database connections, leaves « Synchroniser maintenant » to your KB, and its Settings give your KB's address for the Shortcut and the connector. On an address whose first part ends in `-dev` (or starts with `dev.`), the app shows an orange **DEV** tag and names itself "KB dev", so its home-screen icon is never mistaken for the real one. Turn off Railway's PR environments (Project Settings → Environments) before opening the pull request.
+
+Every push to the branch redeploys the copy. To ship the change, merge the branch: your KB redeploys. Then delete `kb-dev` and its DNS records, or point it at the next branch.
 
 ## Troubleshooting
 

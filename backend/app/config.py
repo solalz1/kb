@@ -1,8 +1,9 @@
 """Configuration lue depuis les variables d'environnement (ou un fichier .env)."""
 
+import os
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -129,10 +130,24 @@ class Settings(BaseSettings):
     # --- Worker ---
     run_worker: bool = True       # traite la file dans le même process que l'API
     auto_migrate: bool = True     # apply supabase/migrations at startup (idempotent)
+    db_pool_max: int = 10         # database connections this process may hold
+    # A copy that only serves the app and the API, next to the real KB on the same database (to try a branch before
+    # shipping it, SETUP.md step 15): no background work, no schema change, few connections. A Railway service whose
+    # name ends in "-dev" is one even if DEV_COPY was forgotten when its variables were pasted.
+    dev_copy: bool = False
     worker_concurrency: int = 2
     max_attempts: int = 3
     link_min_similarity: float = 0.45
     max_links_per_item: int = 5
+
+    @model_validator(mode="after")
+    def _copy_does_no_background_work(self):
+        if self.dev_copy or os.environ.get("RAILWAY_SERVICE_NAME", "").strip().lower().endswith("-dev"):
+            self.dev_copy = True
+            self.run_worker = False
+            self.auto_migrate = False
+            self.db_pool_max = min(self.db_pool_max, 3)
+        return self
 
     @property
     def chat_model_options(self) -> list[dict]:

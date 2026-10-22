@@ -144,8 +144,10 @@ update both.
     swipe, the pull to refresh). Phone pages get `components/TitleBar.tsx`: once the page's `h1` has scrolled under the
     top of the screen, a glass bar shows it small (tap: back to the top).
   - **Dev copy** (`motion.ts` `devCopy()`): on a host whose first label ends in `-dev` (or starts with `dev.`), the app
-    shows a DEV tag and names itself "KB dev". Such a copy runs with `RUN_WORKER=false` and `AUTO_MIGRATE=false`
-    (SETUP.md, step 15): it must never need a schema change.
+    shows a DEV tag, names itself "KB dev", and Settings give the real KB's address (`realOrigin()`) for the Shortcut
+    and the connector. The backend side is `DEV_COPY=true` (or a Railway service named `…-dev`, `config.py`): no
+    worker, no migration, `db_pool_max` ≤ 3, and « Synchroniser maintenant » (Notion, Obsidian) left to the real KB's
+    background work (SETUP.md, step 15; `tests/test_dev_copy.py`). Such a copy must never need a schema change.
 
 ## Commands
 

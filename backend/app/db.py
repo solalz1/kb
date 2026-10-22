@@ -31,7 +31,7 @@ def pool() -> ConnectionPool:
             _pool = ConnectionPool(
                 get_settings().database_url,
                 min_size=1,
-                max_size=10,
+                max_size=max(1, get_settings().db_pool_max),
                 kwargs={"autocommit": True, "row_factory": dict_row, "prepare_threshold": None},
                 configure=_configure,
                 open=True,

@@ -12,6 +12,13 @@ export const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: r
  *  mistaken for the real one. */
 export const devCopy = () => /^[^.]+-dev\./.test(window.location.hostname) || /^dev\./.test(window.location.hostname);
 
+/** This app's address, or on a copy the real KB's (kb-dev.example.com → kb.example.com, dev.kb… → kb…). */
+export function realOrigin(): string {
+  const { protocol, host } = window.location;
+  if (!devCopy()) return window.location.origin;
+  return `${protocol}//${host.replace(/^([^.]+)-dev\./, "$1.").replace(/^dev\./, "")}`;
+}
+
 let tick: HTMLLabelElement | null = null;
 /** A light tick under the finger when a gesture is about to do something: on an iPhone (iOS 18+) through the system
  *  switch's haptic, elsewhere a short vibration where there is one. Nothing on a computer. */
