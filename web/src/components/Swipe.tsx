@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { EDGE, edgeSwipe, haptic } from "../motion";
+import { ContextMenu } from "./ContextMenu";
 
 /** One action revealed behind a card. */
 export type SwipeAction = {
@@ -29,10 +30,12 @@ const LOCK = 8;         // px before deciding whether the finger scrolls or swip
 const KEEP_OPEN = 48;   // a shorter swipe closes the row again
 const LONG = 0.45;      // a swipe past this share of the width runs the action at the edge…
 const BEYOND = 56;      // …and always well past the open buttons
+const HOLD = 480;       // ms a finger rests on a card before its menu opens (a long press)
 
 /**
  * Swipe a card left or right to reveal actions, as in Mail on iPhone. Touch and pen only: with a mouse the card
  * stays a plain link (its page has the same actions). Vertical moves are left to the browser (touch-action: pan-y).
+ * A long press (iPhone) or a right click (Mac) opens the same actions in a menu, the card lifted under it.
  */
 export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange }: Props) {
   const row = useRef<HTMLDivElement>(null);
@@ -44,6 +47,12 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
   const [dragging, setDragging] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const sideRef = useRef<"start" | "end">("end");   // the side last revealed: its panel shrinks back with the card
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const hold = useRef(0);
+  const cancelHold = () => { window.clearTimeout(hold.current); hold.current = 0; };
+  const closeMenu = useCallback(() => setMenuAt(null), []);
+  const menuItems = [...(start ? [{ action: start, side: "start" as const }] : []),
+                     ...[...end].reverse().map((action) => ({ action, side: "end" as const }))];
   const setOffset = (x: number) => {
     offsetRef.current = x;
     if (x) sideRef.current = x > 0 ? "start" : "end";
@@ -113,6 +122,17 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
     if (e.pointerType === "mouse" || leavingRef.current) return;
     if (e.clientX <= EDGE && edgeSwipe()) return;      // the screen's left edge takes the page back (Gestures.tsx)
     gesture.current = { id: e.pointerId, x: e.clientX, y: e.clientY, base: offsetRef.current, mode: "pending" };
+    cancelHold();
+    if (!menuItems.length || open) return;
+    const at = { x: e.clientX, y: e.clientY };
+    hold.current = window.setTimeout(() => {
+      hold.current = 0;
+      if (gesture.current?.mode !== "pending") return;
+      gesture.current = null;
+      swiped.current = true;                // the finger's lift isn't a tap that opens the card
+      haptic();
+      setMenuAt(at);
+    }, HOLD);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -122,6 +142,7 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
     const dy = e.clientY - g.y;
     if (g.mode === "pending") {
       if (Math.abs(dx) < LOCK && Math.abs(dy) < LOCK) return;
+      cancelHold();
       if (Math.abs(dy) >= Math.abs(dx)) { g.mode = "scroll"; return; }
       g.mode = "swipe";
       row.current?.setPointerCapture(e.pointerId);
@@ -132,6 +153,7 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
   };
 
   const finish = (e: React.PointerEvent, cancelled: boolean) => {
+    cancelHold();
     const g = gesture.current;
     if (!g || g.id !== e.pointerId) return;
     gesture.current = null;
@@ -170,10 +192,16 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
   const shown = (side: "start" | "end") => open === side || (side === "start" ? offset > 0 : offset < 0);
 
   return (
-    <div ref={row} className={`swipe${dragging ? " dragging" : ""}${leaving ? " leaving" : ""}`} data-flip={flipId}
+    <div ref={row} className={`swipe${dragging ? " dragging" : ""}${leaving ? " leaving" : ""}${menuAt ? " lifted" : ""}`} data-flip={flipId}
          onPointerDown={onPointerDown} onPointerMove={onPointerMove}
          onPointerUp={(e) => finish(e, false)} onPointerCancel={(e) => finish(e, true)}
-         onClickCapture={onClickCapture}>
+         onClickCapture={onClickCapture}
+         onContextMenu={(e) => { if (!menuItems.length) return; e.preventDefault(); cancelHold(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
+      {menuAt && (
+        <ContextMenu at={menuAt} onClose={closeMenu}
+                     items={menuItems.map(({ action, side }) => ({ id: action.id, label: action.label, icon: action.icon,
+                                                                   danger: action.tone === "danger", run: () => run(action, side) }))} />
+      )}
       {start && sideRef.current === "start" && (
         <div className="swipe-actions start" style={{ width: Math.max(0, offset) }} aria-hidden={!shown("start")}>
           <SwipeButton action={start} armed={armedStart} tabIndex={open === "start" ? 0 : -1}

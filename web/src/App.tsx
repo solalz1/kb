@@ -84,10 +84,16 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
+// This device opened the app with the shared sign-in before: the next launch shows the app at once (as an installed
+// app does) instead of waiting for the server to say so; an expired session still ends on the sign-in page.
+const SSO_SEEN = "kb_sso_ok";
+const ssoSeen = () => { try { return localStorage.getItem(SSO_SEEN) === "1"; } catch { return false; } };
+const rememberSso = (on: boolean) => { try { if (on) localStorage.setItem(SSO_SEEN, "1"); else localStorage.removeItem(SSO_SEEN); } catch { /* private */ } };
+
 /** The app around every page: the sidebar or the tab bar, gestures, scroll positions, and the page (routes in main.tsx). */
 export default function App() {
   // true with a token on this device; null while finding out whether the shared sign-in's cookie opens the app
-  const [authed, setAuthed] = useState<boolean | null>(auth.token ? true : null);
+  const [authed, setAuthed] = useState<boolean | null>(auth.token || ssoSeen() ? true : null);
   const location = useLocation();
   const navigate = useNavigate();
   const tab = useRef("/");
@@ -101,18 +107,27 @@ export default function App() {
   useEffect(() => {
     let live = true;
     (async () => {
-      try { sso.login = (await api.health()).sso_login ?? ""; } catch { /* offline: the token form */ }
+      let reached = false;
+      try { sso.login = (await api.health()).sso_login ?? ""; reached = true; } catch { /* offline: the token form */ }
       if (!live || auth.token) return;
-      if (!sso.login) { setAuthed(false); return; }
-      try { await api.stats(); if (live) setAuthed(true); }
-      catch (err) { if (live && !(err instanceof ApiError && err.status === 401)) setAuthed(false); }
+      if (!sso.login) { if (reached || !ssoSeen()) { rememberSso(false); setAuthed(false); } return; }
+      try { await api.stats(); if (live) { rememberSso(true); setAuthed(true); } }
+      catch (err) { if (live && !(err instanceof ApiError && err.status === 401) && !ssoSeen()) setAuthed(false); }
     })();
     return () => { live = false; };
   }, []);
 
   // a token the server refuses, an expired session, or signing out in Settings
   useEffect(() => {
-    const out = () => { auth.token = ""; cache.clear(); if (sso.login) goSignIn(); else setAuthed(false); };
+    const out = () => {
+      auth.token = "";
+      rememberSso(false);
+      cache.clear();
+      if (sso.login) { goSignIn(); return; }
+      // shown at once from a past sign-in: whether the shared sign-in is on may not be known yet
+      api.health().then((h) => { sso.login = h.sso_login ?? ""; if (sso.login) goSignIn(); else setAuthed(false); },
+                        () => setAuthed(false));
+    };
     window.addEventListener("kb:unauthorized", out);
     return () => window.removeEventListener("kb:unauthorized", out);
   }, []);

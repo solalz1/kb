@@ -688,6 +688,13 @@ code { font-family: var(--mono); font-size: 0.9em; }
   display: flex; flex-direction: column; transform-origin: top right; animation: menu-in 0.32s var(--spring) both;
 }
 @keyframes menu-in { from { opacity: 0; transform: scale(0.85); } }
+/* a card's menu at the finger or the pointer (ContextMenu.tsx), the card lifted under it */
+.menu.context { position: fixed; right: auto; top: auto; z-index: 61; min-width: 230px; background: color-mix(in srgb, var(--surface) 92%, transparent); }
+.menu.context button { justify-content: space-between; }
+.menu-catcher { position: fixed; inset: 0; z-index: 60; background: rgba(43, 34, 25, 0.08); animation: fade-in 0.2s ease-out both; }
+.swipe.lifted { z-index: 59; }
+.swipe.lifted .fiche { transform: scale(1.02); box-shadow: var(--glass-shadow); }
+.fiche { -webkit-user-select: none; user-select: none; }
 .menu button {
   display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 12px; border: 0; border-radius: 14px;
   background: transparent; color: var(--ink); font-size: 15px; text-align: left;

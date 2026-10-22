@@ -981,6 +981,32 @@ def test_keys_and_taps_answer_at_once(site):
     expect(phone.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
 
 
+def test_a_card_menu_on_long_press_and_right_click(site):
+    """A long press on a card (iPhone) or a right click (Mac) opens its actions in a menu, without opening the card."""
+    page = site("/", touch=True)
+    ids = _seed(page)
+    page.reload()
+    card = page.locator(".fiche").first
+    expect(card).to_be_visible()
+    _settled(page)
+    box = card.bounding_box()
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": box["x"] + 60, "y": box["y"] + 40}]})
+    page.wait_for_timeout(700)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    menu = page.get_by_role("menu")
+    expect(menu).to_be_visible()
+    expect(page.locator(".item-title")).to_have_count(0)                  # the card didn't open
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+
+    desk = site("/", viewport=DESKTOP)
+    desk.locator(".fiche").first.click(button="right")
+    desk.get_by_role("menuitem", name="Épingler").click()
+    _wait_for(lambda: _api(desk, "GET", f"/api/items/{ids['article']}")["body"].get("pinned") is True, desk)
+    expect(desk.get_by_role("menu")).to_have_count(0)
+
+
 def test_ticked_actions_stay_in_place_and_a_deleted_item_goes(site):
     """An action ticked on À faire stays under "Fait" (and can be unticked) while the badges update; an item deleted
     from its own page leaves the feed without the page asking for it again."""
@@ -1052,6 +1078,15 @@ def test_shared_sign_in(site, server, monkeypatch):
     page = site("/", signed_in=False, setup=signed_in, expected_status=401)
     expect(page.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
     assert page.evaluate("localStorage.getItem('kb_token')") is None
+    assert page.evaluate("localStorage.getItem('kb_sso_ok')") == "1"
+
+    # Opened with the shared sign-in before, the next launch shows the app at once, without waiting for /api/health.
+    def seen_before(ctx):
+        signed_in(ctx)
+        ctx.add_init_script("localStorage.setItem('kb_sso_ok', '1');")
+        ctx.route("**/api/health", lambda route: route.abort())
+    fast = site("/", signed_in=False, setup=seen_before, expected_errors=("ERR_FAILED",))
+    expect(fast.get_by_role("heading", name="Veille", exact=True)).to_be_visible()
     page.goto("/settings/raccourcis")
     expect(page.get_by_text("cet appareil n'en a pas besoin")).to_be_visible()
     expect(page.get_by_role("button", name="Copier le jeton")).to_have_count(0)
