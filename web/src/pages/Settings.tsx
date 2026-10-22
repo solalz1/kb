@@ -80,7 +80,7 @@ const SWITCH = (typeof HTMLInputElement !== "undefined" && "switch" in HTMLInput
 function StatTilesSkeleton() {
   return (
     <section className="stat-tiles" aria-hidden="true">
-      {[0, 1, 2, 3].map((i) => <div key={i}><b><span className="sk" style={{ width: 44, height: 26 }} /></b><span>&nbsp;</span></div>)}
+      {[0, 1, 2, 3].map((i) => <div key={i}><b><span className="sk" style={{ width: 44, height: "1em" }} /></b><span>&nbsp;</span></div>)}
     </section>
   );
 }

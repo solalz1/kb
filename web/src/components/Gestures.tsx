@@ -213,13 +213,14 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
       g = null;
       const back = () => { set(0, true); window.setTimeout(hideBelow, 340); };
       if (!go) { back(); return; }
-      leaving = true;
+      const mine = ++swipes;
+      leaving = mine;
       set(w, !reducedMotion());
       window.setTimeout(() => {
         skipNextAnimation();
         onBack();
-        // the history had nothing to go back to after all: the page comes back instead of staying off screen
-        window.setTimeout(() => { if (leaving) { leaving = false; back(); } }, 600);
+        // the history had nothing to go back to after all: this page comes back instead of staying off screen
+        window.setTimeout(() => { if (leaving === mine) { leaving = 0; back(); } }, 600);
       }, reducedMotion() ? 0 : 230);
     };
     window.addEventListener("touchstart", onStart, { passive: true });
@@ -232,7 +233,8 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
   </>;
 }
 
-let leaving = false;   // a swipe let go far enough: the page is on its way back
+let leaving = 0;       // the swipe let go far enough whose page is on its way back (0: none)
+let swipes = 0;
 
 /** The copy of the page below goes once the real one is back (or the swipe was let go). */
 function hideBelow() {
@@ -247,7 +249,7 @@ function hideBelow() {
 export function settleSwipe() {
   const main = mainEl();
   if (!main?.classList.contains("swiping")) return;
-  leaving = false;
+  leaving = 0;
   const bar = document.querySelector<HTMLElement>(".title-bar");
   if (bar) { bar.style.transition = "none"; bar.style.opacity = ""; }
   main.style.transition = "none";

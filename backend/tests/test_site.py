@@ -1094,11 +1094,26 @@ def test_a_card_menu_on_long_press_and_right_click(site):
     page.wait_for_timeout(800)
     expect(menu).to_have_count(0)
     expect(page.locator(".item-title")).to_have_count(0)
+    # iOS sends no click once a long press lifts: the first tap on an item still runs it
+    page.evaluate("""() => window.addEventListener("touchend", () => {
+      const swallow = (e) => { e.stopImmediatePropagation(); e.preventDefault(); };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 300);
+    }, { capture: true, once: true })""")
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": box["x"] + 60, "y": box["y"] + 40}]})
+    page.wait_for_timeout(700)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    expect(menu).to_be_visible()
+    page.wait_for_timeout(350)
+    page.get_by_role("menuitem", name="Épingler").tap()
+    _wait_for(lambda: _api(page, "GET", f"/api/items/{ids['article']}")["body"].get("pinned") is True, page)
+    expect(menu).to_have_count(0)
 
     desk = site("/", viewport=DESKTOP)
     desk.locator(".fiche").first.click(button="right")
-    desk.get_by_role("menuitem", name="Épingler").click()
-    _wait_for(lambda: _api(desk, "GET", f"/api/items/{ids['article']}")["body"].get("pinned") is True, desk)
+    expect(desk.get_by_role("menuitem").first).to_be_focused()          # the keyboard starts on its first item
+    desk.get_by_role("menuitem", name="Désépingler").click()
+    _wait_for(lambda: _api(desk, "GET", f"/api/items/{ids['article']}")["body"].get("pinned") is False, desk)
     expect(desk.get_by_role("menu")).to_have_count(0)
 
 

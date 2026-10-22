@@ -196,6 +196,9 @@ export function SwipeRow({ children, flipId, start, end = [], open, onOpenChange
          onPointerDown={onPointerDown} onPointerMove={onPointerMove}
          onPointerUp={(e) => finish(e, false)} onPointerCancel={(e) => finish(e, true)}
          onClickCapture={onClickCapture}
+         // a new touch on the card's menu (a child in React's tree) is a tap of its own: iOS sends no click once a
+         // long press lifts, so the guard against that click would swallow it
+         onPointerDownCapture={(e) => { if ((e.target as HTMLElement).closest(".menu.context, .menu-catcher")) swiped.current = false; }}
          onContextMenu={(e) => { if (!menuItems.length) return; e.preventDefault(); cancelHold(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
       {menuAt && (
         <ContextMenu at={menuAt} onClose={closeMenu}

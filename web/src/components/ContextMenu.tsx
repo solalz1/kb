@@ -29,8 +29,11 @@ export function ContextMenu({ at, items, onClose }: { at: { x: number; y: number
     if (left + w > window.innerWidth - margin) { left = Math.max(margin, at.x - w); x = "right"; }
     if (top + h > window.innerHeight - margin) { top = Math.max(margin, at.y - h - 10); y = "bottom"; }
     setPlace({ left, top, origin: `${y} ${x}` });
-    el.querySelector<HTMLElement>("[role='menuitem']")?.focus({ preventScroll: true });
   }, [at.x, at.y]);
+  // once placed (a hidden button can't take the focus)
+  useEffect(() => {
+    if (place) box.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus({ preventScroll: true });
+  }, [place]);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
