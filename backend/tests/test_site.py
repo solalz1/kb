@@ -1071,7 +1071,7 @@ def test_a_card_menu_on_long_press_and_right_click(site):
     page = site("/", touch=True)
     ids = _seed(page)
     page.reload()
-    card = page.locator(".fiche").first
+    card = page.locator(".fiche:not(.sk-card)").first                     # a card, not one of the loading placeholders
     expect(card).to_be_visible()
     _settled(page)
     box = card.bounding_box()
@@ -1110,7 +1110,7 @@ def test_a_card_menu_on_long_press_and_right_click(site):
     expect(menu).to_have_count(0)
 
     desk = site("/", viewport=DESKTOP)
-    desk.locator(".fiche").first.click(button="right")
+    desk.locator(".fiche:not(.sk-card)").first.click(button="right")
     expect(desk.get_by_role("menuitem").first).to_be_focused()          # the keyboard starts on its first item
     desk.get_by_role("menuitem", name="Désépingler").click()
     _wait_for(lambda: _api(desk, "GET", f"/api/items/{ids['article']}")["body"].get("pinned") is False, desk)
