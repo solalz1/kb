@@ -196,6 +196,12 @@ digest sources and Claude by fakes in `tests/test_digest.py`. Every backend chan
 - Browser tests and motion: pages slide for ~0.4 s and lists glide after a refresh. Raw touch gestures (`_swipe`, CDP
   touch events) must wait for `_settled(page)` (no view transition or finite animation running), and a test that
   matches a heading by name may match the card it just tapped on the previous page: prefer `.item-title`.
+- Reddit refuses servers ("You've been blocked by network security", even to Jina Reader; anonymous JSON closed, API
+  tokens only on approval): it is one of `web.KNOWN_BLOCKERS`, so the Shortcut sends the page from the phone and
+  `extractors/reddit.py` reads it (schema.org JSON-LD, `<shreddit-post>`/`<shreddit-comment>`, old reddit). A post has
+  one address, `https://www.reddit.com/r/<sub>/comments/<id>` (`urls.reddit_post`), whatever link pointed to it; an
+  app's share link (`/r/<sub>/s/<code>`) is resolved by the phone following it. `web.BLOCK_PAGE` must recognise a
+  site's block page, or its text becomes a card: a 200 that `_blocked` matches is treated as a refusal.
 - Perso notes are the user's own words: enrichment must never rewrite `content` for `kind = 'note'`, and the Notion
   copy and the export put the note text first, in full.
 

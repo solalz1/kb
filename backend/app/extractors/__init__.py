@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .. import storage, urls
-from . import arxiv, av, document, github, image, note, pdf, twitter, web, youtube
+from . import arxiv, av, document, github, image, note, pdf, reddit, twitter, web, youtube
 from .base import ExtractionError, Extracted
 
 log = logging.getLogger(__name__)
@@ -73,6 +73,13 @@ def _phone_html(item: dict) -> tuple[Extracted | None, bool]:
         log.warning("Page du téléphone introuvable : %s", path, exc_info=True)
         return None, False
     canonical = urls.classify(item["input_url"]).canonical
+    if urls.is_reddit(item["input_url"]):
+        ex = reddit.parse_html(html, item["input_url"], canonical)
+        if not ex:
+            log.info("Page du téléphone sans post Reddit pour %s : le serveur essaie lui-même", item["input_url"])
+            return None, True
+        ex.metadata["via"] = "phone"
+        return ex, True
     ex = web.extract_html(html, item["input_url"], canonical, jina=False)
     if ex.metadata.get("thin_content") or web._blocked(ex.content):
         log.info("Page du téléphone sans article pour %s : le serveur essaie lui-même", item["input_url"])
@@ -129,6 +136,8 @@ def extract_url(url: str) -> Extracted:
             # ex. post Instagram sans vidéo : on se rabat sur la page web
             log.info("yt-dlp a échoué (%s), extraction web", exc)
             return web.extract(url, info.canonical)
+    if urls.is_reddit(url):
+        return reddit.extract(url, info.canonical)
     return web.extract(url, info.canonical)
 
 

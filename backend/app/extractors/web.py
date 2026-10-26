@@ -23,11 +23,13 @@ THIN = 400
 BLOCKED = (401, 403, 451, 999)          # the site refuses the server (bot protection, datacenter IPs, region)
 # Sites known to refuse servers: the Shortcut fetches their pages from the phone instead (see pipeline.ingest).
 # Others are learned the first time they answer one of BLOCKED.
-KNOWN_BLOCKERS = ("medium.com",)
+KNOWN_BLOCKERS = ("medium.com", "reddit.com", "redd.it")
 BLOCKERS_SETTING = "blocked_hosts"
 # what a bot check or a block page says instead of the article
 BLOCK_PAGE = re.compile(r"just a moment|enable javascript and cookies|attention required|verify you are human|"
-                        r"access denied|are you a robot|checking your browser", re.I)
+                        r"access denied|are you a robot|checking your browser|"
+                        r"blocked by network security|you['’]ve been blocked|your request has been blocked|"
+                        r"use your developer token|whoa there,? pardner", re.I)
 
 
 def _host(url: str) -> str:
@@ -104,7 +106,12 @@ def extract(url: str, canonical: str) -> Extracted:
         ex.source_url = canonical
         return ex
     if "html" in ctype or not ctype or ctype in ("application/xhtml+xml",):
-        return extract_html(data, final_url, canonical)
+        ex = extract_html(data, final_url, canonical)
+        if _blocked(ex.content):
+            # a block page served with a 200: the site refuses the server all the same
+            _remember_blocker(url, 403)
+            return _fallback(url, canonical, status=403)
+        return ex
     if ctype.startswith("text/"):
         return Extracted(kind="article", content=data.decode("utf-8", errors="replace"), source_url=canonical,
                          title=filename, site_name=urlsplit(canonical).netloc)
@@ -175,8 +182,9 @@ def _blocked(text: str) -> bool:
     return len(text) < 3000 and bool(BLOCK_PAGE.search(text))
 
 
-def _wayback(url: str, canonical: str) -> Extracted | None:
-    """The latest copy of the page in the Internet Archive's Wayback Machine, if it has one."""
+def _wayback(url: str, canonical: str, parse=None) -> Extracted | None:
+    """The latest copy of the page in the Internet Archive's Wayback Machine, if it has one. `parse(html, url,
+    canonical)` reads it (default: extract_html), None when it holds nothing."""
     try:
         with http_client(timeout=30) as c:
             r = c.get("https://archive.org/wayback/available", params={"url": url})
@@ -186,11 +194,11 @@ def _wayback(url: str, canonical: str) -> Extracted | None:
             page = c.get(f"https://web.archive.org/web/{snap['timestamp']}id_/{url}")   # id_ : the page as archived
         if page.status_code >= 400:
             return None
-        ex = extract_html(page.content, url, canonical, jina=False)
+        ex = parse(page.content, url, canonical) if parse else extract_html(page.content, url, canonical, jina=False)
     except Exception:
         log.warning("Wayback Machine indisponible", exc_info=True)
         return None
-    if ex.metadata.get("thin_content") or _blocked(ex.content):
+    if not ex or ex.metadata.get("thin_content") or _blocked(ex.content):
         return None
     ex.metadata.update({"via": "wayback", "archived_at": snap["timestamp"]})
     return ex

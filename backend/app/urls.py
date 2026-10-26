@@ -28,6 +28,11 @@ GITHUB_REPO_RE = re.compile(
     r"^(?:https?://)?(?:www\.)?github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?(?:/(?:tree|blob)/[^?#]*)?/?(?:[?#].*)?$",
     re.IGNORECASE,
 )
+# Reddit: a post's id after /comments/ (also in a comment's link), or a redd.it short link. Share links from the app
+# (/r/<sub>/s/<code>) only redirect to the post: the phone follows them (extractors/reddit.py).
+REDDIT_HOSTS = ("reddit.com", "redd.it")
+REDDIT_POST_RE = re.compile(r"^/(?:r/(?P<sub>[\w-]+)/)?comments/(?P<id>[a-z0-9]{4,12})(?:/|$)", re.IGNORECASE)
+REDDIT_SHORT_RE = re.compile(r"^/(?P<id>[a-z0-9]{4,12})/?$", re.IGNORECASE)
 GITHUB_RESERVED = {"orgs", "topics", "collections", "trending", "marketplace", "settings", "sponsors", "features", "about"}
 
 # Plateformes dont le contenu principal est audio/vidéo (traitées via yt-dlp)
@@ -91,6 +96,27 @@ def clean_url(url: str) -> str:
     return urlunsplit(("https" if parts.scheme in ("http", "https") else parts.scheme, netloc, path, urlencode(query), ""))
 
 
+def is_reddit(url: str | None) -> bool:
+    host = urlsplit(url if re.match(r"^https?://", url or "", re.I) else f"https://{url or ''}").netloc.lower()
+    host = host.split("@")[-1].split(":")[0]
+    return any(host == h or host.endswith("." + h) for h in REDDIT_HOSTS)
+
+
+def reddit_post(url: str) -> tuple[str | None, str | None]:
+    """(post id, subreddit) of a Reddit link to a post or one of its comments; (None, None) for anything else."""
+    parts = urlsplit(url if re.match(r"^https?://", url, re.I) else f"https://{url}")
+    host = parts.netloc.lower().split(":")[0]
+    if host == "redd.it" or host.endswith(".redd.it"):
+        m = REDDIT_SHORT_RE.match(parts.path)
+        return (m.group("id").lower(), None) if m else (None, None)
+    m = REDDIT_POST_RE.match(parts.path)
+    return (m.group("id").lower(), m.group("sub")) if m else (None, None)
+
+
+def reddit_canonical(post_id: str, sub: str | None = None) -> str:
+    return f"https://www.reddit.com/r/{sub}/comments/{post_id}" if sub else f"https://www.reddit.com/comments/{post_id}"
+
+
 def classify(url: str) -> UrlInfo:
     url = url.strip()
     if m := TWEET_RE.match(url):
@@ -103,6 +129,11 @@ def classify(url: str) -> UrlInfo:
     if (m := GITHUB_REPO_RE.match(url)) and m.group("owner").lower() not in GITHUB_RESERVED:
         owner, repo = m.group("owner"), m.group("repo")
         return UrlInfo("repo", f"https://github.com/{owner}/{repo}", {"owner": owner, "repo": repo})
+
+    if is_reddit(url):
+        post_id, sub = reddit_post(url)
+        if post_id:      # old., new., m., np. and www. alike, a comment's link, the slug or not: one address per post
+            return UrlInfo("web", reddit_canonical(post_id, sub), {"reddit_post": post_id})
 
     canonical = clean_url(url)
     host = urlsplit(canonical).netloc
@@ -120,4 +151,6 @@ def dedupe_filter(info: UrlInfo) -> tuple[str, list]:
     """Clause SQL pour retrouver un item déjà capturé pour cette URL."""
     if info.kind == "tweet":
         return "source_url like %s", [f"%/status/{info.ids['tweet_id']}"]
+    if info.ids.get("reddit_post"):     # with or without its subreddit in the address
+        return "source_url like %s", [f"%reddit.com/%comments/{info.ids['reddit_post']}"]
     return "source_url = %s", [info.canonical]

@@ -116,7 +116,7 @@ Test : « Dis Siri, Note perso », dicte « Je ne réponds plus aux mails après
 
 - **Threads X** : partage le **dernier** tweet d'un thread. Tout ce qui précède est récupéré. Pour un thread de moins de 7 jours, le premier tweet suffit aussi.
 - **Texte sélectionné** dans Safari : sélectionne le passage, puis Partager → **Ajouter à ma KB**. L'extrait est gardé avec la page.
-- **Sites qui refusent les serveurs** (Medium…) : partage normalement, depuis l'app du site ou Safari. Le Raccourci
+- **Sites qui refusent les serveurs** (Medium, Reddit…) : partage normalement, depuis l'app du site ou Safari. Le Raccourci
   fait lire la page par ton téléphone et l'envoie. Articles réservés aux membres : le texte complet ne vient que de
   Safari, connecté.
 - **Idée au vol** : lance **Ajouter à ma KB** sans rien partager (depuis l'écran d'accueil ou Siri) : il prend le contenu du presse-papiers. Tu peux aussi dicter une note dans l'app.
