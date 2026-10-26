@@ -34,6 +34,9 @@ CATEGORIES = ["Principe", "Valeur", "Leçon", "Objectif", "Habitude", "Réflexio
 # "Où le ranger ?" is filled by the KB at each share (GET /api/folders/choices: Automatique, your folders, Espace Perso),
 # so a folder added in the app shows up without rebuilding the Shortcut. The choice goes back as `folder`.
 CHOICES_PATH = "/api/folders/choices"
+# "Add To KB" asks this first, with what's shared: the same choices, and `open_url` for a link only a browser reads (a
+# Reddit post shared from the Reddit app): the Shortcut opens it in Safari and stops, and it's shared from there.
+PREPARE_PATH = "/api/ingest/prepare"
 WHERE_PROMPT = "Où le ranger ?"
 HAS_ANY_VALUE = 100                    # WFCondition of an If: "has any value"
 # Pages fetched from the phone (sites that refuse servers) ask as Safari on an iPhone would
@@ -112,6 +115,13 @@ class Builder:
                  WFCondition=HAS_ANY_VALUE, WFInput={"Type": "Variable", "Variable": attachment(ref)})
         return group
 
+    def stop_if_has_value(self, ref: dict, then) -> None:
+        """If <ref> has any value: the actions `then()` adds, then Stop This Shortcut."""
+        group = self.if_has_value(ref)
+        then()
+        self.add("exit", with_uuid=False)
+        self.end_if(group)
+
     def end_if(self, group: str) -> None:
         self.add("conditional", GroupingIdentifier=group, WFControlFlowMode=2)
 
@@ -157,8 +167,9 @@ class Builder:
 
 
 def add_to_kb(base: str) -> dict:
-    """Share sheet, links and text: POST /api/ingest as JSON. For a site that refuses servers (Medium…), the API answers
-    `page_wanted`: the phone then fetches the page itself and sends it to POST /api/items/<id>/page."""
+    """Share sheet, links and text: POST /api/ingest as JSON. It first asks the KB (/api/ingest/prepare) for the
+    folders and whether the link must be opened in Safari instead (Reddit). For a site that refuses servers (Medium…),
+    the API answers `page_wanted`: the phone then fetches the page itself and sends it to POST /api/items/<id>/page."""
     b = Builder("Add To KB")
     token = b.token()
     # "Get URLs from Input" takes a text parameter: the variable goes inside a text, or Shortcuts shows an empty
@@ -166,8 +177,26 @@ def add_to_kb(base: str) -> dict:
     urls = b.add("detect.link", "URLs", WFInput=text(SHORTCUT_INPUT))
     first = b.add("getitemfromlist", "Item from List", WFItemSpecifier="First Item", WFInput=attachment(urls))
     shared = b.add("detect.text", "Text", WFInput=attachment(SHORTCUT_INPUT))
+    prepared = b.add("downloadurl", "Contents of URL", custom_name="KB", WFURL=f"{base}{PREPARE_PATH}",
+                     WFHTTPMethod="POST", ShowHeaders=True, WFHTTPHeaders=headers(token), WFHTTPBodyType="JSON",
+                     WFJSONValues=fields(field("url", first), field("text", shared)))
+    # a link only a browser reads: open it in Safari (x-safari-…) and stop, before asking anything
+    safari = b.add("getvalueforkey", "Dictionary Value", custom_name="Safari", WFGetDictionaryValueType="Value",
+                   WFDictionaryKey="open_url", WFInput=attachment(prepared))
+
+    def open_in_safari():
+        why_safari = b.add("getvalueforkey", "Dictionary Value", WFGetDictionaryValueType="Value",
+                           WFDictionaryKey="message", WFInput=attachment(prepared))
+        b.add("notification", WFNotificationActionBody=text(why_safari))
+        # a URL made right before Open URLs: it's that action's input even if its own parameter didn't bind
+        address = b.add("url", "URL", WFURLActionURL=text(safari))
+        b.add("openurl", WFInput=attachment(address))
+
+    b.stop_if_has_value(safari, open_in_safari)
     why = b.add("ask", "Provided Input", WFAskActionPrompt="Pourquoi tu gardes ça ?", WFInputType="Text")
-    where = b.choose_folder(base, token)
+    options = b.add("getvalueforkey", "Dictionary Value", custom_name="Choix", WFGetDictionaryValueType="Value",
+                    WFDictionaryKey="choices", WFInput=attachment(prepared))
+    where = b.add("choosefromlist", "Chosen Item", WFInput=attachment(options), WFChooseFromListActionPrompt=WHERE_PROMPT)
     response = b.add("downloadurl", "Contents of URL", WFURL=f"{base}/api/ingest", WFHTTPMethod="POST",
                      ShowHeaders=True, WFHTTPHeaders=headers(token), WFHTTPBodyType="JSON",
                      WFJSONValues=fields(field("url", first), field("text", shared), field("note", why),

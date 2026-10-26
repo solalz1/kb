@@ -22,8 +22,9 @@ MAX_FILE_BYTES = 200 * 1024 * 1024
 THIN = 400
 BLOCKED = (401, 403, 451, 999)          # the site refuses the server (bot protection, datacenter IPs, region)
 # Sites known to refuse servers: the Shortcut fetches their pages from the phone instead (see pipeline.ingest).
-# Others are learned the first time they answer one of BLOCKED.
-KNOWN_BLOCKERS = ("medium.com", "reddit.com", "redd.it")
+# Others are learned the first time they answer one of BLOCKED. Not Reddit: it gives anything but a browser a bot
+# check, the phone's fetch included, so its links are opened in Safari instead (pipeline.safari_link).
+KNOWN_BLOCKERS = ("medium.com",)
 BLOCKERS_SETTING = "blocked_hosts"
 # what a bot check or a block page says instead of the article
 BLOCK_PAGE = re.compile(r"just a moment|enable javascript and cookies|attention required|verify you are human|"

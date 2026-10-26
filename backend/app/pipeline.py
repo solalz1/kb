@@ -25,8 +25,14 @@ __all__ = ["KIND_LABELS", "clean_tags", "ingest", "create_note", "process", "fai
 # A shared text this long that comes with a link is the page itself (the Safari share sheet attaches the page's text),
 # not a snippet: it's kept aside and read when the server can't read the page (see extractors.extract_item).
 PAGE_TEXT_MIN = 2000
+# A Reddit page's text from Safari can be short (a post without comments); what the Reddit app shares is a link and
+# at most its title (300 characters).
+REDDIT_PAGE_MIN = 500
 # How long an item waits for the page the phone fetches (POST /api/items/<id>/page) before the server tries itself.
 PAGE_WAIT_SECONDS = 60
+# Reddit gives anything but a browser a bot check: a post shared from the Reddit app is opened in Safari (`x-safari-`
+# opens a link there whatever the default browser, on iOS and macOS), and shared from Safari it comes with its text.
+SAFARI_MESSAGE = "Reddit ne laisse lire ses posts qu'à un navigateur : partage-le depuis Safari pour l'ajouter."
 
 INGEST_KIND = {"tweet": "tweet", "youtube": "youtube", "paper": "paper", "repo": "repo", "media": "video", "web": "article"}
 # Types dont le titre d'origine est fiable (sinon on prend celui proposé par Claude)
@@ -48,6 +54,26 @@ def _primary_url(text: str | None) -> str | None:
     first, _, rest = text.strip().partition("\n")
     link = urls.only_url(first)
     return link if link and len(rest.strip()) > PAGE_TEXT_MIN else None
+
+
+def _page_min(url: str) -> int:
+    return REDDIT_PAGE_MIN if urls.is_reddit(url) else PAGE_TEXT_MIN
+
+
+def safari_link(url: str | None, text: str | None) -> str | None:
+    """The address that opens this share in Safari when only a browser can read it: a Reddit post shared without its
+    page (from the Reddit app, Messages…), unless it's already in the KB. None for anything else."""
+    url = (url or "").strip() or _primary_url(text)
+    if not url or not urls.is_reddit(url):
+        return None
+    text = (text or "").strip()
+    if text and text != url and len(text) > _page_min(url):
+        return None                         # shared from Safari: the page's text came with it
+    clause, params = urls.dedupe_filter(urls.classify(url))
+    existing = db.fetchone(f"select status from items where {clause} limit 1", params)
+    if existing and existing["status"] != "error":
+        return None                         # already in the KB: the share only says so
+    return "x-safari-" + (url if re.match(r"^https?://", url, re.I) else f"https://{url}")
 
 
 def _safe_filename(name: str) -> str:
@@ -146,9 +172,9 @@ def ingest(
     if not url and not file and space != "perso":
         url = _primary_url(text)
     page = None
-    if text and url and (text.strip() == url or len(text) > PAGE_TEXT_MIN):
+    if text and url and (text.strip() == url or len(text) > _page_min(url)):
         # the Safari share sheet can attach the whole text of the page: kept aside, used if the site blocks the server
-        page = text if len(text) > PAGE_TEXT_MIN else None
+        page = text if len(text) > _page_min(url) else None
         text = None
     metadata = {"manual_title": True} if title else {}
     if folder_id:
@@ -197,14 +223,16 @@ def ingest(
             out = {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
             if retried:
                 out["retried"] = True
-            elif page_follows and not page and existing["status"] == "error" and info.kind == "web":
+            elif (page_follows and not page and existing["status"] == "error" and info.kind == "web"
+                  and not urls.is_reddit(url)):
                 # failed before: the phone fetches the page (at this address) and sends it, which requeues the item
                 out.update(page_wanted=True, page_url=existing["input_url"] or url)
             return out
         item_id = str(uuid.uuid4())
         if page:
             metadata["page_path"] = _save_page(item_id, page)
-        wanted = page_follows and not page and info.kind == "web" and web_blocks_servers(url)
+        wanted = (page_follows and not page and info.kind == "web" and not urls.is_reddit(url)
+                  and web_blocks_servers(url))
         row = db.fetchone(
             """insert into items (id, input_url, input_text, user_note, source_url, kind, title, space, category,
                                   metadata, next_attempt_at, folder_id)

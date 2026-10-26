@@ -36,6 +36,13 @@ App **Raccourcis** → **+** → nomme-le `Ajouter à ma KB`.
 2. Ajoute **Obtenir les URL de l'entrée** (entrée : *Entrée du raccourci*).
 3. Ajoute **Obtenir l'élément de la liste** → *Premier élément* de *URL*.
 4. Ajoute **Obtenir le texte de l'entrée** (entrée : *Entrée du raccourci*).
+   Pour Reddit (seul un navigateur lit ses posts), demande d'abord à la KB : **Obtenir le contenu de l'URL** →
+   `https://kb.example.com/api/ingest/prepare`, méthode **POST**, en-tête `Authorization` = `Bearer TON_KB_API_TOKEN`,
+   corps **JSON** avec `url` = *Élément de la liste* et `text` = *Texte* ; **Obtenir la valeur du dictionnaire** →
+   clé `open_url` ; **Si** *cette valeur* **a une valeur quelconque** : **Obtenir la valeur du dictionnaire** → clé
+   `message` dans ce *Contenu de l'URL*, **Afficher la notification**, **URL** = la valeur `open_url`, **Ouvrir les
+   URL**, **Arrêter ce raccourci**, **Fin si**. Un post partagé depuis l'app Reddit s'ouvre alors dans Safari, d'où tu
+   le partages de nouveau. La réponse contient aussi `choices`, la liste de l'étape 5.
 5. Facultatif mais utile : **Demander une entrée** → type *Texte*, question `Pourquoi tu gardes ça ?`. Tu pourras valider sans rien écrire.
    Puis, pour choisir un dossier d'un tap, demande à la KB sa liste du moment (un dossier ajouté dans l'app y
    apparaît tout seul) : **Obtenir le contenu de l'URL** → `https://kb.example.com/api/folders/choices`, méthode
@@ -116,9 +123,12 @@ Test : « Dis Siri, Note perso », dicte « Je ne réponds plus aux mails après
 
 - **Threads X** : partage le **dernier** tweet d'un thread. Tout ce qui précède est récupéré. Pour un thread de moins de 7 jours, le premier tweet suffit aussi.
 - **Texte sélectionné** dans Safari : sélectionne le passage, puis Partager → **Ajouter à ma KB**. L'extrait est gardé avec la page.
-- **Sites qui refusent les serveurs** (Medium, Reddit…) : partage normalement, depuis l'app du site ou Safari. Le Raccourci
+- **Sites qui refusent les serveurs** (Medium…) : partage normalement, depuis l'app du site ou Safari. Le Raccourci
   fait lire la page par ton téléphone et l'envoie. Articles réservés aux membres : le texte complet ne vient que de
   Safari, connecté.
+- **Reddit** : partagé depuis l'app Reddit, le Raccourci ouvre le post dans Safari (il dit pourquoi) : partage-le de
+  nouveau de là, il arrive avec le texte de la page. Un Raccourci généré avant ça affiche seulement le message :
+  génère de nouveau `Add To KB`.
 - **Idée au vol** : lance **Ajouter à ma KB** sans rien partager (depuis l'écran d'accueil ou Siri) : il prend le contenu du presse-papiers. Tu peux aussi dicter une note dans l'app.
 - Pour aller plus vite, supprime l'étape « Pourquoi tu gardes ça ? ». Tu pourras ajouter la note plus tard dans la fiche.
 - **Dossiers** : les Raccourcis générés demandent « Où le ranger ? » avec les dossiers de la KB tels qu'ils sont au

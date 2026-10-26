@@ -45,6 +45,10 @@ def extract_item(item: dict) -> Extracted:
 def _read_url(item: dict) -> Extracted:
     """The server reads the link; the page's text sent from Safari rescues a site that refuses it."""
     page = _phone_page(item)
+    if page and urls.is_reddit(item["input_url"]):
+        # only a browser reads a Reddit post: the text Safari sent is the post, the server would only be refused
+        canonical = urls.classify(item["input_url"]).canonical
+        return _from_page(item, page, base=reddit.page_base(item["input_url"], canonical))
     try:
         ex = extract_url(item["input_url"])
     except Exception as exc:

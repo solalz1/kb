@@ -77,7 +77,8 @@ The repository is public, your data is not.
 
 - **Older X threads**: the X API only searches the last 7 days. Share the **last** post of an older thread: everything before it is fetched.
 - **YouTube** often blocks cloud servers. If transcripts are missing, set a residential proxy (`YOUTUBE_PROXY_URL`).
-- **Sites that block servers** (Medium, Reddit and some news sites refuse cloud servers): the Shortcut has your phone fetch the page and sends it, so you share as usual, from the site's app or Safari. A Reddit post comes with its author, its subreddit and its top comments. Shared from the web app instead, a Reddit post can't be read: share it with the Shortcut, or a screenshot. Otherwise the app reads the page again as a browser would, then tries Jina Reader and the Wayback Machine. Member-only stories: the full text comes from a share in **Safari**, signed in (the Shortcut attaches the page's text).
+- **Sites that block servers** (Medium and some news sites refuse cloud servers): the Shortcut has your phone fetch the page and sends it, so you share as usual, from the site's app or Safari. Otherwise the app reads the page again as a browser would, then tries Jina Reader and the Wayback Machine.
+- **Reddit** only lets a browser read its posts, and its API is closed without Reddit's approval. Shared from the Reddit app, the Shortcut opens the post in Safari: share it again from there and the Shortcut sends the page's text. Added from the web app, a post can't be read: share it from Safari, or a screenshot. Member-only stories: the full text comes from a share in **Safari**, signed in (the Shortcut attaches the page's text).
 - **LinkedIn, private Instagram**: behind a login. Share a screenshot instead.
 - **Files over 50 MB**: the Supabase free-plan limit. For a long video, share the link.
 

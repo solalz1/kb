@@ -35,8 +35,10 @@ update both.
   - `folders.py`: the user's folders (`folders` table, one `items.folder_id` per item). Defaults are created once
     (`kb_settings` flag `folders_seeded`) at start; `llm.enrich` picks the folder of each new item, `sort_items`
     (`llm.classify_folders`, batches of 20) files the rest once at start (`folders_sorted`) and from the app. The
-    Shortcut's "Où le ranger ?" list comes from `GET /api/folders/choices` (Automatique, the folders, Espace Perso) and
-    goes back as `folder`; a folder chosen by hand is never changed by Claude.
+    Shortcuts' "Où le ranger ?" list (Automatique, the folders, Espace Perso) comes from `POST /api/ingest/prepare`
+    (Add To KB, asked before anything with what's shared: it also says when to open the link in Safari instead) or
+    `GET /api/folders/choices` (the file Shortcut), and goes back as `folder`; a folder chosen by hand is never changed
+    by Claude.
   - `worker.py`: threads calling `claim_next_item()`. `ExtractionError` = permanent failure; any other exception = retry.
   - `extractors/`: one module per source. URL routing in `urls.classify()`, then `extractors/__init__.py`.
     PDFs use pypdfium2 (not thread-safe: always go through `_PDFIUM_LOCK`).
@@ -197,11 +199,16 @@ digest sources and Claude by fakes in `tests/test_digest.py`. Every backend chan
   touch events) must wait for `_settled(page)` (no view transition or finite animation running), and a test that
   matches a heading by name may match the card it just tapped on the previous page: prefer `.item-title`.
 - Reddit refuses servers ("You've been blocked by network security", even to Jina Reader; anonymous JSON closed, API
-  tokens only on approval): it is one of `web.KNOWN_BLOCKERS`, so the Shortcut sends the page from the phone and
-  `extractors/reddit.py` reads it (schema.org JSON-LD, `<shreddit-post>`/`<shreddit-comment>`, old reddit). A post has
-  one address, `https://www.reddit.com/r/<sub>/comments/<id>` (`urls.reddit_post`), whatever link pointed to it; an
-  app's share link (`/r/<sub>/s/<code>`) is resolved by the phone following it. `web.BLOCK_PAGE` must recognise a
-  site's block page, or its text becomes a card: a 200 that `_blocked` matches is treated as a refusal.
+  tokens only on approval) and gives anything but a browser a bot check, the phone's fetch included. Don't get around
+  it (no browser impersonation, no CAPTCHA solving): only a browser reads a post. So `/api/ingest/prepare` answers
+  `open_url` (`x-safari-<url>`, Safari whatever the default browser) for a Reddit page shared without its text
+  (`pipeline.safari_link`; not one already in the KB): the Shortcut opens it in Safari and stops, and shared from
+  Safari it comes with the page's text (`REDDIT_PAGE_MIN`), which makes the card (`extractors._read_url`,
+  `reddit.page_base`). `extractors/reddit.py` still reads a post's HTML (schema.org JSON-LD,
+  `<shreddit-post>`/`<shreddit-comment>`, old reddit) from the Wayback Machine or a page an older Shortcut sent. A
+  post has one address, `https://www.reddit.com/r/<sub>/comments/<id>` (`urls.reddit_post`), whatever link pointed to
+  it; `i.redd.it` and `v.redd.it` are files, not pages (`urls.is_reddit`). `web.BLOCK_PAGE` must recognise a site's
+  block page, or its text becomes a card: a 200 that `_blocked` matches is treated as a refusal.
 - Perso notes are the user's own words: enrichment must never rewrite `content` for `kind = 'note'`, and the Notion
   copy and the export put the note text first, in full.
 
