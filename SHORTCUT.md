@@ -113,7 +113,7 @@ Test: "Hey Siri, Personal note", dictate "I don't answer emails after 8pm", pick
 
 - **X threads**: share the **last** tweet of a thread; everything before it is fetched. For a thread less than 7 days old, the first tweet works too.
 - **Selected text** in Safari: select the passage, then Share → **Add to my KB**. The excerpt is kept with the page.
-- **Sites that refuse servers** (Medium…): share as usual, from the site's app or Safari. The Shortcut has your phone
+- **Sites that refuse servers** (Medium, Reddit…): share as usual, from the site's app or Safari. The Shortcut has your phone
   fetch the page and sends it. Member-only stories: the full text comes only from Safari, signed in.
 - **Quick idea**: run **Add to my KB** without sharing anything (from the Home Screen or Siri): it takes the clipboard. You can also dictate a note in the app.
 - To go faster, drop the "Why are you keeping this?" step. You can add the note later on the card.
