@@ -29,8 +29,7 @@ GITHUB_REPO_RE = re.compile(
     re.IGNORECASE,
 )
 # Reddit: a post's id after /comments/ (also in a comment's link), or a redd.it short link. Share links from the app
-# (/r/<sub>/s/<code>) only redirect to the post: the phone follows them (extractors/reddit.py).
-REDDIT_HOSTS = ("reddit.com", "redd.it")
+# (/r/<sub>/s/<code>) only redirect to the post: Safari follows them (pipeline.safari_link).
 REDDIT_POST_RE = re.compile(r"^/(?:r/(?P<sub>[\w-]+)/)?comments/(?P<id>[a-z0-9]{4,12})(?:/|$)", re.IGNORECASE)
 REDDIT_SHORT_RE = re.compile(r"^/(?P<id>[a-z0-9]{4,12})/?$", re.IGNORECASE)
 GITHUB_RESERVED = {"orgs", "topics", "collections", "trending", "marketplace", "settings", "sponsors", "features", "about"}
@@ -97,16 +96,18 @@ def clean_url(url: str) -> str:
 
 
 def is_reddit(url: str | None) -> bool:
+    """A Reddit page: reddit.com and its subdomains, or a redd.it short link. Not the files on i.redd.it or
+    v.redd.it, which the server reads like any image or video."""
     host = urlsplit(url if re.match(r"^https?://", url or "", re.I) else f"https://{url or ''}").netloc.lower()
     host = host.split("@")[-1].split(":")[0]
-    return any(host == h or host.endswith("." + h) for h in REDDIT_HOSTS)
+    return host == "redd.it" or host == "reddit.com" or host.endswith(".reddit.com")
 
 
 def reddit_post(url: str) -> tuple[str | None, str | None]:
     """(post id, subreddit) of a Reddit link to a post or one of its comments; (None, None) for anything else."""
     parts = urlsplit(url if re.match(r"^https?://", url, re.I) else f"https://{url}")
     host = parts.netloc.lower().split(":")[0]
-    if host == "redd.it" or host.endswith(".redd.it"):
+    if host == "redd.it":
         m = REDDIT_SHORT_RE.match(parts.path)
         return (m.group("id").lower(), None) if m else (None, None)
     m = REDDIT_POST_RE.match(parts.path)

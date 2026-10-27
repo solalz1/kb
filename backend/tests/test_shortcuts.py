@@ -46,10 +46,21 @@ def _texts(value):
 
 
 def _request(shortcut):
-    """The request that sends the share (the first POST)."""
+    """The request that sends the share (the first POST that isn't Add To KB's question to /api/ingest/prepare)."""
     return next(a["WFWorkflowActionParameters"] for a in shortcut["WFWorkflowActions"]
                 if a["WFWorkflowActionIdentifier"].endswith(".downloadurl")
-                and a["WFWorkflowActionParameters"]["WFHTTPMethod"] == "POST")
+                and a["WFWorkflowActionParameters"]["WFHTTPMethod"] == "POST"
+                and not str(a["WFWorkflowActionParameters"]["WFURL"]).endswith("/api/ingest/prepare"))
+
+
+def _ids(shortcut):
+    return [a["WFWorkflowActionIdentifier"].removeprefix("is.workflow.actions.") for a in shortcut["WFWorkflowActions"]]
+
+
+def _source(params, ref_holder):
+    """The action whose output a parameter holding one variable points to."""
+    uuid = ref_holder["Value"]["OutputUUID"]
+    return next(p for p in params if p.get("UUID") == uuid)
 
 
 def _keys(dictionary_field):
@@ -132,24 +143,61 @@ def test_choices_are_understood_by_the_app(build):
 @pytest.mark.parametrize("name", ["Add To KB", "Fichier vers ma KB"])
 def test_where_to_file_it_comes_from_the_kb(build, shortcuts, name):
     """"Où le ranger ?" lists the KB's folders as they are when sharing: a folder added in the app shows up without
-    rebuilding the Shortcut. The choice goes back as `folder`."""
+    rebuilding the Shortcut. The choice goes back as `folder`. Add To KB gets them with its first question to the KB
+    (/api/ingest/prepare), the file Shortcut from /api/folders/choices."""
     from app.main import api
 
     params = [a["WFWorkflowActionParameters"] for a in shortcuts[name]["WFWorkflowActions"]]
-    ids = [a["WFWorkflowActionIdentifier"].removeprefix("is.workflow.actions.") for a in shortcuts[name]["WFWorkflowActions"]]
-    i = ids.index("choosefromlist")
-    fetch, pick, chosen = params[i - 2], params[i - 1], params[i]
-    assert ids[i - 2:i] == ["downloadurl", "getvalueforkey"] and "list" not in ids
-    assert fetch["WFURL"] == "https://kb.example.com" + build.CHOICES_PATH and fetch["WFHTTPMethod"] == "GET"
-    assert build.CHOICES_PATH in {r.path for r in api.routes if "GET" in getattr(r, "methods", ())}
+    ids = _ids(shortcuts[name])
+    assert ids.count("choosefromlist") == 1 and "list" not in ids
+    chosen = params[ids.index("choosefromlist")]
+    pick = _source(params, chosen["WFInput"])
+    fetch = _source(params, pick["WFInput"])
+    assert pick["WFDictionaryKey"] == "choices" and fetch in params[:params.index(pick)]
+    if name == "Add To KB":
+        assert fetch["WFURL"] == "https://kb.example.com" + build.PREPARE_PATH and fetch["WFHTTPMethod"] == "POST"
+        assert build.PREPARE_PATH in {r.path for r in api.routes if "POST" in getattr(r, "methods", ())}
+    else:
+        assert fetch["WFURL"] == "https://kb.example.com" + build.CHOICES_PATH and fetch["WFHTTPMethod"] == "GET"
+        assert build.CHOICES_PATH in {r.path for r in api.routes if "GET" in getattr(r, "methods", ())}
     assert _keys(fetch["WFHTTPHeaders"])["Authorization"]["WFValue"]["Value"]["string"] == "Bearer " + build.OBJECT
-    assert pick["WFDictionaryKey"] == "choices" and pick["WFInput"]["Value"]["OutputUUID"] == fetch["UUID"]
-    assert chosen["WFInput"]["Value"]["OutputUUID"] == pick["UUID"]
     assert chosen["WFChooseFromListActionPrompt"] == "Où le ranger ?"
     request = _request(shortcuts[name])
     body = _keys(request.get("WFJSONValues") or request["WFFormValues"])
     (ref,) = body["folder"]["WFValue"]["Value"]["attachmentsByRange"].values()
     assert ref["OutputUUID"] == chosen["UUID"]
+
+
+def test_add_opens_in_safari_what_only_a_browser_reads(build, shortcuts):
+    """Add To KB first sends what's shared to /api/ingest/prepare. When the KB answers open_url (a Reddit post shared
+    from the Reddit app), it shows why, opens the link in Safari and stops, before asking anything."""
+    actions = shortcuts["Add To KB"]["WFWorkflowActions"]
+    ids, params = _ids(shortcuts["Add To KB"]), [a["WFWorkflowActionParameters"] for a in actions]
+    prepare = next(p for p in params if p.get("WFURL") == "https://kb.example.com" + build.PREPARE_PATH)
+    first = params.index(prepare)
+    assert first < ids.index("ask") and ids[:first].count("downloadurl") == 0      # the KB is asked before anything
+    sent = _keys(prepare["WFJSONValues"])
+    assert set(sent) == {"url", "text"} and prepare["WFHTTPBodyType"] == "JSON"
+    request = _keys(_request(shortcuts["Add To KB"])["WFJSONValues"])
+    for key in ("url", "text"):                                    # the same url and text as the share itself
+        assert sent[key]["WFValue"] == request[key]["WFValue"]
+
+    start = ids.index("conditional")
+    end = next(i for i in range(start + 1, len(ids)) if ids[i] == "conditional"
+               and params[i]["GroupingIdentifier"] == params[start]["GroupingIdentifier"])
+    assert start < ids.index("ask") and end < ids.index("ask")
+    cond = params[start]
+    assert cond["WFCondition"] == build.HAS_ANY_VALUE and params[end]["WFControlFlowMode"] == 2
+    asked = _source(params, cond["WFInput"]["Variable"])
+    assert asked["WFDictionaryKey"] == "open_url" and _source(params, asked["WFInput"]) is prepare
+    assert ids[start + 1:end] == ["getvalueforkey", "notification", "url", "openurl", "exit"]
+    message, url, opened = params[start + 1], params[start + 3], params[start + 4]
+    assert message["WFDictionaryKey"] == "message" and _source(params, message["WFInput"]) is prepare
+    (shown,) = params[start + 2]["WFNotificationActionBody"]["Value"]["attachmentsByRange"].values()
+    assert shown["OutputUUID"] == message["UUID"]
+    (link,) = url["WFURLActionURL"]["Value"]["attachmentsByRange"].values()
+    assert link["OutputUUID"] == asked["UUID"]
+    assert _source(params, opened["WFInput"]) is url
 
 
 def test_file_shortcut_reports_the_server_message(shortcuts):
@@ -182,12 +230,13 @@ def test_add_fetches_the_page_from_the_phone_when_asked(build, shortcuts):
     from app.main import api
 
     actions = shortcuts["Add To KB"]["WFWorkflowActions"]
-    ids = [a["WFWorkflowActionIdentifier"].removeprefix("is.workflow.actions.") for a in actions]
-    start = next(i for i, a in enumerate(actions) if ids[i] == "conditional"
-                 and a["WFWorkflowActionParameters"]["WFControlFlowMode"] == 0)
-    end = next(i for i, a in enumerate(actions) if ids[i] == "conditional"
+    ids = _ids(shortcuts["Add To KB"])
+    start = max(i for i, a in enumerate(actions) if ids[i] == "conditional"
+                and a["WFWorkflowActionParameters"]["WFControlFlowMode"] == 0)
+    end = next(i for i, a in enumerate(actions) if i > start and ids[i] == "conditional"
                and a["WFWorkflowActionParameters"]["WFControlFlowMode"] == 2)
-    assert ids.index("notification") < start < end == len(actions) - 1
+    share = [a["WFWorkflowActionParameters"] for a in actions].index(_request(shortcuts["Add To KB"]))
+    assert share < ids.index("notification", share) < start < end == len(actions) - 1
     assert ids[start + 1:end] == ["getvalueforkey", "getvalueforkey", "downloadurl", "downloadurl"]
 
     params = [a["WFWorkflowActionParameters"] for a in actions]

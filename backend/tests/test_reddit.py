@@ -1,5 +1,6 @@
-"""Reddit posts: Reddit refuses servers, so the Shortcut sends the post's page from the phone and the KB reads it.
-The pages below are fictional, in the shapes reddit.com, old.reddit.com and search engines (schema.org) get."""
+"""Reddit posts: only a browser reads them, so the Shortcut opens a post shared from the Reddit app in Safari, and
+shared from there it comes with the page's text. The pages below are fictional, in the shapes reddit.com,
+old.reddit.com, search engines (schema.org) and Safari's share sheet give."""
 
 import httpx
 import pytest
@@ -81,9 +82,12 @@ def test_links_to_a_post_give_one_address():
         info = urls.classify(url)
         assert (info.kind, info.canonical, info.ids) == ("web", CANONICAL, {"reddit_post": "1abcde2"}), url
     assert urls.classify("https://redd.it/1abcde2").canonical == "https://www.reddit.com/comments/1abcde2"
-    # a share link only redirects: kept as it is (the phone follows it)
+    # a share link only redirects: kept as it is (Safari follows it)
     assert urls.classify(SHARE) == urls.UrlInfo("web", "https://reddit.com/r/exemple_ia/s/Xy12AbCd", {})
     assert urls.is_reddit(SHARE) and urls.is_reddit("redd.it/abc") and not urls.is_reddit("https://notreddit.com/x")
+    # Reddit's images and videos are files the server reads like any other, not pages
+    assert not urls.is_reddit("https://i.redd.it/ab12cd34ef.jpeg") and not urls.is_reddit("https://v.redd.it/ab12cd34ef")
+    assert urls.reddit_post("https://v.redd.it/ab12cd34ef") == (None, None)
     assert urls.dedupe_filter(urls.classify(POST)) == ("source_url like %s", ["%reddit.com/%comments/1abcde2"])
 
 
@@ -136,15 +140,15 @@ def test_reddits_block_page_is_a_block_page(monkeypatch, clean_db):
     assert web.blocks_servers(url)                                                 # and the phone fetches it next time
 
 
-def test_the_server_alone_says_to_share_with_the_shortcut(monkeypatch, clean_db):
-    monkeypatch.setattr(web, "_browser_get", lambda url: None)
+def test_the_server_alone_says_to_share_from_safari(monkeypatch, clean_db):
+    """The server only tries the Wayback Machine (never as a fake browser), then says what to do."""
+    def no_fake_browser(url):
+        raise AssertionError("the server doesn't pose as a browser to Reddit")
+
+    monkeypatch.setattr(web, "_browser_get", no_fake_browser)
     _fake_web(monkeypatch, {"https://archive.org/wayback/available": (200, {"archived_snapshots": {}})})
-    with pytest.raises(ExtractionError, match="Raccourci « Ajouter à ma KB »"):
+    with pytest.raises(ExtractionError, match="Ouvre le post dans Safari et partage-le de là"):
         extractors.extract_url(SHARE)
-    # a browser that gets the post, or the Wayback Machine's copy of it
-    monkeypatch.setattr(web, "_browser_get", lambda url: SHREDDIT.encode())
-    assert extractors.extract_url(POST).metadata["via"] == "browser"
-    monkeypatch.setattr(web, "_browser_get", lambda url: b"<html>You've been blocked by network security.</html>")
     _fake_web(monkeypatch, {
         "https://archive.org/wayback/available": (200, {"archived_snapshots": {"closest": {
             "available": True, "timestamp": "20260305000000"}}}),
@@ -161,47 +165,107 @@ def client(clean_db, fake_llm):
         yield c
 
 
-def test_shared_from_the_reddit_app_with_the_shortcut(client, monkeypatch):
-    """Reddit is a site that refuses servers: the Shortcut fetches the post from the phone (following the share link)
-    and the card is the post, with its author, its subreddit and its address."""
+# what Safari's share sheet gives the Shortcut for a post: the text of the page as it shows it
+SAFARI_TEXT = """r/exemple_ia
+alice_dev
+Mes règles pour Claude après six mois
+Après six mois, voici ce qui marche le mieux pour moi.
+Donner un exemple de sortie attendue.
+Demander un plan avant le code.
+Relire le plan avant de le laisser écrire quoi que ce soit, et le corriger tout de suite s'il part ailleurs.
+Le reste compte beaucoup moins. Bonne journée.
+bob_ml
+Le plan avant le code, c'est le meilleur conseil. Je le fais même pour des scripts de dix lignes.
+dave
+Je fais pareil avec des tests écrits d'abord : il voit ce qui est attendu avant de commencer.
+erin_data
+Merci, je garde la liste."""
+
+
+def _prepare(client, **body):
+    r = client.post("/api/ingest/prepare", json=body, headers=AUTH)
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_shared_from_the_reddit_app_it_opens_in_safari(client, monkeypatch):
+    """The Reddit app shares a link: before asking anything, the Shortcut learns from the KB to open it in Safari
+    (x-safari- opens it there whatever the default browser), and nothing is saved yet."""
     from app import db
 
+    body = _prepare(client, url=SHARE, text=SHARE)
+    assert body["open_url"] == "x-safari-" + SHARE and "Safari" in body["message"]
+    assert body["choices"][0] == "Automatique" and body["choices"][-1] == "Espace Perso"
+    assert _prepare(client, url="", text=f"Mes règles pour Claude\n{POST}")["open_url"] == "x-safari-" + POST
+    assert _prepare(client, url="redd.it/1abcde2")["open_url"] == "x-safari-https://redd.it/1abcde2"
+    # anything else: only the folders
+    for other in ({"url": "https://www.lemonde.fr/x"}, {"url": "https://i.redd.it/ab12cd34ef.jpeg"}, {"text": "une idée"},
+                  {}):
+        assert _prepare(client, **other) == {"choices": body["choices"]}, other
+    # a Shortcut from before: its share isn't saved, and it shows where to share it from
+    old = client.post("/api/ingest", json={"url": SHARE, "text": SHARE, "page_follows": "1"}, headers=AUTH).json()
+    assert old["ok"] is False and old["message"] == body["message"] and old["open_url"] == "x-safari-" + SHARE
+    assert "page_wanted" not in old                       # the phone's fetch would only get a bot check
+    assert db.fetchone("select count(*) as n from items")["n"] == 0
+
+
+def test_shared_from_safari_the_page_makes_the_card(client, monkeypatch):
+    """Shared from Safari, the post comes with its page's text: the card is made from it, with the post's one address
+    and its subreddit, and the server doesn't even try Reddit."""
+    from app import db, pipeline
+
+    assert len(SAFARI_TEXT) > pipeline.REDDIT_PAGE_MIN          # a short post: under the 2000 characters of other sites
+
     def server_must_not_try(url):
-        raise AssertionError("the server should read the phone's copy")
+        raise AssertionError("the server should read the text Safari sent")
 
     monkeypatch.setattr(extractors, "extract_url", server_must_not_try)
-    body = client.post("/api/ingest", json={"url": SHARE, "note": "utile même si un peu daté", "page_follows": "1"},
-                       headers=AUTH).json()
-    assert body["page_wanted"] is True and body["page_url"] == SHARE
-    assert drain() == 0                                                  # waits for the phone's page
-    _page_upload(client, body["id"], SHREDDIT.encode())
+    safari_url = POST + "?share_id=Ab12&utm_source=share"
+    assert "open_url" not in _prepare(client, url=safari_url, text=SAFARI_TEXT)
+    body = client.post("/api/ingest", json={"url": safari_url, "text": SAFARI_TEXT, "note": "pour mes prompts",
+                                             "page_follows": "1"}, headers=AUTH).json()
+    assert body["message"] == "Ajouté à ta KB ✓" and "page_wanted" not in body
     drain()
-    row = db.fetchone("select status, kind, title, author, site_name, source_url, content, metadata from items where id = %s",
+    row = db.fetchone("select status, kind, site_name, source_url, content, input_text, metadata from items where id = %s",
                       (body["id"],))
-    assert row["status"] == "ready" and row["kind"] == "article"
-    assert row["title"] == "Mes règles pour Claude après six mois" and row["author"] == "u/alice_dev"
+    assert row["status"] == "ready" and row["kind"] == "article" and row["input_text"] is None
     assert row["site_name"] == "Reddit · r/exemple_ia" and row["source_url"] == CANONICAL
-    assert "Demander un plan avant le code" in row["content"] and row["metadata"]["via"] == "phone"
-    # the same post shared again by its address: already in the KB
-    again = client.post("/api/ingest", json={"url": POST, "page_follows": "1"}, headers=AUTH).json()
+    assert "Demander un plan avant le code." in row["content"] and row["metadata"]["via"] == "phone"
+    assert row["metadata"]["reddit_post"] == "1abcde2" and row["metadata"]["subreddit"] == "r/exemple_ia"
+    # in the KB now: the Reddit app's link to it no longer needs Safari, the share says it's there
+    assert "open_url" not in _prepare(client, url=POST, text=POST)
+    again = client.post("/api/ingest", json={"url": POST, "text": POST, "page_follows": "1"}, headers=AUTH).json()
     assert again["id"] == body["id"] and again["items"][0]["duplicate"] is True
 
 
-def test_the_phone_got_a_block_page_too(client, monkeypatch):
+def test_a_failed_post_is_read_again_from_safari(client, monkeypatch):
+    """Added from the app (no Safari): the card fails and says to share from Safari; shared from Safari, it's read."""
     from app import db
 
-    monkeypatch.setattr(web, "_browser_get", lambda url: None)
     _fake_web(monkeypatch, {"https://archive.org/wayback/available": (200, {"archived_snapshots": {}})})
-    item_id = client.post("/api/ingest", json={"url": SHARE, "page_follows": "1"}, headers=AUTH).json()["id"]
-    _page_upload(client, item_id, b"<html><body>You've been blocked by network security.</body></html>")
+    item_id = client.post("/api/ingest", json={"url": POST}, headers=AUTH).json()["id"]
     drain()
     row = db.fetchone("select status, error from items where id = %s", (item_id,))
-    assert row["status"] == "error" and "page envoyée par ton téléphone est bien arrivée" in row["error"]
-    assert "capture d'écran" in row["error"]
+    assert row["status"] == "error" and "Ouvre le post dans Safari" in row["error"] and "capture d'écran" in row["error"]
+    assert _prepare(client, url=POST, text=POST)["open_url"] == "x-safari-" + POST     # failed: Safari can fix it
+    again = client.post("/api/ingest", json={"url": POST, "text": SAFARI_TEXT, "page_follows": "1"}, headers=AUTH).json()
+    assert again["id"] == item_id and again["message"] == "Page reçue, je la relis ✓"
+    drain()
+    assert db.fetchone("select status from items where id = %s", (item_id,))["status"] == "ready"
+
+
+def test_a_page_the_phone_sent_is_still_read(client, monkeypatch):
+    """A post's page that reached /api/items/<id>/page (a Shortcut from before) is read like the server would."""
+    from app import db
+
+    item_id = client.post("/api/ingest", json={"url": SHARE}, headers=AUTH).json()["id"]
+    _page_upload(client, item_id, SHREDDIT.encode())
+    drain()
+    row = db.fetchone("select status, title, author, source_url from items where id = %s", (item_id,))
+    assert row["status"] == "ready" and row["author"] == "u/alice_dev" and row["source_url"] == CANONICAL
 
 
 def test_network_errors_from_reddit_are_not_cards(monkeypatch, clean_db):
-    monkeypatch.setattr(web, "_browser_get", lambda url: None)
     _fake_web(monkeypatch, {"https://archive.org/wayback/available": (0, httpx.ConnectError("down"))})
     with pytest.raises(ExtractionError):
         reddit.extract(SHARE, SHARE)

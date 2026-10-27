@@ -210,10 +210,16 @@ async def ingest(request: Request):
         elif "application/json" in ctype:
             body = await request.json()
             body = body if isinstance(body, dict) else {}
+            page_follows = str(body.get("page_follows") or "").lower() in ("1", "true", "yes", "oui")
+            safari = page_follows and await run_in_threadpool(
+                pipeline.safari_link, _str(body.get("url")), _str(body.get("text")))
+            if safari:
+                # a Shortcut from before /api/ingest/prepare: nothing to save without the page, Safari will send it
+                return {"ok": False, "message": pipeline.SAFARI_MESSAGE, "items": [], "open_url": safari}
             results.append(await run_in_threadpool(
                 pipeline.ingest, url=_str(body.get("url")), text=_str(body.get("text")), note=_str(body.get("note")),
                 space=_str(body.get("space")), category=_str(body.get("category")), title=_str(body.get("title")),
-                folder=_str(body.get("folder")), page_follows=str(body.get("page_follows") or "").lower() in ("1", "true", "yes", "oui")))
+                folder=_str(body.get("folder")), page_follows=page_follows))
         else:
             raw = (await request.body()).decode("utf-8", errors="replace")
             results.append(await run_in_threadpool(pipeline.ingest, text=raw))
@@ -233,6 +239,23 @@ async def ingest(request: Request):
     if len(results) == 1 and results[0].get("page_wanted"):
         # the Shortcut then fetches page_url from the phone and sends it: POST /api/items/<id>/page
         out.update(page_wanted=True, page_url=results[0]["page_url"])
+    return out
+
+
+class PrepareIn(BaseModel):
+    url: str | None = None
+    text: str | None = None
+
+
+@api.post("/api/ingest/prepare", dependencies=auth)
+def ingest_prepare(body: PrepareIn):
+    """What the "Add To KB" Shortcut asks before its questions: the "Où le ranger ?" list and, for a link only a browser
+    reads (a Reddit post shared from the Reddit app), `open_url`: the Shortcut opens it in Safari and stops, and the
+    post is shared from there with its page."""
+    out = {"choices": folders.choices()}
+    safari = pipeline.safari_link(body.url, body.text)
+    if safari:
+        out.update(open_url=safari, message=pipeline.SAFARI_MESSAGE)
     return out
 
 

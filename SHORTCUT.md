@@ -34,6 +34,13 @@ action, "Text", never into the files) and adds the Shortcut. They reach your iPh
 2. Add **Get URLs from Input** (input: *Shortcut Input*).
 3. Add **Get Item from List** → *First Item* of *URLs*.
 4. Add **Get Text from Input** (input: *Shortcut Input*).
+   For Reddit (only a browser reads its posts), ask the KB before anything else: **Get Contents of URL** →
+   `https://kb.example.com/api/ingest/prepare`, method **POST**, header `Authorization` = `Bearer YOUR_KB_API_TOKEN`,
+   Request Body **JSON** with `url` = *Item from List* and `text` = *Text*; **Get Dictionary Value** → key `open_url`;
+   **If** *that value* **has any value**: **Get Dictionary Value** → key `message` in that *Contents of URL*,
+   **Show Notification**, **URL** = the `open_url` value, **Open URLs**, **Stop This Shortcut**, **End If**. A post
+   shared from the Reddit app then opens in Safari, from where you share it again. The answer also holds `choices`,
+   the list of step 5.
 5. Optional but useful: **Ask for Input** → type *Text*, prompt `Why are you keeping this?`. You can confirm without typing anything.
    Then, to pick a folder with one tap, ask the KB for its current list (a folder you add in the app shows up here
    by itself): **Get Contents of URL** → `https://kb.example.com/api/folders/choices`, method **GET**, header
@@ -113,8 +120,11 @@ Test: "Hey Siri, Personal note", dictate "I don't answer emails after 8pm", pick
 
 - **X threads**: share the **last** tweet of a thread; everything before it is fetched. For a thread less than 7 days old, the first tweet works too.
 - **Selected text** in Safari: select the passage, then Share → **Add to my KB**. The excerpt is kept with the page.
-- **Sites that refuse servers** (Medium, Reddit…): share as usual, from the site's app or Safari. The Shortcut has your phone
+- **Sites that refuse servers** (Medium…): share as usual, from the site's app or Safari. The Shortcut has your phone
   fetch the page and sends it. Member-only stories: the full text comes only from Safari, signed in.
+- **Reddit**: shared from the Reddit app, the Shortcut opens the post in Safari (it says why): share it again from
+  there, and it comes with the page's text. A Shortcut generated before this only shows the message: generate
+  `Add To KB` again.
 - **Quick idea**: run **Add to my KB** without sharing anything (from the Home Screen or Siri): it takes the clipboard. You can also dictate a note in the app.
 - To go faster, drop the "Why are you keeping this?" step. You can add the note later on the card.
 - **Folders**: the generated Shortcuts ask "Où le ranger ?" with the KB's folders as they are when you share, so a

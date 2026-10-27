@@ -1,10 +1,12 @@
 """Reddit posts: the post (title, text or shared link, author, subreddit, date) and its top comments.
 
 Reddit refuses servers: a datacenter IP gets "You've been blocked by network security", its JSON endpoints are closed
-to anonymous clients, and its API has only given developer tokens on approval since late 2025. So Reddit is one of
-web.KNOWN_BLOCKERS: the Shortcut fetches the post from the phone (following a share link from the app to the post)
-and sends the page, which `parse_html` reads. Without the phone, the server still tries as a browser, then the
-Wayback Machine, and otherwise says to share the post with the Shortcut.
+to anonymous clients, its API has only given developer tokens on approval since late 2025, and a page fetched by
+anything but a browser is a bot check, even from a phone. So only a browser reads a post: the Shortcut opens a link
+shared from the Reddit app in Safari (pipeline.safari_link), and shared from Safari it comes with the page's text,
+which makes the card (`page_base` gives it its address and subreddit). Without it, the server only tries the Wayback
+Machine, then says to share the post from Safari. `parse_html` reads a post's page as a browser got it (the Wayback
+Machine's copy, or a page the phone sent).
 """
 
 from __future__ import annotations
@@ -28,8 +30,9 @@ MAX_COMMENT_CHARS = 1500
 POST_TYPES = ("DiscussionForumPosting", "SocialMediaPosting")
 _BLOCKS = ".//p|.//li|.//pre|.//blockquote|.//h1|.//h2|.//h3|.//h4|.//h5|.//h6"
 
-NEEDS_PHONE = ("Reddit refuse l'accès aux serveurs. Partage le post depuis l'app Reddit avec le Raccourci « Ajouter à "
-               "ma KB » : il le lira depuis ton téléphone. Sinon, une capture d'écran du post marche aussi.")
+NEEDS_SAFARI = ("Reddit ne laisse lire ses posts qu'à un navigateur. Ouvre le post dans Safari et partage-le de là avec "
+                "le Raccourci : il envoie le texte de la page (partagé depuis l'app Reddit, le Raccourci l'ouvre dans "
+                "Safari pour toi). Sinon, une capture d'écran du post marche aussi.")
 
 
 def _clean(text: str | None) -> str:
@@ -226,17 +229,21 @@ def parse_html(html: str | bytes, url: str, canonical: str) -> Extracted | None:
     )
 
 
+def page_base(url: str, canonical: str) -> Extracted:
+    """What the address says about a post whose page's text came from Safari: its one address and its subreddit."""
+    post_id, sub = urls.reddit_post(url)
+    return Extracted(kind="article", content="",
+                     source_url=urls.reddit_canonical(post_id, sub) if post_id else canonical,
+                     site_name=f"Reddit · r/{sub}" if sub else "Reddit",
+                     metadata={k: v for k, v in {"subreddit": f"r/{sub}" if sub else None,
+                                                 "reddit_post": post_id}.items() if v})
+
+
 def extract(url: str, canonical: str) -> Extracted:
-    """The server's own try: as a browser, then the Wayback Machine. Reddit usually refuses both for a recent post,
-    and the error says to share it with the Shortcut (which sends the page from the phone)."""
-    html = web._browser_get(url)
-    if html:
-        ex = parse_html(html, url, canonical)
-        if ex:
-            ex.metadata["via"] = "browser"
-            return ex
+    """The server alone: Reddit refuses it, so only the Wayback Machine's copy of the post, if it has one (rarely for a
+    recent post). Otherwise the error says to share the post from Safari."""
     archived = web._wayback(canonical if urls.reddit_post(canonical)[0] else url, canonical, parse=parse_html)
     if archived:
         return archived
     log.info("Reddit : %s illisible depuis le serveur", url)
-    raise ExtractionError(NEEDS_PHONE)
+    raise ExtractionError(NEEDS_SAFARI)
