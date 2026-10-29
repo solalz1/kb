@@ -474,7 +474,7 @@ def list_items(
     clause = " and ".join(where)
     rows = db.fetchall(
         f"select {LIST_FIELDS} from items where {clause} order by pinned desc, created_at desc limit %s offset %s",
-        (*params, limit, offset),
+        (*params, limit, max(0, offset)),
     )
     total = db.fetchone(f"select count(*) n from items where {clause}", params)["n"]
     return {"items": _with_thumbs(rows), "total": total, "search": False}
@@ -663,7 +663,7 @@ def tags(limit: int = 200, space: str | None = None):
         """select tag, count(*)::int as count from items, unnest(tags) tag
            where status = 'ready' and not archived and (%s::text is null or space = %s)
            group by tag order by count desc, tag limit %s""",
-        (space, space, limit),
+        (space, space, max(1, min(limit, 1000))),
     )
 
 
@@ -676,7 +676,7 @@ def entities(limit: int = 100, type: str | None = None, space: str | None = None
            where status = 'ready' and not archived and (%s::text is null or e->>'type' = %s)
              and (%s::text is null or space = %s)
            group by 1, 2 having count(*) >= 1 order by count desc, name limit %s""",
-        (type, type, space, space, limit),
+        (type, type, space, space, max(1, min(limit, 1000))),
     )
 
 

@@ -193,7 +193,7 @@ async def add_to_kb(
 @mcp.tool()
 async def list_recent(days: int = 7, limit: int = 20, kind: str | None = None) -> str:
     """Éléments sauvegardés récemment (par défaut : 7 derniers jours)."""
-    since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 36500)))
     rows = await _run(
         db.fetchall,
         f"""select {ITEM_FIELDS} from items where status = 'ready' and not archived and created_at >= %s
@@ -255,7 +255,7 @@ async def browse_kb(
             params.append(entity)
         if since_days:
             where.append("created_at >= now() - make_interval(days => %s)")
-            params.append(since_days)
+            params.append(min(since_days, 36500))
         clause = " and ".join(where)
         total = db.fetchone(f"select count(*)::int n from items where {clause}", params)["n"]
         rows = db.fetchall(
