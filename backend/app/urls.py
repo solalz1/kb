@@ -15,7 +15,8 @@ TWEET_RE = re.compile(
     re.IGNORECASE,
 )
 YOUTUBE_RE = re.compile(
-    r"^(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)|youtu\.be/)"
+    r"^(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/|v/)|youtu\.be/"
+    r"|youtube-nocookie\.com/(?:embed|v)/)"
     r"(?P<id>[A-Za-z0-9_-]{11})",
     re.IGNORECASE,
 )
@@ -38,7 +39,7 @@ GITHUB_RESERVED = {"orgs", "topics", "collections", "trending", "marketplace", "
 MEDIA_HOSTS = (
     "tiktok.com", "instagram.com", "vimeo.com", "dailymotion.com", "twitch.tv",
     "podcasts.apple.com", "soundcloud.com", "facebook.com", "fb.watch", "loom.com",
-    "rumble.com", "bilibili.com", "ted.com", "threads.net/@",
+    "rumble.com", "bilibili.com", "ted.com", "threads.net/@", "threads.com/@",   # Threads moved to threads.com in 2025
 )
 MEDIA_PATH_HINTS = {
     "instagram.com": ("/reel/", "/reels/", "/p/", "/tv/"),
@@ -49,7 +50,7 @@ MEDIA_PATH_HINTS = {
 TRACKING_PARAMS = {
     "fbclid", "gclid", "dclid", "msclkid", "igshid", "igsh", "mc_cid", "mc_eid", "ref", "ref_src",
     "ref_url", "source", "s", "si", "feature", "share", "share_id", "_hsenc", "_hsmi", "mkt_tok",
-    "trk", "trackingid", "lipi", "spm", "cmpid", "xtor",
+    "trk", "trackingid", "lipi", "spm", "cmpid", "xtor", "xmt",
 }
 
 
