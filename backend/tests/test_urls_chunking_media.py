@@ -20,6 +20,12 @@ from app.pipeline import _primary_url
     ("https://www.tiktok.com/@user/video/123?is_from_webapp=1", "media", None),
     ("https://www.instagram.com/reel/C123abc/?igsh=xyz", "media", "https://instagram.com/reel/C123abc"),
     ("https://www.instagram.com/someprofile/", "web", None),
+    ("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=30", "youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+    ("https://www.youtube.com/v/dQw4w9WgXcQ", "youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+    ("https://www.youtube.com/playlist?list=PL123", "web", None),
+    ("https://www.threads.com/@someone/post/C1a2B3c?xmt=abc", "media", "https://threads.com/@someone/post/C1a2B3c"),
+    ("https://www.threads.net/@someone/post/C1a2B3c", "media", "https://threads.net/@someone/post/C1a2B3c"),
+    ("https://www.threads.com/search?q=kb", "web", None),
     ("https://blog.example.com/post/?utm_source=x&id=3", "web", "https://blog.example.com/post?id=3"),
 ])
 def test_classify(url, kind, canonical):
