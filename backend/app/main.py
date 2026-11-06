@@ -26,7 +26,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, folders, llm, migrate, notion, obsidian, pipeline, search, sso, storage, wiki
+from . import chat, costs, db, export, folders, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -82,6 +82,7 @@ def _seed_folders() -> None:
         log.warning("Dossiers par défaut non créés", exc_info=True)
 
 
+monitoring.init(settings.sentry_dsn, settings.dev_copy)
 api = FastAPI(title="KB", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
 if settings.cors_origin_list:
     api.add_middleware(

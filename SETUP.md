@@ -215,6 +215,13 @@ With `DEV_COPY=true` (or a service named `…-dev`) the copy runs no worker (pro
 
 Every push to the branch redeploys the copy. To ship the change, merge the branch: your KB redeploys. Then delete `kb-dev` and its DNS records, or point it at the next branch.
 
+## 16. Error reports (optional)
+
+1. Create a Python project on [Sentry](https://sentry.io) and copy its DSN.
+2. Add `SENTRY_DSN` to Railway → Variables, then let the service redeploy.
+
+Only an error's type, its first 300 characters and the stack leave the KB: no request body, header, parameter or local variable. A page that can't be read is reported on its card, not to Sentry. A dev copy (step 15) reports under the `dev` environment.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

@@ -216,6 +216,13 @@ Avec `DEV_COPY=true` (ou un service nommé `…-dev`), la copie ne fait tourner 
 
 Chaque modification poussée sur la branche redéploie la copie. Pour mettre la nouveauté en prod, fusionne la branche : ta KB se redéploie. Ensuite, supprime `kb-dev` et ses enregistrements DNS, ou fais-lui suivre la branche suivante.
 
+## 16. Rapports d'erreurs (facultatif)
+
+1. Crée un projet Python sur [Sentry](https://sentry.io) et copie son DSN.
+2. Ajoute `SENTRY_DSN` dans Railway → Variables, puis laisse le service se redéployer.
+
+Seuls le type d'une erreur, ses 300 premiers caractères et la pile d'appels quittent la KB : aucun corps de requête, en-tête, paramètre ni variable locale. Une page illisible est signalée sur sa fiche, pas à Sentry. Une copie de développement (étape 15) envoie ses rapports dans l'environnement `dev`.
+
 ## Dépannage
 
 | Symptôme | Cause probable |

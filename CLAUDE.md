@@ -79,6 +79,7 @@ update both.
   - `costs.py`: Settings → Costs. Every paid call is recorded in `usage_log` (`costs.record*`, priced from the public
     price lists). The Claude Console Cost API (`ANTHROPIC_ADMIN_KEY`, cents per UTC day) and the X credit balance are
     synced and cached 10 min; tests never reach them (the autouse `billing_apis` fixture fakes `_http_get`).
+  - `monitoring.py`: optional Sentry reports (`SENTRY_DSN`). `scrub` keeps an error's type, short text and stack, nothing that can carry saved content.
   - `mcp_server.py`: `mcp` SDK **v2** (`MCPServer`, not `FastMCP`), stateless, JSON responses.
   - `digest/`: the tech-digest agent. `sources.py` (HN Algolia, Hugging Face daily papers, GitHub search, RSS via
     feedparser, followed people on X via `/tweets/search/recent`), `profile.py` (interest profile learned from tags,
