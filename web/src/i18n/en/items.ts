@@ -25,6 +25,8 @@ export default {
   "Hacker News · {points} points · {comments} commentaires": "Hacker News · {points} points · {comments} comments",
   "Discussion HN ↗": "HN discussion ↗",
   "Chercher dans HN": "Search HN",
+  "Dans : {scope}": "In: {scope}",
+  "Dans :": "In:",
   "Pas encore de stories HN": "No HN stories yet",
   "Elles arrivent chaque matin : les meilleures du jour sur Hacker News, avec l'article et les commentaires. « Récupérer maintenant » les va chercher tout de suite.":
     "They arrive every morning: the day's best on Hacker News, with the article and the comments. “Fetch now” gets them right away.",

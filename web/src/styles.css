@@ -482,6 +482,23 @@ code { font-family: var(--mono); font-size: 0.9em; }
   .search kbd { display: inline-block; }
 }
 @media (hover: none) { .search kbd { display: none; } }
+/* « Dans »: where the search looks, next to the field */
+.search-row { display: flex; align-items: stretch; gap: 8px; }
+.search-row .search { flex: 1; min-width: 0; }
+.scope-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-3); font: inherit; font-size: 14px;
+  cursor: pointer; white-space: nowrap;
+}
+.scope-btn b { font-weight: 600; color: var(--ink-2); max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+.scope-btn[aria-expanded="true"] { border-color: var(--accent); }
+@media (hover: hover) { .scope-btn:hover { color: var(--ink); } }
+/* a card from another space than the page's */
+.space-pill {
+  flex: none; font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 1px 7px; border-radius: 8px;
+  background: var(--sand); color: var(--ink-2);
+}
+.space-pill[data-space="perso"], .space-pill[data-space="hn"] { background: var(--tint); }
 
 /* ---------- Feed (Veille, Perso, a folder) ---------- */
 

@@ -506,8 +506,9 @@ export function cleanDetail(item: ItemDetail): ItemDetail {
 
 export const api = {
   health: () => request<{ ok: boolean; sso_login?: string | null; real_url?: string | null }>("/api/health"),
+  /** `in`: where a search looks (all, mine, main, perso, hn, folder:<id>), over `space` and `folder`. */
   items: (params: { q?: string; kind?: string; tag?: string; entity?: string; space?: Space; category?: string;
-                    folder?: string; limit?: number; offset?: number; archived?: boolean }) =>
+                    folder?: string; limit?: number; offset?: number; archived?: boolean; in?: string }) =>
     request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`)
       .then((r) => ({ ...r, items: r.items.map(cleanSummary) })),
   /** `view`: counts as the user opening it (once per visit; a refresh in the background doesn't). */

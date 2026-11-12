@@ -2,16 +2,17 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useParams, useSearchParams } from "react-router-dom";
 import { api, type Folder, type ItemSummary, type Space } from "../api";
 import { cache, useQuery } from "../cache";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { Fiche, ResurfaceCard, ResurfaceNote } from "../components/Fiche";
 import { CardsSkeleton } from "../components/Skeleton";
 import { SwipeRow, type SwipeAction, type SwipeSide } from "../components/Swipe";
 import { t } from "../i18n";
-import { IconArchive, IconBack, IconCalendar, IconClose, IconEdit, IconFeed, IconFolder, IconNews, IconPin, IconSearch, IconSettings, IconTodo, IconTrash, IconWiki } from "../icons";
+import { IconArchive, IconBack, IconCalendar, IconCheck, IconClose, IconDown, IconEdit, IconFeed, IconFolder, IconNews, IconPin, IconSearch, IconSettings, IconTodo, IconTrash, IconWiki } from "../icons";
 import { KIND_FILTERS, fullDate, kindsOf } from "../kinds";
 import { useDesktop } from "../layout";
 import { useFlip } from "../motion";
 import { Link, useNavigate } from "../nav";
-import { CATEGORIES, categoryOf } from "../perso";
+import { CATEGORIES, SPACE_LABEL, categoryOf } from "../perso";
 import { dropItem, fetchItems, fetchMore, forgetItem, keys, patchItem, type ItemsPage, type ItemsQuery } from "../queries";
 import { Toast } from "../components/Toast";
 
@@ -45,6 +46,10 @@ export default function Feed({ space }: { space?: Space }) {
   const tag = params.get("tag") || "";
   const entity = params.get("entity") || "";
   const archived = params.get("archived") === "1";
+  // « Dans »: where the search looks. The page's own scope by default; another one lives in the URL (?in=)
+  const pageScope = folderId ? `folder:${folderId}` : space ?? "main";
+  const scope = params.get("in") || pageScope;
+  const [scopeMenu, setScopeMenu] = useState<{ x: number; y: number } | null>(null);
   const [q, setQ] = useState(params.get("q") || "");
   const [query, setQuery] = useState(q);
   const [actionError, setError] = useState("");
@@ -65,6 +70,7 @@ export default function Feed({ space }: { space?: Space }) {
   const filters: ItemsQuery = {
     q: query || undefined, kind: kind ? kindsOf(kind) : undefined, tag: tag || undefined, entity: entity || undefined,
     category: category || undefined, space, folder: folderId, archived: archived || undefined,
+    in: query && scope !== pageScope ? scope : undefined,      // sent only with a query
   };
   const listKey = keys.items(filters);
   useEffect(() => { setError(""); }, [listKey]);       // an action that failed belongs to the list it was on
@@ -96,8 +102,23 @@ export default function Feed({ space }: { space?: Space }) {
   const archivedKey = keys.archivedCount(space);
   const archivedCount = useQuery(aside ? archivedKey : null,
                                  () => api.items({ space, archived: true, limit: 1 }).then((r) => r.total)).data ?? 0;
-  const folders = useQuery(inFolder && folderId !== "none" ? keys.folders : null, api.folders).data;
+  // the folders: for a folder's own page, and for « Dans » once its menu opens (or a folder is the scope)
+  const folders = useQuery((inFolder && folderId !== "none") || scopeMenu || scope.startsWith("folder:") ? keys.folders : null,
+                           api.folders).data;
   const folder: Folder | null = folders?.folders.find((f) => f.id === folderId) ?? null;
+  const scopes: { id: string; label: string }[] = [
+    { id: "all", label: t("Tout") }, { id: "mine", label: t("Mes enregistrements") }, { id: "main", label: t("Veille") },
+    { id: "perso", label: t("Perso") }, { id: "hn", label: "HN" },
+    ...(folders?.folders ?? []).map((f) => ({ id: `folder:${f.id}`, label: f.name })),
+  ];
+  const scopeLabel = scopes.find((s) => s.id === scope)?.label ?? (folderId === "none" ? t("Sans dossier") : t("Dossier"));
+  const scopeItems: MenuItem[] = scopes.map((s) => ({
+    id: s.id, label: s.label, icon: s.id === scope ? <IconCheck size={16} /> : undefined,
+    run: () => setFilter("in", s.id === pageScope ? "" : s.id),
+  }));
+  // a card from another space than the page's (a folder holds what the user saved) shows which one
+  const pageSpaces: string[] = folderId ? ["main", "perso"] : [space ?? "main"];
+  const pillOf = (it: ItemSummary) => (pageSpaces.includes(it.space) ? null : SPACE_LABEL[it.space]);
 
   // ---- swipe actions: pin, archive, delete, each with an undo ----
 
@@ -314,14 +335,22 @@ export default function Feed({ space }: { space?: Space }) {
         )}
 
         {!archived && <>
-          <label className="search">
-            <IconSearch size={20} />
-            <span className="sr-only">{perso ? t("Chercher dans tes notes perso") : hn ? t("Chercher dans HN") : t("Chercher dans ta veille")}</span>
-            <input ref={searchBox} type="search" autoComplete="off" enterKeyHint="search"
-                   placeholder={perso ? t("Une leçon, un principe, un souvenir…") : desktop ? t("Chercher un sujet, une idée, une personne…") : t("Chercher un sujet, une personne…")}
-                   value={q} onChange={(e) => setQ(e.target.value)} />
-            <kbd>⌘K</kbd>
-          </label>
+          <div className="search-row">
+            <label className="search">
+              <IconSearch size={20} />
+              <span className="sr-only">{perso ? t("Chercher dans tes notes perso") : hn ? t("Chercher dans HN") : t("Chercher dans ta veille")}</span>
+              <input ref={searchBox} type="search" autoComplete="off" enterKeyHint="search"
+                     placeholder={perso ? t("Une leçon, un principe, un souvenir…") : desktop ? t("Chercher un sujet, une idée, une personne…") : t("Chercher un sujet, une personne…")}
+                     value={q} onChange={(e) => setQ(e.target.value)} />
+              <kbd>⌘K</kbd>
+            </label>
+            <button type="button" className="scope-btn" aria-haspopup="menu" aria-expanded={Boolean(scopeMenu)}
+                    aria-label={t("Dans : {scope}", { scope: scopeLabel })}
+                    onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setScopeMenu({ x: r.left, y: r.bottom - 4 }); }}>
+              <span className="desk-only">{t("Dans :")} </span><b>{scopeLabel}</b><IconDown size={14} />
+            </button>
+            {scopeMenu && <ContextMenu at={scopeMenu} items={scopeItems} onClose={() => setScopeMenu(null)} />}
+          </div>
 
           {perso ? (
             <div className="chips scroll" role="group" aria-label={t("Filtrer par catégorie")}>
@@ -428,7 +457,7 @@ export default function Feed({ space }: { space?: Space }) {
                 )}
                 <SwipeRow flipId={it.id} {...actionsFor(it)} open={opened?.id === it.id ? opened.side : null}
                           onOpenChange={(side) => setOpened(side ? { id: it.id, side } : (cur) => (cur?.id === it.id ? null : cur))}>
-                  <Fiche item={it} />
+                  <Fiche item={it} pill={searching ? pillOf(it) : null} />
                 </SwipeRow>
               </Fragment>
             ))}

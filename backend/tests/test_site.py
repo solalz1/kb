@@ -1446,3 +1446,38 @@ def test_ask_chooses_its_sources(site, monkeypatch):
     page.get_by_role("group", name="Mode").get_by_role("button", name="Nouveau projet").click()
     expect(page.get_by_role("group", name="Chercher dans")).to_be_visible()
     expect(page.get_by_role("group", name="Répondre à partir de")).to_have_count(0)
+
+
+def test_search_in_another_space(site, monkeypatch):
+    """The feed's search looks where « Dans » says: the page's space by default, then everywhere, HN, a folder…"""
+    hn_title = "Un benchmark d'agents qui fait débat sur HN"
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=hn_title if "news" in url else "Mesurer un agent sur de vraies tâches", source_url=url,
+        content="Un benchmark d'agents doit utiliser de vraies tâches et mesurer le coût. " * 30))
+    page = site("/", viewport=DESKTOP)
+    _seed(page)
+    _hn_story("9", hn_title)
+    page.reload()
+    page.locator(".main .search input").fill("benchmark")
+    cards = page.locator(".fiche:not(.sk-card)")
+    expect(cards).to_have_count(1)
+    expect(cards.first).to_contain_text("Mesurer un agent sur de vraies tâches")
+
+    page.get_by_role("button", name="Dans : Veille").click()
+    page.get_by_role("menuitem", name="HN", exact=True).click()
+    expect(cards).to_have_count(1)
+    expect(cards.first).to_contain_text(hn_title)
+    expect(cards.first.locator(".space-pill")).to_have_text("HN")
+    expect(page).to_have_url(re.compile(r"in=hn"))
+
+    page.get_by_role("button", name="Dans : HN").click()
+    page.get_by_role("menuitem", name="Tout", exact=True).click()
+    expect(page).to_have_url(re.compile(r"in=all"))
+    expect(page.locator(".fiche", has_text=hn_title).locator(".space-pill")).to_have_text("HN")
+    expect(page.locator(".fiche", has_text="Mesurer un agent")).to_be_visible()
+    expect(page.locator(".fiche", has_text="Mesurer un agent").locator(".space-pill")).to_have_count(0)
+    expect(page.locator(".fiche", has_text="Je tiens mes promesses").locator(".space-pill")).to_have_text("Perso")
+
+    page.locator(".main .search input").blur()
+    page.keyboard.press("ControlOrMeta+k")
+    expect(page.locator(".main .search input")).to_be_focused()
