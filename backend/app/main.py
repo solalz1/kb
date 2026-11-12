@@ -487,9 +487,13 @@ def list_items(
         where.append("pinned = %s")
         params.append(pinned)
     clause = " and ".join(where)
+    order = "pinned desc, created_at desc"
+    if spaces == ["hn"]:     # the HN page: each day's stories, the best first (a run ingests them best first)
+        order = ("pinned desc, (created_at at time zone %s)::date desc, "
+                 "coalesce((metadata->'hn'->>'points')::int, 0) desc, created_at desc")
     rows = db.fetchall(
-        f"select {LIST_FIELDS} from items where {clause} order by pinned desc, created_at desc limit %s offset %s",
-        (*params, limit, max(0, offset)),
+        f"select {LIST_FIELDS} from items where {clause} order by {order} limit %s offset %s",
+        (*params, *([settings.digest_timezone] if spaces == ["hn"] else []), limit, max(0, offset)),
     )
     total = db.fetchone(f"select count(*) n from items where {clause}", params)["n"]
     return {"items": _with_thumbs(rows), "total": total, "search": False}

@@ -37,6 +37,8 @@ def _folder(it: dict, lang: str = "fr") -> str:
     if it.get("space") == "perso":
         plural = locales.category_plurals(lang).get(it.get("category") or "")
         return f"KB/{tx['perso_folder']}/{plural or tx['other']}"
+    if it.get("space") == "hn":       # the day's Hacker News stories, apart from what the user saved
+        return "KB/HN"
     return f"KB/{tx['feed_folder']}"
 
 

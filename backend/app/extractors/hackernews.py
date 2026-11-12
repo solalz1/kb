@@ -92,8 +92,9 @@ def _posted(meta: dict) -> datetime | None:
 
 
 def extract(item: dict, read_article: Callable[[dict], Extracted]) -> Extracted:
-    """The card of a story of the HN space. Only an ExtractionError from the article gives the fallback card: a network
-    error propagates, so the worker tries again later."""
+    """The card of a story of the HN space. An ExtractionError from the article gives the fallback card at once; any
+    other error (a site down, a timeout) propagates so the worker tries again, until its last attempt. An error from
+    Hacker News itself always propagates."""
     meta = item["metadata"]["hn"]
     block = discussion_block(meta, discussion(meta["id"], get_settings().hn_comments))
     own = {"kind": "article", "title": meta.get("title") or None, "author": meta.get("author"),
@@ -104,7 +105,12 @@ def extract(item: dict, read_article: Callable[[dict], Extracted]) -> Extracted:
                          content=f"{post}\n\n{block}" if post else block)
     try:
         ex = read_article(item)
-    except ExtractionError:
+    except Exception as exc:
+        # a site that refuses to be read: the card at once; one that's down or times out: the worker tries again,
+        # and the last attempt makes the card from the discussion rather than an error
+        last = (item.get("attempts") or 0) >= get_settings().max_attempts
+        if not isinstance(exc, ExtractionError) and not last:
+            raise
         return Extracted(**own, source_url=item.get("source_url") or item.get("input_url"), content=block,
                          metadata={"hn": {**meta, "article_unreadable": True}})
     ex.content = f"{(ex.content or '').rstrip()}\n\n{block}"

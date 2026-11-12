@@ -581,3 +581,55 @@ def test_mcp_knows_the_hn_space(hn_client):
     refused = _tool(hn_client, "add_to_kb", url="https://blog.example.com/new", space="hn")
     assert refused.startswith("Impossible")
     assert not db.fetchone("select 1 from items where input_url = 'https://blog.example.com/new'")
+
+
+# ---------------------------------------------------------------------------
+# Final review fixes
+
+def test_hn_page_lists_the_best_first(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES[:5])                     # ingested best first: the best gets the oldest created_at
+    hn.run(NOW)
+    old = _hn_item(hn_client, "https://news.example.com/old", id="999", points=999)
+    db.execute("update items set created_at = now() - interval '1 day' where id = %s", (old,))
+    r = hn_client.get("/api/items", params={"space": "hn"}, headers=AUTH).json()
+    assert [i["hn"]["points"] for i in r["items"]] == [45, 44, 43, 42, 41, 999]   # by day, then by points
+
+
+def test_unreachable_article_falls_back_on_the_last_attempt(hn_client, monkeypatch):
+    """A site that times out or is down (not an ExtractionError): retried, then a card from the discussion."""
+    def down(url):
+        raise RuntimeError("Page inaccessible : ConnectTimeout")
+
+    monkeypatch.setattr(extractors, "extract_url", down)
+    fake_hn(monkeypatch, STORIES[:1], comments={"1000": [("alice", "The site is down again.")]})
+    hn.run(NOW)
+    for _ in range(get_settings().max_attempts + 1):
+        drain()
+        db.execute("update items set next_attempt_at = null where status = 'pending'")
+    card = _card()
+    assert card["status"] == "ready", card["error"]
+    assert card["metadata"]["hn"]["article_unreadable"] is True
+    assert "**alice** : The site is down again." in card["content"]
+
+
+def test_export_keeps_hn_apart(hn_client):
+    import io
+    import zipfile
+
+    from app import locales
+
+    _saved(hn_client, "https://blog.example.com/agents")
+    _hn_item(hn_client, "https://news.example.com/a", id="1")
+    names = zipfile.ZipFile(io.BytesIO(hn_client.get("/api/export", headers=AUTH).content)).namelist()
+    assert "KB/HN/Une story HN.md" in names and "KB/Veille/Une page gardée.md" in names
+    assert not [n for n in names if n.startswith("KB/Veille/Une story HN")]
+    assert locales.space_labels("en")["hn"] == "HN"
+
+
+def test_server_texts_have_english():
+    """What the app shows of the server's words (tServer) has its English, as every new text must."""
+    from pathlib import Path
+
+    en = "".join(p.read_text() for p in (Path(__file__).resolve().parents[2] / "web/src/i18n/en").glob("*.ts"))
+    for text in ("Recherche dans Hacker News…", "Gardé dans ta Veille ✓", "Gardé dans Perso ✓"):
+        assert f'"{text}"' in en, text

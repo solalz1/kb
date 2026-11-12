@@ -66,6 +66,7 @@ export default {
 
   // chat statuses and model notes sent by the server (shown through tServer)
   "Recherche dans ta KB…": "Searching your KB…",
+  "Recherche dans Hacker News…": "Searching Hacker News…",
   "Je relis tes principes et tes notes…": "Rereading your principles and notes…",
   "Je prépare les recherches…": "Planning the searches…",
   "le plus rapide, ≈ 0,3 ct la question": "fastest, ≈ 0.3¢ per question",
