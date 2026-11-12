@@ -89,8 +89,15 @@ def attach_items(ids: list[str], grouped: dict[str, list[dict]], scores: dict[st
     return out
 
 
-def merge_rankings(rankings: list[list[dict]], limit: int, k: int = 30) -> list[dict]:
-    """Fusion RRF de plusieurs listes d'items (mode projet : une liste par requête)."""
+def mixes_hn(spaces: list[str] | None) -> bool:
+    """Whether a search over `spaces` (None: every space) puts HN stories next to what the user saved."""
+    wanted = set(spaces or SPACES)
+    return "hn" in wanted and len(wanted) > 1
+
+
+def merge_rankings(rankings: list[list[dict]], limit: int, k: int = 30, cap: bool = True) -> list[dict]:
+    """Fusion RRF de plusieurs listes d'items (mode projet : une liste par requête).
+    `cap`: HN keeps at most half of the places (`cap_hn`), for rankings that mix it with the user's saves."""
     score: dict[str, float] = defaultdict(float)
     best: dict[str, dict] = {}
     hits: dict[str, int] = defaultdict(int)
@@ -110,16 +117,16 @@ def merge_rankings(rankings: list[list[dict]], limit: int, k: int = 30) -> list[
         it["matched_queries"] = hits[iid]
         it["excerpts"] = it["excerpts"][:4]
         out.append(it)
-    return cap_hn(out, limit)
+    return cap_hn(out, limit) if cap else out[:limit]
 
 
 def cap_hn(ranked: list[dict], limit: int) -> list[dict]:
-    """Keeps the order, with at most half of the places (`limit // 2`) for the Hacker News space: ~30 stories a day
-    would otherwise crowd out what the user saved."""
+    """Keeps the order, with at most half of the places (`limit // 2`, one in a search of one) for the Hacker News
+    space: ~30 stories a day would otherwise crowd out what the user saved."""
     out, hn = [], 0
     for item in ranked:
         if item.get("space") == "hn":
-            if hn >= limit // 2:
+            if hn >= max(1, limit // 2):
                 continue
             hn += 1
         out.append(item)

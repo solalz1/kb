@@ -115,6 +115,16 @@ def reddit_post(url: str) -> tuple[str | None, str | None]:
     return (m.group("id").lower(), m.group("sub")) if m else (None, None)
 
 
+def hn_story(url: str | None) -> str | None:
+    """The story id of a link to a Hacker News discussion (news.ycombinator.com/item?id=…), else None."""
+    parts = urlsplit(url if re.match(r"^https?://", url or "", re.I) else f"https://{url or ''}")
+    if parts.netloc.lower().split(":")[0] not in ("news.ycombinator.com", "ycombinator.com") or \
+            parts.path.rstrip("/") != "/item":
+        return None
+    story = dict(parse_qsl(parts.query)).get("id", "")
+    return story if story.isdigit() else None
+
+
 def reddit_canonical(post_id: str, sub: str | None = None) -> str:
     return f"https://www.reddit.com/r/{sub}/comments/{post_id}" if sub else f"https://www.reddit.com/comments/{post_id}"
 

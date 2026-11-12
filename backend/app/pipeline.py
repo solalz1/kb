@@ -34,6 +34,8 @@ PAGE_WAIT_SECONDS = 60
 # Reddit gives anything but a browser a bot check: a post shared from the Reddit app is opened in Safari (`x-safari-`
 # opens a link there whatever the default browser, on iOS and macOS), and shared from Safari it comes with its text.
 SAFARI_MESSAGE = "Reddit ne laisse lire ses posts qu'à un navigateur : partage-le depuis Safari pour l'ajouter."
+# nothing goes into the HN space by hand: only the daily run (app/hn.py) fills it
+HN_BY_HAND = "L'espace HN se remplit tout seul chaque matin : partage vers la Veille ou Perso"
 
 INGEST_KIND = {"tweet": "tweet", "youtube": "youtube", "paper": "paper", "repo": "repo", "media": "video", "web": "article"}
 # Types dont le titre d'origine est fiable (sinon on prend celui proposé par Claude)
@@ -172,7 +174,7 @@ def ingest(
         text = _strip_tags(text, used)
     space = space or "main"
     if space == "hn" and not hn:
-        raise ValueError("L'espace HN se remplit tout seul chaque matin : partage vers la Veille ou Perso")
+        raise ValueError(HN_BY_HAND)
     category = (category or tag_category) if space == "perso" else None
 
     if not url and not file and space != "perso":
@@ -210,6 +212,10 @@ def ingest(
         clause, params = urls.dedupe_filter(info)
         existing = db.fetchone(
             f"select id, status, user_note, space, metadata, input_url from items where {clause} limit 1", params)
+        if not existing and (story := urls.hn_story(url)):
+            # a story's discussion on Hacker News: the card of that story, whose source is the article
+            existing = db.fetchone("""select id, status, user_note, space, metadata, input_url from items
+                                       where metadata->'hn'->>'id' = %s limit 1""", (story,))
         retried = False
         if existing and page and existing["status"] == "error":
             # shared again from Safari after the server couldn't read it: this time the phone sends the page
@@ -290,6 +296,8 @@ def create_note(
         raise ValueError("La note est vide")
     title = (title or "").strip()[:300] or None
     space = normalize_space(space) or "main"
+    if space == "hn":
+        raise ValueError(HN_BY_HAND)
     category = normalize_category(category) if space == "perso" else None
     tags = clean_tags(tags)
     metadata = {}

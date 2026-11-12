@@ -138,7 +138,11 @@ export default function Ask() {
     if (!about) return;
     const known = cache.peek<ItemDetail>(keys.item(about));
     (known ? Promise.resolve(known) : api.item(about, false))
-      .then((it) => setInput(t("À propos de « {title} » : ", { title: localized(it).title ?? "" }))).catch(() => {});
+      .then((it) => {
+        setInput(t("À propos de « {title} » : ", { title: localized(it).title ?? "" }));
+        // a question about an HN story searches HN too, this time (the device's choice stays as it is)
+        if (it.space === "hn") setScopeState((s) => (s === "mine" ? "both" : s));
+      }).catch(() => {});
   }, [params]);
 
   useEffect(() => {

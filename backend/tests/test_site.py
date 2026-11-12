@@ -1060,12 +1060,12 @@ def test_keys_and_taps_answer_at_once(site):
     lost."""
     page = site("/wiki", viewport=DESKTOP)
     expect(page.get_by_role("heading", name="Wiki", exact=True)).to_be_visible()
-    page.keyboard.press("Control+k")
+    page.keyboard.press("ControlOrMeta+k")
     expect(page.locator(".main .search input")).to_be_focused()
     # …but never while something is being typed elsewhere: the draft stays where it is
     page.goto("/ask")
     page.locator("#ask-input").fill("Une question en cours")
-    page.keyboard.press("Control+k")
+    page.keyboard.press("ControlOrMeta+k")
     page.wait_for_timeout(300)
     expect(page).to_have_url(re.compile(r"/ask"))
     expect(page.locator("#ask-input")).to_have_value("Une question en cours")
@@ -1490,3 +1490,61 @@ def test_search_in_another_space(site, monkeypatch):
     page.locator(".main .search input").blur()
     page.keyboard.press("ControlOrMeta+k")
     expect(page.locator(".main .search input")).to_be_focused()
+
+
+def test_hn_page_pins_the_side_column_and_questions(site, monkeypatch):
+    """The HN page: pinned stories under their own heading, no empty side column, no archiving a story; its item
+    page lights HN in the sidebar; a question about a story searches HN even when the device asks the saves only."""
+    from app import db
+
+    titles = {"https://news1.example.com/post": "Un compilateur en un week-end",
+              "https://news2.example.com/post": "Le retour des bases de données embarquées"}
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=titles[url], source_url=url, content="Un article de fond sur le sujet. " * 30))
+    page = site("/hn", viewport=DESKTOP, setup=lambda ctx: ctx.add_init_script(
+        "if (!localStorage.getItem('kb_ask_scope')) localStorage.setItem('kb_ask_scope', 'mine');"))
+    today = _hn_story("1", titles["https://news1.example.com/post"])
+    old = _hn_story("2", titles["https://news2.example.com/post"], days_ago=3)
+    db.execute("update items set pinned = true where id = %s", (old,))
+    page.reload()
+    heads = page.locator(".day-head")
+    expect(heads).to_have_count(2)
+    assert heads.all_inner_texts() == ["Épinglées", "Aujourd'hui"]
+    expect(page.locator(".feed-aside")).to_have_count(0)
+
+    _settled(page)
+    page.locator(".fiche", has_text=titles["https://news1.example.com/post"]).click()
+    expect(page.locator(".item-title")).to_have_text(titles["https://news1.example.com/post"])
+    expect(page.locator(".item-meta")).to_contain_text("récupéré le")            # the morning's run brought it
+    expect(page.locator(".item-meta")).not_to_contain_text("sauvé le")
+    expect(page.locator(".rail").get_by_role("link", name="HN", exact=True)).to_have_class(re.compile(r"\bactive\b"))
+    expect(page.locator(".rail").get_by_role("link", name="Veille", exact=True)).not_to_have_class(re.compile(r"\bactive\b"))
+    tools = page.locator(".item-tools")                  # on a computer, the actions sit under the side column
+    expect(tools.get_by_role("button", name="Retraiter")).to_be_visible()
+    expect(tools.get_by_role("button", name="Archiver")).to_have_count(0)
+
+    page.goto(f"/ask?about={today}")
+    where = page.get_by_role("group", name="Chercher dans")
+    expect(where.get_by_role("button", name="Les deux")).to_have_attribute("aria-pressed", "true")
+    assert page.evaluate("localStorage.getItem('kb_ask_scope')") == "mine"       # the device's choice stays
+
+
+def test_a_settings_link_keeps_its_section_while_the_page_fills_in(site, billing_apis):
+    """A section picked in the strip stays at the top when what is above it arrives while the page scrolls there (the
+    costs table, a little slow): the scroll used to end where the heading had been, the costs pushing it down."""
+    import time as _time
+
+    from app import costs
+
+    costs.record("anthropic", 0.42, model="claude-haiku-5-5")
+
+    def slow_costs(route):
+        _time.sleep(0.3)
+        route.continue_()
+
+    desk = site("/settings", viewport=DESKTOP, setup=lambda ctx: ctx.route("**/api/costs", slow_costs))
+    desk.get_by_role("navigation", name="Sections des réglages").get_by_role("link", name="Connecteur Claude").click()
+    expect(desk.locator("#couts .cost-totals")).to_contain_text("Ce mois-ci", timeout=10_000)
+    desk.wait_for_timeout(700)
+    top = desk.locator("h2", has_text="Connecteur Claude").first.evaluate("h => h.getBoundingClientRect().top")
+    assert 0 <= top < 260, top

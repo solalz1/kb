@@ -308,7 +308,8 @@ as $$
      select id from public.items
       where (status = 'pending' and (next_attempt_at is null or next_attempt_at <= now()))
          or (status = 'processing' and locked_at < now() - stale_after)
-      order by created_at
+      -- what the user shares goes before the morning's Hacker News stories (the hn space, app/hn.py)
+      order by (space = 'hn'), created_at
       for update skip locked
       limit 1
    )

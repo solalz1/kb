@@ -633,3 +633,137 @@ def test_server_texts_have_english():
     en = "".join(p.read_text() for p in (Path(__file__).resolve().parents[2] / "web/src/i18n/en").glob("*.ts"))
     for text in ("Recherche dans Hacker News…", "Gardé dans ta Veille ✓", "Gardé dans Perso ✓"):
         assert f'"{text}"' in en, text
+
+
+# ---------------------------------------------------------------------------
+# The review's smaller points
+
+def test_cap_hn_leaves_hn_a_place_in_a_search_of_one():
+    assert [r["id"] for r in cap_hn([{"id": "h", "space": "hn"}, {"id": "s", "space": "main"}], 1)] == ["h"]
+
+
+def test_a_project_on_hn_alone_is_not_capped(hn_client):
+    _vector_kb(hn_client, hn_count=10)
+    sources = _chat(hn_client, mode="project", scope="hn")
+    assert len(sources) > 7 and {s["space"] for s in sources} == {"hn"}
+
+
+def test_a_long_ask_hn_post_is_kept_whole(hn_client, monkeypatch):
+    fake_hn(monkeypatch, [_hit(0, url=None, story_text="<p>" + "Un long post. " * 300 + "</p>")])
+    hn.run(NOW)
+    drain()
+    assert _card()["content"].count("Un long post.") == 300
+
+
+def test_show_hn_keeps_its_post(hn_client, monkeypatch):
+    _page(hn_client, STORIES[0]["url"], "The project's README. " * 10, title="A project")
+    fake_hn(monkeypatch, [_hit(0, story_text="<p>I built this over a weekend.</p>")],
+            comments={"1000": [("alice", "Nice")]})
+    hn.run(NOW)
+    drain()
+    content = _card()["content"]
+    assert content.index("README") < content.index("I built this over a weekend.") \
+        < content.index("## Discussion Hacker News")
+
+
+def test_a_card_read_again_is_no_longer_unreadable(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES[:1])
+    hn.run(NOW)
+    drain()
+    assert _card()["metadata"]["hn"]["article_unreadable"] is True
+    _page(hn_client, STORIES[0]["url"], "Now readable. " * 20)
+    iid = db.fetchone("select id::text from items where space = 'hn'")["id"]
+    assert hn_client.post(f"/api/items/{iid}/reprocess", headers=AUTH).status_code == 200
+    drain()
+    card = _card()
+    assert "Now readable." in card["content"] and "article_unreadable" not in card["metadata"]["hn"]
+
+
+def test_no_note_goes_into_hn(hn_client):
+    r = hn_client.post("/api/notes", json={"content": "Une note", "space": "hn"}, headers=AUTH)
+    assert r.status_code == 400
+    assert not db.fetchone("select 1 from items where space = 'hn'")
+
+
+def test_sharing_the_discussion_keeps_the_card(hn_client, inline):
+    iid = _hn_item(hn_client, "https://news.example.com/rag", id="7")
+    r = hn_client.post("/api/ingest", json={"url": "https://news.ycombinator.com/item?id=7"}, headers=AUTH).json()
+    assert r["id"] == iid and r["message"] == "Gardé dans ta Veille ✓"
+    assert _kept(iid)["space"] == "main"
+    again = hn_client.post("/api/ingest", json={"url": "https://news.ycombinator.com/item?id=7"}, headers=AUTH).json()
+    assert again["id"] == iid
+    assert db.fetchone("select count(*)::int as n from items")["n"] == 1
+
+
+def test_a_run_that_fails_halfway_remembers_what_it_queued(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES)
+    real, calls = pipeline.ingest, []
+
+    def flaky(**kw):
+        calls.append(kw)
+        if len(calls) == 11:
+            raise RuntimeError("database hiccup")
+        return real(**kw)
+
+    monkeypatch.setattr(pipeline, "ingest", flaky)
+    with pytest.raises(RuntimeError):
+        hn.run(NOW)
+    monkeypatch.setattr(pipeline, "ingest", real)
+    assert hn.run(NOW + timedelta(minutes=1))["added"] == 20          # 30 a day, 10 already queued
+    assert len(_hn_rows()) == 30
+
+
+def test_the_daily_run_waits_for_a_run_going_on(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES)
+    with hn._lock:
+        assert hn.run_due(NOW) == {"busy": True}
+    assert hn.run_due(NOW + timedelta(minutes=1))["added"] == 30
+
+
+def test_an_hn_outage_is_a_warning_and_waits(monkeypatch, caplog):
+    def down(now=None):
+        raise httpx.ConnectError("HN is down")
+
+    monkeypatch.setattr(hn, "run_due", down)
+    with caplog.at_level("WARNING", logger="app.hn"):
+        assert hn.Scheduler().tick() == hn.RETRY_AFTER
+    assert [r.levelname for r in caplog.records if r.name == "app.hn"] == ["WARNING"]
+    monkeypatch.setattr(hn, "run_due", lambda now=None: None)
+    assert hn.Scheduler().tick() == 60
+
+
+def test_what_the_user_shares_goes_before_the_hn_batch(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES[:5])
+    hn.run(NOW)
+    mine = pipeline.ingest(url="https://blog.example.com/mine")["id"]
+    assert str(db.fetchone("select id from claim_next_item()")["id"]) == mine
+
+
+def test_a_kept_answer_leaves_hn_out_of_the_wiki(hn_client):
+    saved = _saved(hn_client, "https://blog.example.com/agents")
+    story = _hn_item(hn_client, "https://news.example.com/agents", id="9")
+    sources = [{"n": 1, "id": saved, "kind": "article"},
+               {"n": 2, "id": story, "kind": "article", "space": "main"}]      # what the app says isn't trusted
+    r = hn_client.post("/api/wiki/answers", json={"question": "Les agents ?", "answer": "Utiles [1], en prod [2].",
+                                                  "sources": sources}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    wiki.drain()
+    page = next(p for p in wiki.all_pages(with_content=True) if p["kind"] == "answer")
+    cited = {r["item_id"] for r in db.fetchall(
+        "select item_id::text from wiki_page_sources where page_id = %s", (page["id"],))}
+    assert cited == {saved}
+    assert f"[src:{wiki.ref(saved)}]" in page["content"] and wiki.ref(story) not in page["content"]
+    assert "https://news.example.com/agents" in page["content"]          # the story is still cited, by its link
+
+
+def test_overview_last_added_is_a_save(hn_client):
+    _saved(hn_client, "https://blog.example.com/agents")
+    db.execute("update items set created_at = '2026-11-01 10:00+00'")
+    _hn_item(hn_client, "https://news.example.com/a", id="1")
+    assert "dernier ajout le 2026-11-01" in _tool(hn_client, "kb_overview")
+
+
+def test_meta_line_of_an_hn_card_is_not_saved():
+    line = item_meta_line({"kind": "article", "space": "hn", "created_at": "2026-11-12 06:00:00+00",
+                           "metadata": {"hn": {"points": 1, "comments": 0}}})
+    assert "sauvé le" not in line and "récupéré le 2026-11-12" in line

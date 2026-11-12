@@ -299,7 +299,7 @@ def gather_for_project(description: str, limit: int = 14, kinds: list[str] | Non
     with ThreadPoolExecutor(max_workers=4) as pool:
         rankings = list(pool.map(
             lambda q: search.search_items(q, limit=8, kinds=kinds, spaces=spaces, chunks_per_item=2), queries))
-    return plan, search.merge_rankings(rankings, limit=limit)
+    return plan, search.merge_rankings(rankings, limit=limit, cap=search.mixes_hn(spaces))
 
 
 def project(description: str, kinds: list[str] | None = None, model: str | None = None,

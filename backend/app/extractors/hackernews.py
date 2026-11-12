@@ -42,8 +42,9 @@ def get_json(url: str, params: dict | None = None) -> Any:
 MAX_COMMENT = 1500      # characters kept of one comment
 
 
-def _text(fragment: str | None) -> str:
-    """HN's comment HTML (paragraphs as <p>, links, <i>, <pre><code>, entities) as plain text."""
+def _text(fragment: str | None, limit: int | None = MAX_COMMENT) -> str:
+    """HN's comment HTML (paragraphs as <p>, links, <i>, <pre><code>, entities) as plain text, cut at `limit`
+    characters (None: whole, for a post's own text)."""
     if not fragment:
         return ""
     t = re.sub(r"<a\s[^>]*href=\"([^\"]*)\"[^>]*>.*?</a>", lambda m: m.group(1), fragment, flags=re.S | re.I)
@@ -53,7 +54,7 @@ def _text(fragment: str | None) -> str:
     t = html.unescape(t)
     paragraphs = [re.sub(r"[ \t]+", " ", p).strip() for p in re.split(r"\n\s*\n", t)]
     t = "\n\n".join(p for p in paragraphs if p)
-    return t if len(t) <= MAX_COMMENT else t[: MAX_COMMENT - 1].rstrip() + "…"
+    return t if limit is None or len(t) <= limit else t[: limit - 1].rstrip() + "…"
 
 
 def discussion(story_id: str, limit: int) -> list[dict]:
@@ -95,14 +96,15 @@ def extract(item: dict, read_article: Callable[[dict], Extracted]) -> Extracted:
     """The card of a story of the HN space. An ExtractionError from the article gives the fallback card at once; any
     other error (a site down, a timeout) propagates so the worker tries again, until its last attempt. An error from
     Hacker News itself always propagates."""
-    meta = item["metadata"]["hn"]
+    meta = {k: v for k, v in item["metadata"]["hn"].items() if k != "article_unreadable"}    # as of this reading
     block = discussion_block(meta, discussion(meta["id"], get_settings().hn_comments))
+    post = _text(meta.get("text"), limit=None)          # an Ask HN's question, a Show HN's few words
     own = {"kind": "article", "title": meta.get("title") or None, "author": meta.get("author"),
            "site_name": "Hacker News", "published_at": _posted(meta)}
     if item.get("input_url") == meta.get("discussion_url"):         # a text post: no article to read
-        post = _text(meta.get("text"))
-        return Extracted(**own, source_url=meta["discussion_url"],
-                         content=f"{post}\n\n{block}" if post else block)
+        return Extracted(**own, source_url=meta["discussion_url"], content=_join(post, block),
+                         metadata={"hn": meta})
+    told = f"## Le post sur Hacker News\n\n{post}" if post else ""
     try:
         ex = read_article(item)
     except Exception as exc:
@@ -111,7 +113,12 @@ def extract(item: dict, read_article: Callable[[dict], Extracted]) -> Extracted:
         last = (item.get("attempts") or 0) >= get_settings().max_attempts
         if not isinstance(exc, ExtractionError) and not last:
             raise
-        return Extracted(**own, source_url=item.get("source_url") or item.get("input_url"), content=block,
+        return Extracted(**own, source_url=item.get("source_url") or item.get("input_url"), content=_join(told, block),
                          metadata={"hn": {**meta, "article_unreadable": True}})
-    ex.content = f"{(ex.content or '').rstrip()}\n\n{block}"
+    ex.content = _join((ex.content or "").rstrip(), told, block)
+    ex.metadata = {**ex.metadata, "hn": meta}
     return ex
+
+
+def _join(*parts: str) -> str:
+    return "\n\n".join(p for p in parts if p)

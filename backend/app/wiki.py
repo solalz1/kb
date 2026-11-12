@@ -598,6 +598,10 @@ def file_answer(payload: dict) -> dict:
     if not answer:
         raise ValueError("Réponse vide")
     sources = {int(s["n"]): s for s in payload.get("sources") or [] if isinstance(s, dict) and str(s.get("n", "")).isdigit()}
+    # the day's Hacker News stories stay out of the wiki: an answer that drew on one cites it by its link
+    news = {r["id"]: r["source_url"] for r in db.fetchall(
+        "select id::text, source_url from items where id::text = any(%s) and space = 'hn'",
+        ([str(s["id"]) for s in sources.values() if s.get("id") and s.get("kind") != "wiki"],))}
     pages = all_pages()
     meta = llm.wiki_file_answer(question=question, answer=answer, index=index_text(pages))
 
@@ -607,6 +611,8 @@ def file_answer(payload: dict) -> dict:
             return ""
         if s.get("kind") == "wiki":
             return f"[[{s.get('title')}]]"
+        if str(s.get("id")) in news:
+            return f"([Hacker News]({news[str(s['id'])]}))" if news[str(s["id"])] else ""
         return f"[src:{ref(s['id'])}]" if s.get("id") else ""
 
     body = re.sub(r"\[(\d{1,2})\](?!\()", cite, answer)
@@ -616,7 +622,7 @@ def file_answer(payload: dict) -> dict:
     base, n = title, 2
     while title.lower() in taken:
         title, n = f"{base} ({n})", n + 1
-    item_ids = [s["id"] for s in sources.values() if s.get("kind") != "wiki" and s.get("id")]
+    item_ids = [s["id"] for s in sources.values() if s.get("kind") != "wiki" and s.get("id") and str(s["id"]) not in news]
     with db.conn() as c, c.transaction():
         row = save_page(c, page=None, title=title, section=meta.get("section") or "research", kind="answer",
                         summary=meta.get("summary"), content=content, author="claude", reason="answer",

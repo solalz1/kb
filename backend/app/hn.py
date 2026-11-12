@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from . import db, pipeline, urls
 from .config import get_settings
 from .extractors import hackernews
@@ -25,6 +27,7 @@ CANDIDATES = 200
 SEEN_KEY = "hn_seen"             # {"ids": {story id: local day picked}}: a story deleted from HN never comes back
 SEEN_DAYS = 3                    # longer than the window
 LAST_RUN_KEY = "hn_last_run"     # {"date": local day of the last daily run}
+RETRY_AFTER = 15 * 60            # seconds before the scheduler tries a failed run again
 
 _lock = threading.Lock()
 
@@ -127,15 +130,18 @@ def run(now: datetime | None = None) -> dict:
         seen = _seen()
         room = get_settings().hn_daily_count - sum(1 for d in seen.values() if d == day)
         stories, skipped = _pick(now, room, seen)
-        added = 0
-        for story in stories:
-            res = pipeline.ingest(url=story.url or story.discussion_url, space="hn", hn=story.meta())
-            if res.get("duplicate"):
-                skipped += 1
-            else:
-                added += 1
-        if stories:
-            _remember(seen, stories, day, now)
+        added, done = 0, []
+        try:
+            for story in stories:
+                res = pipeline.ingest(url=story.url or story.discussion_url, space="hn", hn=story.meta())
+                done.append(story)
+                if res.get("duplicate"):
+                    skipped += 1
+                else:
+                    added += 1
+        finally:
+            if done:        # what was queued counts for the day, even when a later story failed
+                _remember(seen, done, day, now)
         if added:
             log.info("Hacker News : %d stories ajoutées", added)
         return {"added": added, "skipped": skipped}
@@ -165,15 +171,22 @@ def run_due(now: datetime | None = None) -> dict | None:
         (LAST_RUN_KEY, db.jsonb({"date": day}), previous))
     if not claimed:
         return None
-    try:
-        return run(now)
-    except Exception:
+
+    def give_back():
         if previous:
             db.execute("update kb_settings set value = %s where key = %s and value->>'date' = %s",
                        (db.jsonb({"date": previous}), LAST_RUN_KEY, day))
         else:
             db.execute("delete from kb_settings where key = %s and value->>'date' = %s", (LAST_RUN_KEY, day))
+
+    try:
+        out = run(now)
+    except Exception:
+        give_back()
         raise
+    if out.get("busy"):     # a run from the app is going on: if it fails, the next minute still has the day's run
+        give_back()
+    return out
 
 
 class Scheduler:
@@ -188,11 +201,21 @@ class Scheduler:
     def stop(self) -> None:
         self._stop.set()
 
+    def tick(self) -> float:
+        """One look at the clock; how long to wait before the next. A failed run waits RETRY_AFTER, and Hacker News
+        out of reach is a warning, not an error report every minute while it lasts."""
+        try:
+            run_due()
+        except httpx.HTTPError as exc:
+            log.warning("Hacker News injoignable (%s) : nouvel essai dans %d min", type(exc).__name__,
+                        RETRY_AFTER // 60)
+            return RETRY_AFTER
+        except Exception:
+            log.exception("Planificateur Hacker News")
+            return RETRY_AFTER
+        return 60
+
     def _loop(self) -> None:
         self._stop.wait(30)          # let the API start first
         while not self._stop.is_set():
-            try:
-                run_due()
-            except Exception:
-                log.exception("Planificateur Hacker News")
-            self._stop.wait(60)
+            self._stop.wait(self.tick())

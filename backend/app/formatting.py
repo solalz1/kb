@@ -29,7 +29,8 @@ def item_meta_line(it: dict) -> str:
     if d := _date(it.get("published_at")):
         parts.append(f"publié le {d}")
     if d := _date(it.get("created_at")):
-        parts.append(f"sauvé le {d}")
+        # an HN card wasn't saved by the user: the morning's run brought it
+        parts.append(f"récupéré le {d}" if it.get("space") == "hn" else f"sauvé le {d}")
     return " · ".join(parts)
 
 

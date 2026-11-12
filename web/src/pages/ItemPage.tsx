@@ -132,7 +132,10 @@ export default function ItemPage() {
   const back = perso ? t("Perso") : item.space === "hn" ? "HN" : t("Veille");
   const tools = [
     { label: item.pinned ? t("Désépingler") : t("Épingler"), run: () => { setMenu(false); update({ pinned: !item.pinned }); } },
-    { label: item.archived ? t("Désarchiver") : t("Archiver"), run: () => { setMenu(false); update({ archived: !item.archived }); } },
+    // the HN page has no archives to find an archived story in again: keep it in Veille, or delete it
+    ...(item.space !== "hn" || item.archived
+      ? [{ label: item.archived ? t("Désarchiver") : t("Archiver"), run: () => { setMenu(false); update({ archived: !item.archived }); } }]
+      : []),
     { label: t("Retraiter"), run: reprocess },
     { label: t("Supprimer"), run: () => { setMenu(false); remove(); }, danger: true },
   ];
@@ -170,7 +173,9 @@ export default function ItemPage() {
                   {who && (item.author_url ? <a href={item.author_url} target="_blank" rel="noreferrer">{who}</a> : who)}</span>
               )}
               <span>·</span>
-              <span>{writtenNote ? t("écrit le {date}", { date: fullDate(item.created_at) }) : t("sauvé le {date}", { date: fullDate(item.created_at) })}</span>
+              <span>{writtenNote ? t("écrit le {date}", { date: fullDate(item.created_at) })
+                : hn ? t("récupéré le {date}", { date: fullDate(item.created_at) })          // brought by the morning's run
+                : t("sauvé le {date}", { date: fullDate(item.created_at) })}</span>
             </>
           ) : <span>{[who, shortDate(item.created_at)].filter(Boolean).join(" · ")}</span>}
           {item.pinned && <IconPin size={14} className="pin" aria-label={t("Épinglé")} role="img" aria-hidden={false} />}

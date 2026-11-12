@@ -30,6 +30,11 @@ function dayOf(iso: string): string {
   return fullDate(iso);
 }
 
+/** The heading a card of the HN page sits under: pinned cards first, under their own, then the days. */
+function groupOf(it: ItemSummary): string {
+  return it.pinned ? t("Épinglées") : dayOf(it.created_at);
+}
+
 /** Veille, Perso, HN, or one folder (`/folders/:folderId`, any space). Everything comes from the cache (cache.ts):
  *  coming back to the feed shows it at once, where it was. */
 export default function Feed({ space }: { space?: Space }) {
@@ -262,7 +267,7 @@ export default function Feed({ space }: { space?: Space }) {
   const showResurface = !archived && !inFolder && browsing && resurface.length > 0;
 
   return (
-    <div className={`page feed${inFolder || archived ? " solo" : ""}`}>
+    <div className={`page feed${inFolder || archived || hn ? " solo" : ""}`}>
       <div className="feed-main">
         {archived ? (
           <>
@@ -452,8 +457,8 @@ export default function Feed({ space }: { space?: Space }) {
             <span className={`feed-count${searching || archived ? "" : " phone-only"}`}>{countLabel}</span>
             {items.map((it, i) => (
               <Fragment key={it.id}>
-                {hn && !searching && (i === 0 || dayOf(items[i - 1].created_at) !== dayOf(it.created_at)) && (
-                  <h2 className="day-head">{dayOf(it.created_at)}</h2>
+                {hn && !searching && (i === 0 || groupOf(items[i - 1]) !== groupOf(it)) && (
+                  <h2 className="day-head">{groupOf(it)}</h2>
                 )}
                 <SwipeRow flipId={it.id} {...actionsFor(it)} open={opened?.id === it.id ? opened.side : null}
                           onOpenChange={(side) => setOpened(side ? { id: it.id, side } : (cur) => (cur?.id === it.id ? null : cur))}>
@@ -484,7 +489,7 @@ export default function Feed({ space }: { space?: Space }) {
         </Toast>
       </div>
 
-      {!inFolder && !archived && (
+      {!inFolder && !archived && !hn && (
         <aside className="feed-aside" aria-label={t("Explorer")}>
           {resurface.length > 0 && (
             <section className="aside-block">

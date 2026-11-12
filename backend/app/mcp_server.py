@@ -323,7 +323,8 @@ async def kb_overview() -> str:
         ents = db.fetchall(
             """select e->>'name' as name, e->>'type' as type, count(*)::int n from items, jsonb_array_elements(entities) e
                where status='ready' and not archived and space <> 'hn' group by 1, 2 order by n desc limit 30""")
-        last = db.fetchone("select max(created_at) as d, count(*)::int n from items where status='ready' and not archived")
+        last = db.fetchone("""select max(created_at) filter (where space <> 'hn') as d, count(*)::int n from items
+                              where status='ready' and not archived""")
         news = db.fetchone("""select max(created_at) as d, count(*)::int n from items
                               where status='ready' and not archived and space = 'hn'""")
         perso = db.fetchall(
@@ -337,7 +338,7 @@ async def kb_overview() -> str:
     n_perso, n_hn = sum(p["n"] for p in perso), news["n"]
     return "\n".join([
         f"{last['n']} éléments (veille {last['n'] - n_perso - n_hn}, perso {n_perso}, hn {n_hn}), "
-        f"dernier ajout le {str(last['d'])[:10]}.",
+        + (f"dernier ajout le {str(last['d'])[:10]}." if last["d"] else "aucun enregistrement à lui pour l'instant."),
         (f'HN : {n_hn} fiches Hacker News, dernière le {str(news["d"])[:10]} (space="hn" ; l\'actualité du jour, '
          "pas ses choix). Le reste de cette vue porte sur ses enregistrements.") if n_hn else
         "HN : aucune fiche Hacker News pour l'instant.",

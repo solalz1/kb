@@ -29,6 +29,11 @@ const navItem = (to: string) => NAV.find((x) => x.to === to)!;
 const TABS = [navItem("/"), navItem("/perso"), { to: "/add", label: t("Ajouter"), Icon: IconPlus }, navItem("/digest"), navItem("/ask")];
 const RAIL_STEP = 50;     // px between two sidebar links (44 + the 6 px gap): the selection slides by that much
 
+/** The sidebar section a page belongs to ("" for none: an item, a note, Réglages). */
+function railOf(path: string): string {
+  return NAV.find(({ to }) => (to === "/" ? path === "/" : path === to || path.startsWith(`${to}/`)))?.to ?? "";
+}
+
 const hostOf = (base: string) => { try { return new URL(base).host; } catch { return base; } };
 
 function Login({ onDone }: { onDone: () => void }) {
@@ -101,6 +106,9 @@ export default function App() {
   const tab = useRef("/");
   tab.current = tabOf(location.pathname, tab.current);
   const opened = /^\/(item|note)\//.test(location.pathname);    // an item or a note: lit where it was opened from
+  // the sidebar has more sections than the tab bar (HN, Wiki, Dossiers…): an item lights the one it was opened from
+  const rail = useRef("/");
+  rail.current = opened ? rail.current : railOf(location.pathname);
   const stats = useQuery(authed ? keys.stats : null, api.stats, { maxAge: 20_000, poll: 60_000 });
   const pending = stats.data?.open_actions ?? 0;
 
@@ -199,9 +207,8 @@ export default function App() {
 
   // the tab bar's lens sits on the current tab; tapping the tab you're on brings its page back to the top
   const lens = TABS.findIndex((x) => x.to === tab.current && x.to !== "/add");
-  const here = NAV.findIndex(({ to }) => (to === "/" ? location.pathname === "/"
-    : location.pathname === to || location.pathname.startsWith(`${to}/`)));
-  const railLens = here >= 0 ? here : opened ? NAV.findIndex(({ to }) => to === tab.current) : -1;
+  const here = NAV.findIndex(({ to }) => to === railOf(location.pathname));
+  const railLens = here >= 0 ? here : opened ? NAV.findIndex(({ to }) => to === rail.current) : -1;
   const onTab = (e: React.MouseEvent, to: string) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;     // a new tab or window: the browser's
     if (location.pathname === to && !location.search) {
@@ -224,7 +231,7 @@ export default function App() {
           <span className={`rail-lens${railLens < 0 ? " off" : ""}`} aria-hidden="true" />
           {NAV.map(({ to, label, Icon, end }) => (
             <NavLink key={to} to={to} end={end} onClick={(e) => onTab(e, to)} viewTransition={false}
-                     className={({ isActive }) => `nav${isActive || (opened && tab.current === to) ? " active" : ""}`}>
+                     className={({ isActive }) => `nav${isActive || (opened && rail.current === to) ? " active" : ""}`}>
               <Icon size={20} /> <span className="label">{label}</span>
               {to === "/todo" && pending > 0 && <span className="badge">{pending}</span>}
             </NavLink>
