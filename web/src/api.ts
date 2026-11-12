@@ -134,6 +134,8 @@ export interface NotionStatus {
 export type ChatMode = "ask" | "project" | "advice";
 /** Where a question's answer comes from: the wiki's pages, or the items search finds (RAG). */
 export type AskSource = "wiki" | "rag";
+/** Where a question looks: the user's saves (Veille + Perso), the HN space, or both. */
+export type AskScope = "mine" | "hn" | "both";
 
 export type WikiSection = "personal" | "research" | "reading" | "business" | "competitive";
 export type WikiKind = "theme" | "entity" | "book" | "synthesis" | "answer";
@@ -609,7 +611,7 @@ export type ChatEvent =
 
 export async function streamChat(
   body: { messages: { role: "user" | "assistant"; content: string }[]; mode: ChatMode; kinds?: string[]; model?: string;
-          source?: AskSource },
+          source?: AskSource; scope?: AskScope },
   onEvent: (e: ChatEvent) => void,
   signal?: AbortSignal,
 ) {

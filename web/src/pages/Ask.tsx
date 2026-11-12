@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, streamChat, type AskSource, type ChatMode, type ItemDetail, type SourceCard } from "../api";
+import { api, streamChat, type AskScope, type AskSource, type ChatMode, type ItemDetail, type SourceCard } from "../api";
 import { cache, useQuery } from "../cache";
 import { claudePrompt, openInClaude } from "../claude";
 import { localized, t, tServer } from "../i18n";
@@ -25,6 +25,7 @@ interface Turn {
   done?: boolean;
   model?: string;
   source?: AskSource;
+  scope?: AskScope;
   /** "Garder dans le wiki": being filed, then the page it became */
   kept?: { state: "pending" } | { state: "done"; slug: string; title: string } | { state: "error"; message: string };
 }
@@ -36,6 +37,17 @@ const saveModel = (id: string) => { try { localStorage.setItem(MODEL_KEY, id); }
 const SOURCE_KEY = "kb_ask_source";
 const readSource = (): AskSource => { try { return localStorage.getItem(SOURCE_KEY) === "rag" ? "rag" : "wiki"; } catch { return "wiki"; } };
 const saveSource = (v: AskSource) => { try { localStorage.setItem(SOURCE_KEY, v); } catch { /* storage unavailable */ } };
+// where a question looks (modes Question and Nouveau projet): the user's saves, the HN space, or both (default)
+const SCOPE_KEY = "kb_ask_scope";
+const readScope = (): AskScope => {
+  try { const v = localStorage.getItem(SCOPE_KEY); return v === "mine" || v === "hn" ? v : "both"; } catch { return "both"; }
+};
+const saveScope = (v: AskScope) => { try { localStorage.setItem(SCOPE_KEY, v); } catch { /* storage unavailable */ } };
+const SCOPES: { id: AskScope; label: string; short: string; title: string }[] = [
+  { id: "mine", label: t("Mes enregistrements"), short: t("Les miens"), title: t("Ce que tu as sauvegardé : Veille et Perso") },
+  { id: "hn", label: "HN", short: "HN", title: t("Les stories Hacker News récupérées chaque matin") },
+  { id: "both", label: t("Les deux"), short: t("Les deux"), title: t("Tes enregistrements, et HN pour au plus la moitié des sources") },
+];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // the conversation survives navigation (open a source, come back)
@@ -97,6 +109,10 @@ export default function Ask() {
   const pickModel = (id: string) => { setModel(id); saveModel(id); };
   const [source, setSourceState] = useState<AskSource>(readSource);
   const setSource = (v: AskSource) => { setSourceState(v); saveSource(v); };
+  const [scope, setScopeState] = useState<AskScope>(readScope);
+  const setScope = (v: AskScope) => { setScopeState(v); saveScope(v); };
+  const scoped = mode !== "advice";           // Conseil always reads the charter, Perso and a little Veille
+  const wikiSwitch = mode === "ask" && scope !== "hn";   // the wiki is made of the user's saves
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   // Streamed text is shown once per frame, and the page follows it down while you are at the bottom (scroll up to
@@ -155,9 +171,11 @@ export default function Ask() {
     setInput("");
     setBusy(true);
     const history = [...turns, { role: "user" as const, mode, content }];
-    const from: AskSource | undefined = mode === "ask" ? source : undefined;
-    setTurns([...history, { role: "assistant", mode, content: "", source: from,
-                            status: mode === "advice" ? t("Je relis tes principes…") : from === "wiki" ? t("Je lis ton wiki…") : t("Je cherche dans ta KB…"),
+    const from: AskSource | undefined = wikiSwitch ? source : undefined;
+    const where: AskScope | undefined = scoped ? scope : undefined;
+    setTurns([...history, { role: "assistant", mode, content: "", source: from, scope: where,
+                            status: mode === "advice" ? t("Je relis tes principes…") : from === "wiki" ? t("Je lis ton wiki…")
+                              : where === "hn" ? t("Je cherche dans HN…") : t("Je cherche dans ta KB…"),
                             model: modelInfo?.label }]);
     requestAnimationFrame(() => bottom.current?.scrollIntoView({ behavior: "smooth" }));
 
@@ -168,7 +186,7 @@ export default function Ask() {
     abort.current = new AbortController();
     const mine = ++run.current;
     try {
-      await streamChat({ messages, mode, model: model || undefined, source: from }, (e) => {
+      await streamChat({ messages, mode, model: model || undefined, source: from, scope: where }, (e) => {
         if (mine !== run.current) return;
         if (e.type === "delta") {
           pending.current += e.text;
@@ -261,7 +279,15 @@ export default function Ask() {
         <div className="seg" role="group" aria-label={t("Mode")}>
           {MODES.map((m) => <button key={m.id} type="button" aria-pressed={mode === m.id} onClick={() => setMode(m.id)}>{desktop ? m.label : m.short}</button>)}
         </div>
-        {mode === "ask" && (
+        {scoped && (
+          <div className="seg sm" role="group" aria-label={t("Chercher dans")}>
+            {SCOPES.map((s) => (
+              <button key={s.id} type="button" aria-pressed={scope === s.id} onClick={() => setScope(s.id)}
+                      aria-label={s.label} title={s.title}>{desktop ? s.label : s.short}</button>
+            ))}
+          </div>
+        )}
+        {wikiSwitch && (
           <div className="seg sm" role="group" aria-label={t("Répondre à partir de")}>
             <button type="button" aria-pressed={source === "wiki"} onClick={() => setSource("wiki")}
                     title={t("Les pages de ton wiki : des synthèses par thème de tout ce que tu as lu")}>{t("Wiki")}</button>
@@ -282,7 +308,9 @@ export default function Ask() {
         {turns.length === 0 && (
           <div className="ask-intro">
             <h1>{current.title}</h1>
-            <p className="lede">{mode === "ask" && source === "wiki"
+            <p className="lede">{scoped && scope === "hn"
+              ? t("Les réponses s'appuient sur les stories Hacker News récupérées chaque matin, avec un renvoi vers chaque fiche.")
+              : wikiSwitch && source === "wiki"
               ? t("Les réponses s'appuient sur les pages de ton wiki : des synthèses par thème de tout ce que tu as sauvegardé, avec un renvoi vers chaque page.")
               : current.intro}</p>
             {mode === "advice" && (
@@ -311,7 +339,8 @@ export default function Ask() {
               {turn.error && <div className="error-box">{turn.error}</div>}
               {turn.done && turn.model && (
                 <p className="answered-by">{t("Réponse de {model}", { model: turn.model })}
-                  {turn.source === "wiki" ? ` · ${t("d'après ton wiki")}` : turn.source === "rag" ? ` · ${t("d'après tes éléments")}` : ""}</p>
+                  {turn.scope === "hn" ? ` · ${t("d'après HN")}` : turn.source === "wiki" ? ` · ${t("d'après ton wiki")}`
+                    : turn.source === "rag" ? ` · ${t("d'après tes éléments")}` : ""}</p>
               )}
               {turn.done && turn.content && !turn.error && (
                 <div className="keep-row">
@@ -337,7 +366,7 @@ export default function Ask() {
                     ) : (
                       <span className="body">
                         <Link to={`/item/${s.id}`} className="st">{localized(s).title || t("Sans titre")}</Link>
-                        <span className="sm">{headLabel({ ...s, kind: s.kind })}{s.author ? ` · ${s.author}` : ""}
+                        <span className="sm">{s.space === "hn" ? "HN · " : ""}{headLabel({ ...s, kind: s.kind })}{s.author ? ` · ${s.author}` : ""}
                           {s.source_url && <> · <a href={s.source_url} target="_blank" rel="noreferrer">{t("source ↗")}</a></>}</span>
                       </span>
                     )}

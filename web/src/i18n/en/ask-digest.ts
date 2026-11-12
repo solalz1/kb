@@ -132,6 +132,18 @@ export default {
   "Pas pour moi": "Not for me",
   "Dans ta KB": "In your KB",
   "Garder": "Keep",
+  // Ask: where a question looks
+  "Chercher dans": "Look in",
+  "Mes enregistrements": "My saves",
+  "Les miens": "Mine",
+  "Les deux": "Both",
+  "Ce que tu as sauvegardé : Veille et Perso": "What you saved: Feed and Personal",
+  "Les stories Hacker News récupérées chaque matin": "The Hacker News stories fetched every morning",
+  "Tes enregistrements, et HN pour au plus la moitié des sources": "Your saves, and HN for at most half of the sources",
+  "Je cherche dans HN…": "Searching HN…",
+  "d'après HN": "from HN",
+  "Les réponses s'appuient sur les stories Hacker News récupérées chaque matin, avec un renvoi vers chaque fiche.":
+    "Answers draw on the Hacker News stories fetched every morning, with a link to each card.",
   "Discussion": "Discussion",
   "Projet {n}": "Project {n}",
   "Pourquoi maintenant": "Why now",

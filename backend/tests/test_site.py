@@ -1410,3 +1410,39 @@ def test_hn_page_and_keep_in_veille(site, monkeypatch):
     phone = site("/")
     phone.get_by_role("link", name="HN", exact=True).click()
     expect(phone.get_by_role("heading", name="HN", exact=True)).to_be_visible()
+
+
+def test_ask_chooses_its_sources(site, monkeypatch):
+    """« Demander »: the user's saves, HN or both (« Les deux » by default, remembered on the device)."""
+    hn_title = "Les agents de code en production, vus par HN"
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=hn_title if "news" in url else "Mesurer un agent sur de vraies tâches", source_url=url,
+        content="Les agents de code en production : retours d'expérience et benchmark. " * 30))
+    page = site("/ask", viewport=DESKTOP)
+    _seed(page)
+    _hn_story("7", hn_title)
+    page.reload()
+    where = page.get_by_role("group", name="Chercher dans")
+    expect(where.get_by_role("button", name="Les deux")).to_have_attribute("aria-pressed", "true")
+    expect(page.get_by_role("group", name="Répondre à partir de")).to_be_visible()
+
+    where.get_by_role("button", name="HN", exact=True).click()
+    expect(page.get_by_role("group", name="Répondre à partir de")).to_have_count(0)
+    page.locator("#ask-input").fill("Que dit-on des agents de code ?")
+    with page.expect_request(lambda r: r.url.endswith("/api/chat")) as sent:
+        page.keyboard.press("Enter")
+    assert sent.value.post_data_json["scope"] == "hn" and "source" not in sent.value.post_data_json
+    expect(page.locator(".answer")).to_contain_text("Réponse sourcée")
+    titles = page.locator(".source .st")
+    expect(titles.first).to_be_visible()
+    assert set(titles.all_inner_texts()) == {hn_title}
+    expect(page.get_by_text("d'après HN")).to_be_visible()
+
+    page.reload()
+    expect(page.get_by_role("group", name="Chercher dans").get_by_role("button", name="HN", exact=True)) \
+        .to_have_attribute("aria-pressed", "true")
+    page.get_by_role("group", name="Mode").get_by_role("button", name="Conseil").click()
+    expect(page.get_by_role("group", name="Chercher dans")).to_have_count(0)
+    page.get_by_role("group", name="Mode").get_by_role("button", name="Nouveau projet").click()
+    expect(page.get_by_role("group", name="Chercher dans")).to_be_visible()
+    expect(page.get_by_role("group", name="Répondre à partir de")).to_have_count(0)
