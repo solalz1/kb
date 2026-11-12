@@ -402,3 +402,59 @@ def test_network_error_is_retried(hn_client, monkeypatch):
     drain()
     card = _card()
     assert card["status"] == "pending" and "ConnectError" in card["error"]
+
+
+# ---------------------------------------------------------------------------
+# Keeping an HN card in Veille
+
+def _kept(iid):
+    return db.fetchone("""select space, folder_id::text, exists(select 1 from wiki_jobs where item_id = items.id) as wiki
+                            from items where id = %s""", (iid,))
+
+
+@pytest.fixture
+def inline(monkeypatch):
+    monkeypatch.setattr(pipeline, "_background", lambda fn, *a: fn(*a))
+
+
+def test_sharing_an_hn_link_keeps_it(hn_client, inline):
+    folder = folders.create("Agents")
+    iid = _hn_item(hn_client, "https://news.example.com/rag", id="7")
+    other = _saved(hn_client, "https://blog.example.com/agents")
+    r = hn_client.post("/api/ingest", json={"url": "https://news.example.com/rag?utm_source=hn"}, headers=AUTH).json()
+    assert r["id"] == iid and r["items"][0]["duplicate"] is True and r["message"] == "Gardé dans ta Veille ✓"
+    assert _kept(iid) == {"space": "main", "folder_id": folder["id"], "wiki": True}
+    assert db.fetchone("select 1 from item_links where source_id = %s and target_id = %s", (iid, other))
+    assert db.fetchone("select metadata->'hn'->>'id' as id from items where id = %s", (iid,))["id"] == "7"
+
+
+def test_keep_in_veille_from_the_app(hn_client, inline):
+    folder = folders.create("Agents")
+    iid = _hn_item(hn_client, "https://news.example.com/rag", id="7")
+    assert hn_client.patch(f"/api/items/{iid}", json={"space": "main"}, headers=AUTH).status_code == 200
+    assert _kept(iid) == {"space": "main", "folder_id": folder["id"], "wiki": True}
+    assert "Agents" in {f["name"] for f in folders.all_folders() if f["count"]}
+
+
+def test_kept_while_it_was_being_read(hn_client, inline, monkeypatch):
+    """« Garder » pressed while the worker reads the story: it ends up filed and in the wiki all the same."""
+    folders.create("Agents")
+    _page(hn_client, "https://news.example.com/rag", "Les agents autonomes orchestrés. " * 8)
+    res = pipeline.ingest(url="https://news.example.com/rag", space="hn", hn=_hn_meta(id="7"))
+    real = extractors.extract_url
+
+    def read_and_keep(url):
+        db.execute("update items set space = 'main' where id = %s", (res["id"],))
+        return real(url)
+
+    monkeypatch.setattr(extractors, "extract_url", read_and_keep)
+    drain()
+    assert _kept(res["id"])["folder_id"] and _kept(res["id"])["wiki"]
+
+
+def test_nothing_is_moved_into_hn_by_hand(hn_client):
+    saved = _saved(hn_client, "https://blog.example.com/agents")
+    assert hn_client.patch(f"/api/items/{saved}", json={"space": "hn"}, headers=AUTH).status_code == 400
+    assert hn_client.post("/api/ingest", json={"url": "https://blog.example.com/new", "space": "hn"},
+                          headers=AUTH).status_code == 400
+    assert db.fetchone("select space from items where id = %s", (saved,))["space"] == "main"

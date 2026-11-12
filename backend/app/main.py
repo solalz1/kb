@@ -232,6 +232,9 @@ async def ingest(request: Request):
     dupes = sum(r["duplicate"] for r in results)
     if len(results) == 1 and results[0].get("retried"):
         message = "Page reçue, je la relis ✓"     # failed before; this time the phone sent the page
+    elif len(results) == 1 and results[0].get("kept"):
+        # a story of the HN space, shared by the user: it moves to what the user keeps
+        message = "Gardé dans Perso ✓" if results[0]["kept"] == "perso" else "Gardé dans ta Veille ✓"
     elif len(results) == 1:
         message = "Déjà dans ta KB ✓" if dupes else "Ajouté à ta KB ✓"
     else:
@@ -568,7 +571,7 @@ def patch_item(item_id: str, patch: ItemPatch):
     changes = patch.model_dump(exclude_unset=True)
     if not changes:
         return {"ok": True}
-    item = db.fetchone("select kind, input_url, file_path, title from items where id = %s", (item_id,))
+    item = db.fetchone("select kind, input_url, file_path, title, space from items where id = %s", (item_id,))
     if not item:
         raise HTTPException(404, "Élément introuvable")
     if "folder_id" in changes:
@@ -582,6 +585,10 @@ def patch_item(item_id: str, patch: ItemPatch):
         category = normalize_category(changes["category"]) if "category" in changes else None
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    was_hn = item["space"] == "hn"
+    if space == "hn" and not was_hn:
+        raise HTTPException(400, "L'espace HN se remplit tout seul chaque matin")
+    kept = was_hn and space in ("main", "perso")      # « Garder dans la Veille »
     if space:
         sets.append("space = %s")
         params.append(space)
@@ -636,6 +643,8 @@ def patch_item(item_id: str, patch: ItemPatch):
 
     if requeue:
         wake.set()      # résumé, tags, index et liens refaits par le worker
+    elif kept:
+        pipeline._background(pipeline.promote, item_id)    # filed, linked, into the wiki, its card redone
     elif {"title", "user_note", "tags", "space", "category"} & changes.keys():
         threading.Thread(target=pipeline.reembed_card, args=(item_id,), daemon=True).start()
     notion.wake()

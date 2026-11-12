@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -170,6 +171,8 @@ def ingest(
     if not (url or file):
         text = _strip_tags(text, used)
     space = space or "main"
+    if space == "hn" and not hn:
+        raise ValueError("L'espace HN se remplit tout seul chaque matin : partage vers la Veille ou Perso")
     category = (category or tag_category) if space == "perso" else None
 
     if not url and not file and space != "perso":
@@ -225,9 +228,15 @@ def ingest(
             if space == "perso" and existing["space"] != "perso":   # repartagé exprès vers Perso : on le déplace
                 db.execute("update items set space = 'perso', category = coalesce(%s, category) where id = %s",
                            (category, existing["id"]))
+            elif existing["space"] == "hn":     # a story of the HN space shared by the user: kept in Veille
+                db.execute("update items set space = 'main' where id = %s", (existing["id"],))
             if folder_id:       # shared again into a chosen folder: it moves there
                 folders.move(str(existing["id"]), folder_id)
+            if existing["space"] == "hn":
+                _background(promote, str(existing["id"]))
             out = {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
+            if existing["space"] == "hn":
+                out["kept"] = "perso" if space == "perso" else "main"
             if retried:
                 out["retried"] = True
             elif (page_follows and not page and existing["status"] == "error" and info.kind == "web"
@@ -525,6 +534,9 @@ def process(item: dict) -> None:
         reembed_card(item_id)      # fiche indexée refaite avec le titre, les tags ou la note modifiés entre-temps
     if fields["space"] == "hn":
         return
+    if is_hn:       # kept by the user while it was being read
+        promote(item_id)
+        return
     try:
         link_item(item_id, fields)
     except Exception:
@@ -600,6 +612,38 @@ def _translations(enr: dict, title: str | None) -> dict:
         if tr:
             out[code] = tr
     return out
+
+
+def _background(fn, *args) -> None:
+    """Runs `fn(*args)` in a daemon thread, so an API call answers at once; a failure only goes to the logs."""
+    def run():
+        try:
+            fn(*args)
+        except Exception:  # noqa: BLE001
+            log.warning("%s%s a échoué", getattr(fn, "__name__", fn), args, exc_info=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def promote(item_id: str) -> None:
+    """A story of the HN space the user keeps (moved to Veille or Perso): it gets what a save gets, a folder (unless
+    one was chosen by hand), its links, its place in the wiki and an up-to-date card. Nothing if it isn't ready yet:
+    `process` then does it when it finishes."""
+    item = db.fetchone(
+        """select id::text, kind, coalesce(title, left(input_text, 90)) as title, left(summary, 400) as summary,
+                  tags, space, status, metadata from items where id = %s""", (item_id,))
+    if not item or item["space"] == "hn" or item["status"] != "ready":
+        return
+    if not (db.loads(item["metadata"]) or {}).get("manual_folder") and (shelves := folders.for_enrich()):
+        folder_id = folders.id_for(llm.classify_folders([item], shelves).get(item["id"]))
+        if folder_id:
+            db.execute("""update items set folder_id = %s::uuid where id = %s
+                          and not coalesce((metadata->>'manual_folder')::boolean, false)""", (folder_id, item_id))
+    reembed_card(item_id)
+    try:
+        link_item(item_id, item)
+    except Exception:
+        log.warning("Calcul des liens impossible pour %s", item_id, exc_info=True)
+    wiki.enqueue_item(item_id)
 
 
 def link_item(item_id: str, fields: dict) -> None:
