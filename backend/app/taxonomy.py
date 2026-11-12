@@ -1,4 +1,4 @@
-"""Vocabulaire partagé : types d'éléments, espaces (Veille / Perso) et catégories de l'espace Perso."""
+"""Vocabulaire partagé : types d'éléments, espaces (Veille / Perso / HN) et catégories de l'espace Perso."""
 
 from __future__ import annotations
 
@@ -9,9 +9,13 @@ KIND_LABELS = {
     "pdf": "PDF", "image": "Image", "document": "Document", "note": "Note", "repo": "Dépôt GitHub", "paper": "Paper",
 }
 
-# 'main' = la veille (ce que tu captures) ; 'perso' = développement personnel (tes principes, leçons, objectifs…)
-SPACES = ("main", "perso")
-SPACE_LABELS = {"main": "Veille", "perso": "Perso"}
+# 'main' = la veille (ce que tu captures) ; 'perso' = développement personnel (tes principes, leçons, objectifs…) ;
+# 'hn' = the day's best Hacker News stories, fetched every morning (app/hn.py): news, not something the user kept
+SPACES = ("main", "perso", "hn")
+SAVED_SPACES = ("main", "perso")  # what the user saved (« Mes enregistrements »)
+SPACE_LABELS = {"main": "Veille", "perso": "Perso", "hn": "HN"}
+# where a question or a search looks: the user's saves, Hacker News, or both
+SCOPES = ("mine", "hn", "both")
 
 # clé -> (libellé, pluriel, description pour Claude)
 CATEGORIES: dict[str, tuple[str, str, str]] = {
@@ -41,7 +45,8 @@ _ALIASES.update({"lecons": "lecon", "lesson": "lecon", "lessons": "lecon", "goal
                  "value": "valeur", "values": "valeur", "principle": "principe", "principles": "principe",
                  "habit": "habitude", "habits": "habitude", "quote": "citation", "quotes": "citation"})
 
-_SPACE_ALIASES = {"main": "main", "veille": "main", "perso": "perso", "personnel": "perso", "personal": "perso"}
+_SPACE_ALIASES = {"main": "main", "veille": "main", "perso": "perso", "personnel": "perso", "personal": "perso",
+                  "hn": "hn", "hackernews": "hn", "hacker news": "hn"}
 
 
 def normalize_category(value: str | None) -> str | None:
@@ -63,8 +68,19 @@ def normalize_space(value: str | None) -> str | None:
         return None
     key = _SPACE_ALIASES.get(_ascii(str(value)))
     if not key:
-        raise ValueError(f"Espace inconnu : {value} (au choix : veille, perso)")
+        raise ValueError(f"Espace inconnu : {value} (au choix : veille, perso, hn)")
     return key
+
+
+def scope_spaces(scope: str | None) -> list[str] | None:
+    """The spaces a scope covers: `mine` → the saved spaces, `hn` → HN, `both` (or nothing) → every space (None)."""
+    if scope is None or scope == "both":
+        return None
+    if scope == "mine":
+        return list(SAVED_SPACES)
+    if scope == "hn":
+        return ["hn"]
+    raise ValueError(f"Portée inconnue : {scope} (au choix : {', '.join(SCOPES)})")
 
 
 def space_from_word(word: str) -> str | None:

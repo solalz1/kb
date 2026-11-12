@@ -19,9 +19,12 @@ update both.
   `similar_items`, `claim_next_item` (job queue, recovers stale items, stops after `max_attempts`). The `items_touch`
   trigger sets `notion_synced_at = null` whenever visible content changes (that's how the Notion copy knows what to
   rewrite); views (`view_count`) don't count.
-- Two **spaces** on `items.space`: `main` (« Veille », what the user captures) and `perso` (personal development:
-  principles, values, lessons, goals… in `items.category`). Vocabulary in `backend/app/taxonomy.py`, mirrored in
-  `web/src/perso.ts`. Principles and values form the « charte », always sent in full in advice mode.
+- Three **spaces** on `items.space`: `main` (« Veille », what the user captures), `perso` (personal development:
+  principles, values, lessons, goals… in `items.category`) and `hn` (the day's best Hacker News stories, fetched
+  every morning by `hn.py`: news, not something the user kept). `SAVED_SPACES` = main + perso (« Mes
+  enregistrements »); `SCOPES` (`mine | hn | both`) say where a question or a search looks. Vocabulary in
+  `backend/app/taxonomy.py`, mirrored in `web/src/perso.ts`. Principles and values form the « charte », always sent
+  in full in advice mode.
 - `backend/app/` (FastAPI, Python 3.12, sync code + threads):
   - `main.py`: `/api/*`, the SPA, and `RootApp`, which routes `/mcp` (Bearer header) and `/mcp/<KB_MCP_SECRET>`
     to the MCP server.
