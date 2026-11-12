@@ -69,7 +69,10 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     """Opens pages as a signed-in user; fails the test on any page error, console error or failed request."""
     from app import folders
 
+    from app.extractors import hackernews
+
     folders.seed()          # as the app does when it starts
+    monkeypatch.setattr(hackernews, "get_json", lambda url, params=None: {})     # Hacker News: nothing, ever reached
     monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
         kind="article", title="Mesurer un agent sur de vraies tâches", source_url=url, author="Jane Doe",
         content="Un benchmark d'agents doit utiliser de vraies tâches et mesurer le coût. " * 30))
@@ -176,6 +179,7 @@ def test_every_page_opens(site, viewport):
         ("/add", page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")),
         ("/folders", page.get_by_role("heading", name="Dossiers", exact=True)),
         ("/wiki", page.get_by_role("heading", name="Wiki", exact=True)),
+        ("/hn", page.get_by_role("heading", name="HN", exact=True)),
         ("/todo", page.get_by_text("Tester l'outil mentionné").first),
         ("/settings", page.get_by_role("heading", name="Réglages")),
         (f"/item/{ids['article']}", page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")),
@@ -1348,3 +1352,61 @@ def test_ask_the_wiki_and_keep_the_answer(site):
     page.reload()
     expect(page.get_by_role("group", name="Répondre à partir de").get_by_role("button", name="Éléments")) \
         .to_have_attribute("aria-pressed", "true")
+
+
+def _hn_story(story_id: str, title: str, *, days_ago: int = 0, points: int = 120, comments: int = 40) -> str:
+    """A story of the HN space, as the daily run makes it (the article, then its discussion), processed."""
+    from app import db, pipeline
+
+    url = f"https://news{story_id}.example.com/post"
+    res = pipeline.ingest(url=url, space="hn", hn={
+        "id": story_id, "title": title, "points": points, "comments": comments, "author": "pg",
+        "discussion_url": f"https://news.ycombinator.com/item?id={story_id}", "posted_at": "2026-11-12T05:00:00+00:00"})
+    drain()
+    if days_ago:
+        db.execute("update items set created_at = now() - make_interval(days => %s) where id = %s", (days_ago, res["id"]))
+    return res["id"]
+
+
+def test_hn_page_and_keep_in_veille(site, monkeypatch):
+    titles = {"https://news1.example.com/post": "Un compilateur en un week-end",
+              "https://news2.example.com/post": "Le retour des bases de données embarquées"}
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=titles[url], source_url=url, content="Un article de fond sur le sujet. " * 30))
+    page = site("/hn", viewport=DESKTOP)
+    today = _hn_story("1", titles["https://news1.example.com/post"])
+    yesterday = _hn_story("2", titles["https://news2.example.com/post"], days_ago=1, points=88, comments=12)
+    page.reload()
+    expect(page.get_by_role("heading", name="HN", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Aujourd'hui")).to_be_visible()
+    expect(page.get_by_role("heading", name="Hier")).to_be_visible()
+    expect(page.get_by_text("▲ 120 · 40 commentaires")).to_be_visible()
+    expect(page.get_by_text("À redécouvrir")).to_have_count(0)
+
+    # « Garder dans la Veille »: the card leaves HN for Veille, filed and in the wiki
+    card = page.locator(".fiche", has_text=titles["https://news1.example.com/post"])
+    _settled(page)
+    card.click(button="right")
+    page.get_by_role("menuitem", name="Garder dans la Veille").click()
+    expect(page.get_by_text("Gardé dans la Veille")).to_be_visible()
+    expect(card).to_have_count(0)
+    _wait_for(lambda: _api(page, "GET", f"/api/items/{today}")["body"]["space"] == "main", page)
+    page.goto("/")
+    expect(page.locator(".fiche", has_text=titles["https://news1.example.com/post"])).to_be_visible()
+
+    # an HN card's page: its score, the discussion on HN, and the same button
+    page.goto(f"/item/{yesterday}")
+    expect(page.get_by_text("Hacker News · 88 points · 12 commentaires")).to_be_visible()
+    expect(page.get_by_role("link", name="Discussion HN ↗")).to_have_attribute(
+        "href", "https://news.ycombinator.com/item?id=2")
+    expect(page.get_by_role("button", name="Garder dans la Veille")).to_be_visible()
+
+    # « Récupérer maintenant »: nothing new from HN here
+    page.goto("/hn")
+    page.get_by_role("button", name="Récupérer maintenant").click()
+    expect(page.get_by_text("Rien de nouveau")).to_be_visible()
+
+    # on a phone, Veille's head leads to it
+    phone = site("/")
+    phone.get_by_role("link", name="HN", exact=True).click()
+    expect(phone.get_by_role("heading", name="HN", exact=True)).to_be_visible()

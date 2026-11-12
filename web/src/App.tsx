@@ -7,16 +7,17 @@ import { EdgeSwipeBack, PullToRefresh, settleSwipe } from "./components/Gestures
 import { LangSwitch } from "./components/LangSwitch";
 import { TitleBar } from "./components/TitleBar";
 import { t } from "./i18n";
-import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconPlus, IconSettings, IconTodo, IconWiki } from "./icons";
+import { IconCalendar, IconChat, IconDigest, IconFeed, IconFolder, IconLeaf, IconNews, IconPlus, IconSettings, IconTodo, IconWiki } from "./icons";
 import { devCopy, pressFeedback, realKb, scrollKey, stepsToRoot, tabOf } from "./motion";
 import { Link, NavLink, useNavigate } from "./nav";
 import { keys, prefetchTabs } from "./queries";
 
 // The sidebar (desktop). "Ajouter" is the primary button above it; on phones it is the + in the middle of the tab bar,
-// the wiki, the folders and À faire are icons at the top of Veille, and the journal an icon at the top of Perso.
+// HN, the wiki, the folders and À faire are icons at the top of Veille, and the journal an icon at the top of Perso.
 const NAV = [
   { to: "/", label: t("Veille"), Icon: IconFeed, end: true },
   { to: "/perso", label: t("Perso"), Icon: IconLeaf },
+  { to: "/hn", label: "HN", Icon: IconNews },
   { to: "/wiki", label: t("Wiki"), Icon: IconWiki },
   { to: "/folders", label: t("Dossiers"), Icon: IconFolder },
   { to: "/journal", label: t("Journal"), Icon: IconCalendar },
@@ -24,7 +25,8 @@ const NAV = [
   { to: "/ask", label: t("Demander"), Icon: IconChat },
   { to: "/todo", label: t("À faire"), Icon: IconTodo },
 ];
-const TABS = [NAV[0], NAV[1], { to: "/add", label: t("Ajouter"), Icon: IconPlus }, NAV[5], NAV[6]];
+const navItem = (to: string) => NAV.find((x) => x.to === to)!;
+const TABS = [navItem("/"), navItem("/perso"), { to: "/add", label: t("Ajouter"), Icon: IconPlus }, navItem("/digest"), navItem("/ask")];
 const RAIL_STEP = 50;     // px between two sidebar links (44 + the 6 px gap): the selection slides by that much
 
 const hostOf = (base: string) => { try { return new URL(base).host; } catch { return base; } };

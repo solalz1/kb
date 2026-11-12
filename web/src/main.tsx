@@ -78,6 +78,7 @@ const router = createBrowserRouter([{
   children: [
     { path: "/", element: <Feed key="main" space="main" /> },
     { path: "/perso", element: <Feed key="perso" space="perso" /> },
+    { path: "/hn", element: <Feed key="hn" space="hn" /> },
     { path: "/folders", element: <Folders /> },
     { path: "/folders/:folderId", element: <Feed key="folder" /> },
     { path: "/journal", element: <Journal /> },

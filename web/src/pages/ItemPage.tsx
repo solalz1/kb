@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api, type ItemDetail, type Space } from "../api";
+import { api, type HnMeta, type ItemDetail, type Space } from "../api";
 import { cache, useQuery } from "../cache";
 import { openInClaude } from "../claude";
 import { Embed } from "../components/Embed";
@@ -120,6 +120,7 @@ export default function ItemPage() {
   const fileIn = (folderId: string) => update({ folder_id: folderId || null });
 
   const perso = item.space === "perso";
+  const hn: HnMeta | null = item.space === "hn" && item.metadata?.hn ? item.metadata.hn : null;   // a story of the HN space
   const writtenNote = isEditableNote(item);
   const noteText = writtenNote ? (item.content ?? item.input_text ?? "") : "";
   const shown = localized(item);
@@ -128,7 +129,7 @@ export default function ItemPage() {
   const thread: { id: string; url: string }[] = Array.isArray(m.thread) ? m.thread.filter((tw: unknown) => tw && typeof tw === "object") : [];
   const ready = item.status === "ready";
   const content = !writtenNote && item.content ? item.content : "";
-  const back = perso ? t("Perso") : t("Veille");
+  const back = perso ? t("Perso") : item.space === "hn" ? "HN" : t("Veille");
   const tools = [
     { label: item.pinned ? t("Désépingler") : t("Épingler"), run: () => { setMenu(false); update({ pinned: !item.pinned }); } },
     { label: item.archived ? t("Désarchiver") : t("Archiver"), run: () => { setMenu(false); update({ archived: !item.archived }); } },
@@ -176,6 +177,12 @@ export default function ItemPage() {
         </div>
 
         <h1 className="item-title">{shown.title || item.source_url || t("Sans titre")}</h1>
+        {hn && (
+          <p className="hn-line">
+            <span>{t("Hacker News · {points} points · {comments} commentaires", { points: hn.points, comments: hn.comments })}</span>
+            {" · "}<a href={hn.discussion_url} target="_blank" rel="noreferrer">{t("Discussion HN ↗")}</a>
+          </p>
+        )}
 
         {pending && <div className="status-line"><IconSpinner /> {t("Lecture, résumé et indexation en cours…")}</div>}
         {(failed || (error && item)) && <div className="error-box">{failed || error}</div>}
@@ -193,6 +200,7 @@ export default function ItemPage() {
           {item.source_url && (
             <a className="btn primary primary-action" href={item.source_url} target="_blank" rel="noreferrer"><IconExternal size={18} /> {sourceLabel(item.kind)}</a>
           )}
+          {hn && <button type="button" className="btn" onClick={() => moveTo("main")}>{t("Garder dans la Veille")}</button>}
           {ready && (
             <div className="more">
               {perso
@@ -206,7 +214,7 @@ export default function ItemPage() {
 
         {item.kind !== "tweet" && <Embed item={item} />}
 
-        {!writtenNote && ready && (
+        {!writtenNote && ready && !hn && (
           <label className="stack why-box">
             <span className="label">{t("Pourquoi tu gardes ça ?")} {savedNote && <span className="saved">· {t("Enregistré")}</span>}</span>
             <textarea className="field serif" rows={2} value={note} onChange={(e) => setNote(e.target.value)} onBlur={saveNote}
@@ -292,16 +300,19 @@ export default function ItemPage() {
           </div>
         </section>
         <section className="aside-sec placement"><h2 className="mini-h">{t("Rangement")}</h2>
-          <label className="stack">
-            <span className="hint">{t("Dossier")}</span>
-            <select className="field" value={item.folder_id ?? ""} onChange={(e) => fileIn(e.target.value)} aria-label={t("Dossier")}>
-              <option value="">{t("Aucun dossier")}</option>
-              {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
-          </label>
+          {!hn && (
+            <label className="stack">
+              <span className="hint">{t("Dossier")}</span>
+              <select className="field" value={item.folder_id ?? ""} onChange={(e) => fileIn(e.target.value)} aria-label={t("Dossier")}>
+                <option value="">{t("Aucun dossier")}</option>
+                {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </label>
+          )}
           <div className="seg sm" role="group" aria-label={t("Espace")}>
-            <button type="button" aria-pressed={!perso} onClick={() => perso && moveTo("main")}>{t("Veille")}</button>
+            <button type="button" aria-pressed={item.space === "main"} onClick={() => item.space !== "main" && moveTo("main")}>{t("Veille")}</button>
             <button type="button" aria-pressed={perso} onClick={() => !perso && moveTo("perso")}>{t("Perso")}</button>
+            {hn && <button type="button" aria-pressed="true">HN</button>}
           </div>
           {perso && (
             <select className="field" value={item.category ?? ""} onChange={(e) => update({ category: e.target.value || null })} aria-label={t("Catégorie")}>

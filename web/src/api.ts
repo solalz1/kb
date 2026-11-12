@@ -7,7 +7,16 @@ export type Kind =
   | "image" | "document" | "note" | "repo" | "paper";
 
 // "main" = la veille ; "perso" = développement personnel
-export type Space = "main" | "perso";
+export type Space = "main" | "perso" | "hn";
+
+/** A story of the HN space: its score and its discussion on Hacker News (metadata.hn). */
+export interface HnMeta {
+  id: string;
+  points: number;
+  comments: number;
+  discussion_url: string;
+  article_unreadable?: boolean;
+}
 
 export interface ItemSummary {
   id: string;
@@ -35,6 +44,7 @@ export interface ItemSummary {
   entry_date?: string | null;   // journal notes: the day they belong to
   folder_id?: string | null;    // the folder it's filed in (by Claude, or by hand)
   duration?: number | null;     // seconds, for a video or a podcast
+  hn?: HnMeta | null;           // a story of the HN space
 }
 
 /** One of the user's folders (backend/app/folders.py). */
@@ -506,6 +516,8 @@ export const api = {
                         entry_date?: string; folder?: string }) =>
     request<{ ok: boolean; id: string }>("/api/notes", { method: "POST", body: JSON.stringify(body) }),
   remove: (id: string) => request<{ ok: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
+  /** « Récupérer maintenant »: today's best Hacker News stories now (at most 30 a day). */
+  runHn: () => request<{ added?: number; skipped?: number; busy?: boolean }>("/api/hn/run", { method: "POST" }),
   journalMonth: (month: string) =>
     request<{ month: string; today: string; days: Record<string, number> }>(`/api/journal${qs({ month })}`),
   journalDay: (day: string) => request<{ date: string; entries: JournalEntry[] }>(`/api/journal/${day}`),

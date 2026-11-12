@@ -19,6 +19,11 @@ export const IconFeed = icon(<>
   <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21z" />
   <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2z" />
 </>);
+// HN: a folded newspaper (the day's news)
+export const IconNews = icon(<>
+  <path d="M5 4h12v15a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1z" />
+  <path d="M17 9h3v10a2 2 0 0 1-2 2M8 8h5M8 12h5M8 16h5" />
+</>);
 export const IconLeaf = icon(<><path d="M5 20c0-8 4-13 14-14-1 10-6 14-14 14z" /><path d="M5 20c3-4 6-7 10-10" /></>);
 export const IconFolder = icon(<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />);
 export const IconCalendar = icon(<><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>);
