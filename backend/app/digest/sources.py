@@ -330,7 +330,9 @@ def already_in_kb(urls: list[str]) -> set[str]:
     if not urls:
         return set()
     canon = {canonical(u): u for u in urls}
-    rows = db.fetchall("select source_url from items where source_url = any(%s)", (list(canon) + urls,))
+    # what the user saved: a story of the HN space is news the digest may still bring up
+    rows = db.fetchall("select source_url from items where source_url = any(%s) and space <> 'hn'",
+                       (list(canon) + urls,))
     found = {canonical(r["source_url"]) for r in rows if r["source_url"]}
     return {u for c, u in canon.items() if c in found}
 

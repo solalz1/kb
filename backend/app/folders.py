@@ -88,7 +88,8 @@ def all_folders() -> list[dict]:
 
 def overview() -> dict:
     return {"folders": all_folders(),
-            "unfiled": db.fetchone("select count(*)::int n from items where folder_id is null and not archived")["n"]}
+            "unfiled": db.fetchone("select count(*)::int n from items where folder_id is null and not archived "
+                                   "and space <> 'hn'")["n"]}
 
 
 def get(folder_id: str) -> dict | None:
@@ -228,7 +229,8 @@ def sort_items() -> dict:
             """select id::text, kind, coalesce(title, left(input_text, 90)) as title, left(summary, 400) as summary,
                       tags, folder_id::text
                  from items
-                where status = 'ready' and not coalesce((metadata->>'manual_folder')::boolean, false)
+                where status = 'ready' and space <> 'hn'
+                  and not coalesce((metadata->>'manual_folder')::boolean, false)
                 order by created_at""")
         filed = 0
         for start in range(0, len(items), BATCH):

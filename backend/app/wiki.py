@@ -388,7 +388,9 @@ def enqueue_item(item_id: str) -> None:
     """An item became ready (new, reprocessed or edited): it joins the queue, once."""
     if not enabled():
         return
-    db.execute("""insert into wiki_jobs (kind, item_id) values ('ingest', %s) on conflict do nothing""", (item_id,))
+    # the day's Hacker News stories are news, not the user's material: the wiki never takes them in
+    db.execute("""insert into wiki_jobs (kind, item_id) select 'ingest', id from items where id = %s and space <> 'hn'
+                  on conflict do nothing""", (item_id,))
     wake.set()
 
 
@@ -902,7 +904,7 @@ def backfill_once() -> int:
         rows = c.execute(
             """insert into wiki_jobs (kind, item_id, created_at)
                select 'ingest', i.id, i.created_at from items i
-               where i.status = 'ready'
+               where i.status = 'ready' and i.space <> 'hn'
                  and not exists (select 1 from wiki_jobs j where j.item_id = i.id and j.kind = 'ingest')
                order by i.created_at
                on conflict do nothing returning id""").fetchall()

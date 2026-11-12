@@ -139,7 +139,7 @@ def _links(item_id: str) -> list[dict]:
     return db.fetchall(
         """select i.id::text, i.title, l.reason, l.similarity from item_links l
            join items i on i.id = case when l.source_id = %(id)s then l.target_id else l.source_id end
-           where (l.source_id = %(id)s or l.target_id = %(id)s) and i.status = 'ready'
+           where (l.source_id = %(id)s or l.target_id = %(id)s) and i.status = 'ready' and i.space <> 'hn'
            order by l.similarity desc limit 10""",
         {"id": item_id},
     )
@@ -401,6 +401,7 @@ def resurface_items(count: int = 5, space: str | None = None) -> list[dict]:
         f"""with recent as (
               select c.embedding from chunks c join items i on i.id = c.item_id
               where c.chunk_index = -1 and i.created_at > now() - interval '14 days' and i.status = 'ready'
+                and i.space <> 'hn'
               order by i.created_at desc limit 10
             ), candidates as (
               select c.item_id, max(1 - (c.embedding <=> r.embedding)) sim
@@ -408,7 +409,7 @@ def resurface_items(count: int = 5, space: str | None = None) -> list[dict]:
               where c.chunk_index = -1 and i.status = 'ready' and not i.archived
                 and i.created_at < now() - interval '21 days'
                 and (i.last_viewed_at is null or i.last_viewed_at < now() - interval '30 days')
-                and (%s::text is null or i.space = %s)
+                and i.space <> 'hn' and (%s::text is null or i.space = %s)
               group by c.item_id order by sim desc limit %s
             )
             select {ITEM_FIELDS} from items where id in (select item_id from candidates)""",
@@ -419,7 +420,7 @@ def resurface_items(count: int = 5, space: str | None = None) -> list[dict]:
         rows += db.fetchall(
             f"""select {ITEM_FIELDS} from items where status = 'ready' and not archived
                 and created_at < now() - interval '21 days' and not (id::text = any(%s))
-                and (%s::text is null or space = %s)
+                and space <> 'hn' and (%s::text is null or space = %s)
                 order by random() limit %s""",
             (seen, space, space, count - len(rows)),
         )

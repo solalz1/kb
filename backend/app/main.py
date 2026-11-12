@@ -34,7 +34,7 @@ from .digest import profile as digest_profile
 from .digest import render as digest_render
 from .digest import sources as digest_sources
 from .mcp_server import mcp, resurface_items
-from .taxonomy import CATEGORIES, SPACE_LABELS, normalize_category, normalize_space
+from .taxonomy import CATEGORIES, SAVED_SPACES, SPACE_LABELS, normalize_category, normalize_space
 from .worker import Worker, wake
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -370,7 +370,8 @@ def sort_folders():
 @api.get("/api/taxonomy", dependencies=auth)
 def taxonomy():
     return {
-        "spaces": [{"id": k, "label": v} for k, v in SPACE_LABELS.items()],
+        # where something can be saved: the HN space is filled by the daily run only
+        "spaces": [{"id": k, "label": SPACE_LABELS[k]} for k in SAVED_SPACES],
         "categories": [{"id": k, "label": label, "plural": plural, "description": desc}
                        for k, (label, plural, desc) in CATEGORIES.items()],
     }
@@ -486,7 +487,7 @@ def _links(item_id: str) -> list[dict]:
         """select i.id::text, i.title, i.kind, i.source_url, l.reason, l.similarity
            from item_links l
            join items i on i.id = case when l.source_id = %(id)s then l.target_id else l.source_id end
-           where (l.source_id = %(id)s or l.target_id = %(id)s) and i.status = 'ready'
+           where (l.source_id = %(id)s or l.target_id = %(id)s) and i.status = 'ready' and i.space <> 'hn'
            order by l.similarity desc limit 12""",
         {"id": item_id},
     )
@@ -662,9 +663,9 @@ def tags(limit: int = 200, space: str | None = None):
     space = _space_param(space)
     return db.fetchall(
         """select tag, count(*)::int as count from items, unnest(tags) tag
-           where status = 'ready' and not archived and (%s::text is null or space = %s)
+           where status = 'ready' and not archived and coalesce(space = %s, space <> 'hn')
            group by tag order by count desc, tag limit %s""",
-        (space, space, max(1, min(limit, 1000))),
+        (space, max(1, min(limit, 1000))),
     )
 
 
@@ -675,9 +676,9 @@ def entities(limit: int = 100, type: str | None = None, space: str | None = None
         """select e->>'name' as name, e->>'type' as type, count(*)::int as count
            from items, jsonb_array_elements(entities) e
            where status = 'ready' and not archived and (%s::text is null or e->>'type' = %s)
-             and (%s::text is null or space = %s)
+             and coalesce(space = %s, space <> 'hn')
            group by 1, 2 having count(*) >= 1 order by count desc, name limit %s""",
-        (type, type, space, space, max(1, min(limit, 1000))),
+        (type, type, space, max(1, min(limit, 1000))),
     )
 
 
@@ -725,9 +726,12 @@ def resurface(count: int = 4, space: str | None = None):
 
 @api.get("/api/stats", dependencies=auth)
 def stats():
-    by_kind = db.fetchall("select kind, count(*)::int n from items where status='ready' group by kind order by n desc")
-    by_status = db.fetchall("select status, count(*)::int n from items group by status")
-    week = db.fetchone("select count(*)::int n from items where created_at > now() - interval '7 days'")
+    # what the user saved: the HN space only shows in by_space
+    by_kind = db.fetchall("""select kind, count(*)::int n from items where status='ready' and space <> 'hn'
+                             group by kind order by n desc""")
+    by_status = db.fetchall("select status, count(*)::int n from items where space <> 'hn' group by status")
+    week = db.fetchone("select count(*)::int n from items where created_at > now() - interval '7 days' "
+                       "and space <> 'hn'")
     open_actions = db.fetchone("select count(*)::int n from actions where not done")
     by_space = db.fetchall("select space, count(*)::int n from items where not archived group by space")
     return {

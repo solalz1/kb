@@ -176,7 +176,8 @@ class Settings(BaseSettings):
     @property
     def notion_space_list(self) -> list[str]:
         spaces = [s.strip().lower() for s in self.notion_spaces.split(",") if s.strip()]
-        return [{"veille": "main"}.get(s, s) for s in spaces] or ["main", "perso"]
+        # the HN space is never copied: it is the day's news, not the user's material
+        return [{"veille": "main"}.get(s, s) for s in spaces if s != "hn"] or ["main", "perso"]
 
     @property
     def cors_origin_list(self) -> list[str]:
