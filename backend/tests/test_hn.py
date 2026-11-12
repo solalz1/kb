@@ -130,3 +130,64 @@ def test_hn_is_left_out_of_counts_and_suggestions(hn_client):
     assert sources.already_in_kb(["https://news.example.com/quantum"]) == set()
     assert folders.overview()["unfiled"] == 1
     assert Settings(notion_spaces="main,hn").notion_space_list == ["main"]
+
+
+# ---------------------------------------------------------------------------
+# Search scopes, HN capped at half
+
+from app import search  # noqa: E402
+from app.formatting import item_meta_line  # noqa: E402
+from app.search import cap_hn  # noqa: E402
+
+HN_VECTOR = "Vector databases: vector databases benchmarks for vector databases at scale. " * 4
+SAVED_VECTOR = "Notes de lecture sur les vector databases et le choix d'un index pour mon projet. " * 3
+
+
+def _vector_kb(client, hn_count=10):
+    hn_ids = [_hn_item(client, f"https://news.example.com/v{i}", body=HN_VECTOR + f" Story {i}.", id=str(100 + i))
+              for i in range(hn_count)]
+    saved = [_saved(client, "https://blog.example.com/vdb", body=SAVED_VECTOR),
+             _saved(client, "https://blog.example.com/vdb2", body=SAVED_VECTOR + " Deuxième.")]
+    perso = _saved(client, "https://perso.example.com/vdb", body=SAVED_VECTOR + " Une leçon.", space="perso")
+    return hn_ids, saved, perso
+
+
+def test_cap_hn():
+    ranked = [{"id": str(i), "space": "hn"} for i in range(6)] + [{"id": "s", "space": "main"}]
+    assert [r["id"] for r in cap_hn(ranked, 4)] == ["0", "1", "s"]
+    assert [r["id"] for r in cap_hn([{"id": "s", "space": "main"}] * 3, 2)] == ["s", "s"]
+
+
+def test_mixed_search_keeps_saved_items(hn_client):
+    _vector_kb(hn_client)
+    found = search.search_items("vector databases", limit=8)
+    assert sum(f["space"] == "hn" for f in found) <= 4
+    assert {"main", "perso"} <= {f["space"] for f in found}
+    assert {f["space"] for f in search.search_items("vector databases", spaces=["hn"])} == {"hn"}
+
+
+def test_items_search_scope(hn_client):
+    _vector_kb(hn_client, hn_count=3)
+    for scope, spaces in {"hn": {"hn"}, "mine": {"main", "perso"}, "main": {"main"}, "perso": {"perso"},
+                          "all": {"main", "perso", "hn"}}.items():
+        r = hn_client.get("/api/items", params={"q": "vector databases", "in": scope}, headers=AUTH).json()
+        assert r["items"] and {i["space"] for i in r["items"]} == spaces, scope
+    # the scope wins over the page's space
+    r = hn_client.get("/api/items", params={"q": "vector databases", "space": "main", "in": "hn"}, headers=AUTH)
+    assert {i["space"] for i in r.json()["items"]} == {"hn"}
+    assert r.json()["items"][0]["hn"]["points"] == 100
+    assert hn_client.get("/api/items", params={"q": "x", "in": "nowhere"}, headers=AUTH).status_code == 400
+
+
+def test_folder_scope_searches_saved_items_only(hn_client):
+    folder = folders.create("Vector")
+    _vector_kb(hn_client, hn_count=2)
+    db.execute("update items set folder_id = %s::uuid", (folder["id"],))   # even an HN item put there by mistake
+    for params in ({"in": f"folder:{folder['id']}"}, {"folder": folder["id"]}):
+        r = hn_client.get("/api/items", params={"q": "vector databases", **params}, headers=AUTH).json()
+        assert r["items"] and "hn" not in {i["space"] for i in r["items"]}
+
+
+def test_meta_line_says_hacker_news():
+    line = item_meta_line({"kind": "article", "space": "hn", "metadata": {"hn": {"points": 512, "comments": 230}}})
+    assert line.startswith("Hacker News · 512 points · 230 commentaires")

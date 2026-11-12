@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -385,7 +385,7 @@ LIST_FIELDS = """id::text, kind, status, error, coalesce(title, left(input_text,
                  site_name, published_at, created_at, left(coalesce(summary, input_text), 320) as summary, tags,
                  thumbnail_url, user_note, pinned, archived, file_path, file_mime,
                  metadata->>'thumb_path' as thumb_path, genre, space, category, translations, entry_date,
-                 folder_id::text as folder_id, (metadata->>'duration')::float as duration"""
+                 folder_id::text as folder_id, (metadata->>'duration')::float as duration, metadata->'hn' as hn"""
 
 
 def _with_thumbs(rows: list[dict]) -> list[dict]:
@@ -417,9 +417,14 @@ def list_items(
     folder: str | None = None,          # a folder id, or "none": the items in no folder
     limit: int = 40,
     offset: int = 0,
+    scope: str | None = Query(None, alias="in"),   # where to look, over `space` and `folder` (_scope)
 ):
     limit = max(1, min(limit, 100))
     kinds = [k.strip() for k in (kind or "").split(",") if k.strip()]     # "youtube,video": any of them
+    spaces = None
+    if scope:
+        spaces, folder = _scope(scope)
+        space = None
     folder_id = None
     if folder and folder != "none":
         found = folders.get(folder)
@@ -430,9 +435,13 @@ def list_items(
         space, category = normalize_space(space), normalize_category(category)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if space:
+        spaces = [space]
+    elif folder and not spaces:
+        spaces = list(SAVED_SPACES)       # a folder holds what the user saved
     if q and q.strip():
         found = search.search_items(q.strip(), limit=limit, kinds=kinds or None, tags=[tag] if tag else None,
-                                    spaces=[space] if space else None)
+                                    spaces=spaces)
         if category:
             found = [f for f in found if f.get("category") == category]
         ids = [f["id"] for f in found]
@@ -447,9 +456,9 @@ def list_items(
         return {"items": _with_thumbs(rows), "total": len(rows), "search": True}
 
     where, params = ["archived = %s"], [archived]
-    if space:
-        where.append("space = %s")
-        params.append(space)
+    if spaces:
+        where.append("space = any(%s)")
+        params.append(spaces)
     if category:
         where.append("category = %s")
         params.append(category)
@@ -480,6 +489,24 @@ def list_items(
     )
     total = db.fetchone(f"select count(*) n from items where {clause}", params)["n"]
     return {"items": _with_thumbs(rows), "total": total, "search": False}
+
+
+def _scope(value: str) -> tuple[list[str] | None, str | None]:
+    """`in` of /api/items → (spaces, folder): `all`, `mine` (Veille + Perso), a space, or `folder:<id>`."""
+    value = value.strip()
+    if value == "all":
+        return None, None
+    if value == "mine":
+        return list(SAVED_SPACES), None
+    if value.startswith("folder:") and value[len("folder:"):]:
+        return list(SAVED_SPACES), value[len("folder:"):]
+    try:
+        space = normalize_space(value)
+    except ValueError:
+        space = None
+    if not space:
+        raise HTTPException(400, f"Portée inconnue : {value} (au choix : all, mine, main, perso, hn, folder:<id>)")
+    return [space], None
 
 
 def _links(item_id: str) -> list[dict]:

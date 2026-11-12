@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from . import db
 from .config import get_settings
 from .taxonomy import CHARTER_CATEGORIES, KIND_LABELS, category_label
 
@@ -18,6 +19,9 @@ def item_meta_line(it: dict) -> str:
         if it.get("category") in CHARTER_CATEGORIES:
             perso += " (charte)"
         parts.insert(0, perso)
+    if it.get("space") == "hn":
+        hn = (db.loads(it.get("metadata")) or {}).get("hn") or {}
+        parts.insert(0, f"Hacker News · {hn.get('points') or 0} points · {hn.get('comments') or 0} commentaires")
     if it.get("author"):
         parts.append(it["author"])
     if it.get("site_name") and it.get("site_name") not in (it.get("author") or ""):
