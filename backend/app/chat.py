@@ -10,7 +10,7 @@ from typing import Iterator
 from . import db, llm, search
 from .formatting import source_block, source_card
 from .search import ITEM_FIELDS
-from .taxonomy import CHARTER_CATEGORIES
+from .taxonomy import CHARTER_CATEGORIES, scope_spaces
 
 CONTEXT_BUDGET = 70_000  # caractères de sources envoyés au modèle
 CHARTER_BUDGET = 30_000  # caractères de principes et valeurs (texte intégral) en mode Conseil
@@ -23,7 +23,10 @@ def _lang(lang: str | None) -> str:
 
 def _system_common(lang: str | None = None) -> str:
     return f"""Tu es l'assistant de la knowledge base personnelle de l'utilisateur. Date du jour : {date.today().isoformat()}.
-Les sources fournies sont des éléments que l'utilisateur a lui-même sauvegardés (tweets, articles, vidéos, PDF, notes…).
+Les sources fournies sont des éléments que l'utilisateur a lui-même sauvegardés (tweets, articles, vidéos, PDF, notes…),
+sauf celles dont les infos commencent par « Hacker News » : ce sont les meilleures stories du jour sur Hacker News
+(l'article et ses commentaires), récupérées chaque matin, pas des choix de l'utilisateur. Quand tu t'en sers, dis-le
+(« sur HN, … », « dans les commentaires HN, … »).
 
 Règles :
 - Réponds en {_lang(lang)}, de façon directe et structurée (Markdown léger, pas de titre inutile). Les titres de
@@ -117,12 +120,13 @@ def _clean_history(messages: list[dict]) -> list[dict]:
 
 
 def ask(messages: list[dict], kinds: list[str] | None = None, tags: list[str] | None = None,
-        model: str | None = None, lang: str | None = None) -> Iterator[dict]:
+        model: str | None = None, lang: str | None = None, spaces: list[str] | None = None) -> Iterator[dict]:
+    """`spaces`: where to look (None: everywhere, Hacker News at most half of the sources)."""
     history = _clean_history(messages[:-1])
     question = str(messages[-1]["content"]).strip()
     query = llm.rewrite_query(history, question) if history else question
-    yield {"type": "status", "text": "Recherche dans ta KB…"}
-    items = search.search_items(query, limit=8, kinds=kinds, tags=tags)
+    yield {"type": "status", "text": "Recherche dans Hacker News…" if spaces == ["hn"] else "Recherche dans ta KB…"}
+    items = search.search_items(query, limit=8, kinds=kinds, tags=tags, spaces=spaces)
     sources, context = build_sources(items)
     yield {"type": "sources", "query": query, "sources": sources}
 
@@ -190,8 +194,10 @@ def gather_wiki(query: str) -> list[dict]:
     return out
 
 
-def ask_wiki(messages: list[dict], model: str | None = None, lang: str | None = None) -> Iterator[dict]:
-    """A question answered from the wiki's pages rather than from the items found by search (RAG)."""
+def ask_wiki(messages: list[dict], model: str | None = None, lang: str | None = None,
+             scope: str = "mine") -> Iterator[dict]:
+    """A question answered from the wiki's pages rather than from the items found by search (RAG). `scope` "both":
+    the Hacker News stories search finds come after the pages, never more of them than of pages."""
     from . import wiki
 
     history = _clean_history(messages[:-1])
@@ -202,7 +208,7 @@ def ask_wiki(messages: list[dict], model: str | None = None, lang: str | None = 
     if not pages:
         yield {"type": "status", "text": "Rien dans le wiki là-dessus : je cherche dans tes éléments…"}
         yield {"type": "fallback", "source": "rag"}
-        yield from ask(messages, model=model, lang=lang)
+        yield from ask(messages, model=model, lang=lang, spaces=scope_spaces(scope))
         return
     titles = {wiki.ref(r): it.get("title") or "" for r, it in
               wiki.resolve_refs(sorted({c for p in pages for c in wiki.cites_of(p["content"])})).items()}
@@ -214,6 +220,14 @@ def ask_wiki(messages: list[dict], model: str | None = None, lang: str | None = 
         used += len(block)
         blocks.append(block)
         cards.append(wiki_card(n, page))
+    if scope == "both":
+        for it in search.search_items(query, limit=min(4, len(cards)), spaces=["hn"]):
+            block = source_block(len(cards) + 1, it)
+            if used + len(block) > CONTEXT_BUDGET:
+                break
+            used += len(block)
+            blocks.append(block)
+            cards.append(source_card(len(cards) + 1, it))
     yield {"type": "sources", "query": query, "sources": cards}
     user_turn = f"<sources>\n{chr(10).join(blocks)}\n</sources>\n\nQuestion : {question}"
     msgs = history + [{"role": "user", "content": user_turn}]
@@ -277,19 +291,21 @@ def advise(messages: list[dict], model: str | None = None, lang: str | None = No
     yield {"type": "done"}
 
 
-def gather_for_project(description: str, limit: int = 14, kinds: list[str] | None = None) -> tuple[dict, list[dict]]:
+def gather_for_project(description: str, limit: int = 14, kinds: list[str] | None = None,
+                       spaces: list[str] | None = None) -> tuple[dict, list[dict]]:
     plan = llm.plan_project_queries(description)
     queries = [q for q in plan.get("queries", []) if q.strip()][:8] or [description]
     queries.append(description)
     with ThreadPoolExecutor(max_workers=4) as pool:
-        rankings = list(pool.map(lambda q: search.search_items(q, limit=8, kinds=kinds, chunks_per_item=2), queries))
+        rankings = list(pool.map(
+            lambda q: search.search_items(q, limit=8, kinds=kinds, spaces=spaces, chunks_per_item=2), queries))
     return plan, search.merge_rankings(rankings, limit=limit)
 
 
 def project(description: str, kinds: list[str] | None = None, model: str | None = None,
-            lang: str | None = None) -> Iterator[dict]:
+            lang: str | None = None, spaces: list[str] | None = None) -> Iterator[dict]:
     yield {"type": "status", "text": "Je prépare les recherches…"}
-    plan, items = gather_for_project(description, kinds=kinds)
+    plan, items = gather_for_project(description, kinds=kinds, spaces=spaces)
     yield {"type": "plan", "summary": plan.get("project_summary"), "queries": plan.get("queries", [])}
     sources, context = build_sources(items)
     yield {"type": "sources", "sources": sources}

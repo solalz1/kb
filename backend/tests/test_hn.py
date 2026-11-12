@@ -458,3 +458,83 @@ def test_nothing_is_moved_into_hn_by_hand(hn_client):
     assert hn_client.post("/api/ingest", json={"url": "https://blog.example.com/new", "space": "hn"},
                           headers=AUTH).status_code == 400
     assert db.fetchone("select space from items where id = %s", (saved,))["space"] == "main"
+
+
+# ---------------------------------------------------------------------------
+# Chat scopes
+
+from app import wiki  # noqa: E402
+
+from .test_perso import _events  # noqa: E402
+
+
+def _chat(client, **body):
+    r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "vector databases"}], **body},
+                    headers=AUTH)
+    assert r.status_code == 200, r.text
+    events = _events(r)
+    assert not [e for e in events if e["type"] == "error"], events
+    return [s for e in events if e["type"] == "sources" for s in e["sources"]]
+
+
+@pytest.mark.parametrize("scope,allowed", [("mine", {"main", "perso"}), ("hn", {"hn"}),
+                                           ("both", {"main", "perso", "hn"})])
+def test_ask_scope(hn_client, scope, allowed):
+    _vector_kb(hn_client)
+    sources = _chat(hn_client, source="rag", scope=scope)
+    assert {s["space"] for s in sources} == allowed
+    if scope == "both":
+        assert sum(s["space"] == "hn" for s in sources) <= 4        # half of the 8 places
+
+
+def test_ask_scope_hn_ignores_the_wiki(hn_client):
+    _vector_kb(hn_client, hn_count=3)
+    assert {s["space"] for s in _chat(hn_client, source="wiki", scope="hn")} == {"hn"}
+
+
+def test_unknown_scope(hn_client):
+    r = hn_client.post("/api/chat", json={"messages": [{"role": "user", "content": "x"}], "scope": "partout"},
+                       headers=AUTH)
+    assert r.status_code == 400
+
+
+def test_wiki_answer_with_hn(hn_client):
+    for i in range(2):
+        _saved(hn_client, f"https://blog.example.com/agents{i}", body=f"Les agents autonomes, version {i}. " * 6)
+    wiki.drain()
+    for i in range(6):
+        _hn_item(hn_client, f"https://news.example.com/agents{i}", id=str(300 + i),
+                 body=f"Agents autonomes en production, retour {i}. " * 6)
+    pages = [p["title"] for p in wiki.all_pages()]
+    assert "Agents IA" in pages
+    msg = {"messages": [{"role": "user", "content": "Que sais-je des agents autonomes ?"}]}
+    r = hn_client.post("/api/chat", json={**msg, "source": "wiki", "scope": "both"}, headers=AUTH)
+    sources = [s for e in _events(r) if e["type"] == "sources" for s in e["sources"]]
+    kinds = [s["kind"] for s in sources]
+    wiki_cards = kinds.count("wiki")
+    assert wiki_cards and kinds[:wiki_cards] == ["wiki"] * wiki_cards      # the wiki's pages first
+    hn_cards = [s for s in sources if s["kind"] != "wiki"]
+    assert hn_cards and {s["space"] for s in hn_cards} == {"hn"} and len(hn_cards) <= wiki_cards
+    assert [s["n"] for s in sources] == list(range(1, len(sources) + 1))
+    # the same question on the saves only: the wiki, no HN
+    r = hn_client.post("/api/chat", json={**msg, "source": "wiki", "scope": "mine"}, headers=AUTH)
+    assert {s["kind"] for e in _events(r) if e["type"] == "sources" for s in e["sources"]} == {"wiki"}
+
+
+def test_project_scope_mine(hn_client):
+    _vector_kb(hn_client)
+    sources = _chat(hn_client, mode="project", scope="mine")
+    assert sources and "hn" not in {s["space"] for s in sources}
+    assert "hn" in {s["space"] for s in _chat(hn_client, mode="project", scope="both")}
+
+
+def test_advice_never_sees_hn(hn_client):
+    _vector_kb(hn_client)
+    sources = _chat(hn_client, mode="advice", scope="both")
+    assert sources and "hn" not in {s["space"] for s in sources}
+
+
+def test_system_prompt_tells_hn_apart(hn_client, fake_llm):
+    _vector_kb(hn_client, hn_count=2)
+    _chat(hn_client, source="rag", scope="both")
+    assert "Hacker News" in fake_llm["stream"][-1]["system"]

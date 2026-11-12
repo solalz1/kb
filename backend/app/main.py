@@ -34,7 +34,8 @@ from .digest import profile as digest_profile
 from .digest import render as digest_render
 from .digest import sources as digest_sources
 from .mcp_server import mcp, resurface_items
-from .taxonomy import CATEGORIES, SAVED_SPACES, SPACE_LABELS, normalize_category, normalize_space
+from .taxonomy import (CATEGORIES, SAVED_SPACES, SCOPES, SPACE_LABELS, normalize_category, normalize_space,
+                       scope_spaces)
 from .worker import Worker, wake
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -837,6 +838,7 @@ class ChatRequest(BaseModel):
     model: str | None = None     # un des modèles de /api/models ; défaut : CHAT_MODEL
     lang: str | None = None      # langue de l'app (fr, en) : celle de la réponse ; défaut : KB_LANGUAGE
     source: str = "rag"          # mode ask: "wiki" answers from the wiki's pages, "rag" from the items search finds
+    scope: str = "both"          # modes ask and project: the user's saves ("mine"), Hacker News ("hn") or "both"
 
 
 @api.get("/api/models", dependencies=auth)
@@ -871,18 +873,22 @@ def chat_endpoint(req: ChatRequest):
         raise HTTPException(400, f"Mode inconnu : {req.mode}")
     if req.source not in ("wiki", "rag"):
         raise HTTPException(400, f"Source inconnue : {req.source}")
+    if req.scope not in SCOPES:
+        raise HTTPException(400, f"Portée inconnue : {req.scope} (au choix : {', '.join(SCOPES)})")
+    spaces = scope_spaces(req.scope)
     lang = req.lang if req.lang in llm.LANG_NAMES else None
 
     def events():
         try:
             if req.mode == "project":
-                gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model, lang=lang)
-            elif req.mode == "advice":
+                gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model, lang=lang,
+                                   spaces=spaces)
+            elif req.mode == "advice":     # the charter, Perso and a little Veille: never Hacker News
                 gen = chat.advise(req.messages, model=model, lang=lang)
-            elif req.source == "wiki":
-                gen = chat.ask_wiki(req.messages, model=model, lang=lang)
+            elif req.source == "wiki" and req.scope != "hn":    # the wiki is made of the user's saves only
+                gen = chat.ask_wiki(req.messages, model=model, lang=lang, scope=req.scope)
             else:
-                gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model, lang=lang)
+                gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model, lang=lang, spaces=spaces)
             for event in gen:
                 yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         except Exception as exc:
