@@ -11,18 +11,22 @@ from . import chat, db, folders, pipeline, search
 from .config import get_settings
 from .formatting import item_markdown
 from .search import ITEM_FIELDS
-from .taxonomy import normalize_category, normalize_space
+from .taxonomy import SAVED_SPACES, normalize_category, normalize_space
 
-INSTRUCTIONS = """Knowledge base personnelle de l'utilisateur, en deux espaces :
+INSTRUCTIONS = """Knowledge base personnelle de l'utilisateur, en trois espaces :
 - Veille (space="main") : tweets, articles, vidéos, PDF, images, notes qu'il a sauvegardés, chacun résumé, taggé, indexé.
 - Perso (space="perso") : son développement personnel. Ses principes, valeurs, leçons, objectifs, habitudes,
   réflexions, son journal, des citations et ressources qui l'inspirent.
+- HN (space="hn") : chaque matin, les 30 meilleures stories Hacker News du jour, avec l'article et les meilleurs
+  commentaires. C'est l'actualité tech du jour, pas ce qu'il a choisi de garder : dis-le quand tu t'en sers
+  (« sur HN… »). space="mine" = ses enregistrements seuls (Veille + Perso).
 
 Outils :
 - kb_overview donne la carte de la KB (volume, types, tags, personnes et outils les plus présents) : utile pour
   savoir quoi chercher.
-- search_kb : recherche sémantique + mots-clés, à relancer avec d'autres formulations si besoin. find_for_project quand
-  l'utilisateur démarre un projet ou demande « qu'est-ce qui peut me servir pour… ».
+- search_kb : recherche sémantique + mots-clés, à relancer avec d'autres formulations si besoin ; sans espace, elle
+  couvre les trois (HN au plus la moitié des résultats). find_for_project quand l'utilisateur démarre un projet ou
+  demande « qu'est-ce qui peut me servir pour… » : ses enregistrements et ce que HN en dit.
 - browse_kb : parcours exhaustif par espace, catégorie, type, tag, entité ou période.
 - get_item pour lire un élément en entier avant d'en tirer une conclusion précise.
 - get_principles quand il demande un conseil sur sa vie, une décision personnelle ou une situation difficile : fonde
@@ -57,9 +61,20 @@ def _render(items: list[dict], empty: str) -> str:
     return "\n\n".join(item_markdown(it) for it in items)
 
 
-def _space(value: str | None) -> list[str] | None:
-    key = normalize_space(value) if value and value.lower() not in ("all", "tout", "tous") else None
-    return [key] if key else None
+_EVERY = ("all", "tout", "tous", "partout")
+_MINE = ("mine", "enregistrements", "mes enregistrements", "saved", "saves")
+
+
+def _space(value: str | None, default: list[str] | None = None) -> list[str] | None:
+    """A tool's `space` → the spaces to cover (None: every space). Nothing given: `default`."""
+    if not value or not value.strip():
+        return default
+    word = value.strip().lower()
+    if word in _EVERY:
+        return None
+    if word in _MINE:
+        return list(SAVED_SPACES)
+    return [normalize_space(value)]
 
 
 @mcp.tool()
@@ -77,7 +92,8 @@ async def search_kb(
         limit: nombre d'éléments (1-20).
         kinds: filtre facultatif parmi tweet, article, youtube, video, audio, pdf, image, document, note, repo, paper.
         tags: filtre facultatif sur des tags exacts.
-        space: "main" (veille), "perso" (développement personnel) ; par défaut les deux.
+        space: "main" (veille), "perso" (développement personnel), "hn" (Hacker News du jour), "mine" (veille +
+            perso) ; par défaut les trois, Hacker News au plus la moitié des résultats.
     """
     try:
         spaces = _space(space)
@@ -175,7 +191,7 @@ async def add_to_kb(
         url: lien à capturer.
         text: texte d'une note (si pas d'URL), gardé tel quel.
         note: pourquoi l'utilisateur garde cet élément (facultatif).
-        space: "main" (veille, par défaut) ou "perso" (développement personnel).
+        space: "main" (veille, par défaut) ou "perso" (développement personnel). L'espace HN se remplit seul.
         category: pour space="perso" : principe, valeur, lecon, objectif, habitude, reflexion, journal, citation, ressource.
         title: titre de la note (facultatif ; sinon Claude en propose un).
         folder: dossier où le ranger (nom d'un dossier listé par kb_overview) ; par défaut Claude choisit.
@@ -185,20 +201,31 @@ async def add_to_kb(
                          folder=folder)
     except ValueError as exc:
         return f"Impossible : {exc}"
+    if res.get("kept"):
+        return f"C'était une story de l'espace HN : gardée dans {'Perso' if res['kept'] == 'perso' else 'la Veille'} (id : {res['id']})."
     if res["duplicate"]:
         return f"Déjà dans la KB (id : {res['id']})."
     return f"Ajouté (id : {res['id']}). Traitement en cours : résumé et indexation dans une à deux minutes."
 
 
 @mcp.tool()
-async def list_recent(days: int = 7, limit: int = 20, kind: str | None = None) -> str:
-    """Éléments sauvegardés récemment (par défaut : 7 derniers jours)."""
+async def list_recent(days: int = 7, limit: int = 20, kind: str | None = None, space: str | None = None) -> str:
+    """Éléments sauvegardés récemment (par défaut : 7 derniers jours, dans ses enregistrements).
+
+    Args:
+        space: "main", "perso", "hn" (les stories Hacker News récupérées), "all" ; par défaut veille + perso.
+    """
+    try:
+        spaces = _space(space, default=list(SAVED_SPACES))
+    except ValueError as exc:
+        return str(exc)
     since = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 36500)))
     rows = await _run(
         db.fetchall,
         f"""select {ITEM_FIELDS} from items where status = 'ready' and not archived and created_at >= %s
-            and (%s::text is null or kind = %s) order by created_at desc limit %s""",
-        (since, kind, kind, max(1, min(limit, 50))),
+            and (%s::text is null or kind = %s) and (%s::text[] is null or space = any(%s))
+            order by created_at desc limit %s""",
+        (since, kind, kind, spaces, spaces, max(1, min(limit, 50))),
     )
     return _render(rows, "Rien de sauvegardé sur cette période.")
 
@@ -220,10 +247,11 @@ async def browse_kb(
 
     À utiliser quand il faut couvrir tout un sujet plutôt que les meilleurs résultats d'une recherche
     (ex. space="perso", category="lecon" pour toutes ses leçons ; folder="ML" pour tout son dossier ML ; les dossiers
-    sont listés par kb_overview). Renvoie une ligne par élément ; get_item pour le détail.
+    sont listés par kb_overview). Renvoie une ligne par élément ; get_item pour le détail. Par défaut ses
+    enregistrements (veille + perso) ; space="hn" pour les stories Hacker News, space="all" pour tout.
     """
     try:
-        spaces, cat = _space(space), normalize_category(category)
+        spaces, cat = _space(space, default=list(SAVED_SPACES)), normalize_category(category)
     except ValueError as exc:
         return str(exc)
     shelf = None
@@ -236,8 +264,8 @@ async def browse_kb(
     def load():
         where, params = ["status = 'ready'", "not archived"], []
         if spaces:
-            where.append("space = %s")
-            params.append(spaces[0])
+            where.append("space = any(%s)")
+            params.append(spaces)
         if cat:
             where.append("category = %s")
             params.append(cat)
@@ -271,7 +299,8 @@ async def browse_kb(
         return "Aucun élément ne correspond à ces filtres."
     lines = [f"{total} élément(s) au total ; affichés {offset + 1} à {offset + len(rows)}."]
     for r in rows:
-        label = r["kind"] if r["space"] != "perso" else f"perso{'/' + r['category'] if r['category'] else ''}"
+        label = {"perso": f"perso{'/' + r['category'] if r['category'] else ''}", "hn": f"hn/{r['kind']}"}.get(
+            r["space"], r["kind"])
         lines.append(
             f"- [{label}] {r['title'] or '(sans titre)'} ({str(r['created_at'])[:10]}"
             f"{', ' + r['author'] if r['author'] else ''}) id={r['id']} {r['source_url'] or ''}\n  {r['summary'] or ''}"
@@ -283,27 +312,35 @@ async def browse_kb(
 
 @mcp.tool()
 async def kb_overview() -> str:
-    """Vue d'ensemble de la KB : nombre d'éléments par type, tags et entités les plus fréquents, derniers ajouts."""
+    """Vue d'ensemble de la KB : nombre d'éléments par espace et par type, tags et entités les plus fréquents (dans ses
+    enregistrements), derniers ajouts."""
     def load():
-        kinds = db.fetchall("select kind, count(*)::int n from items where status='ready' and not archived group by kind order by n desc")
+        kinds = db.fetchall("""select kind, count(*)::int n from items where status='ready' and not archived
+                               and space <> 'hn' group by kind order by n desc""")
         tags = db.fetchall(
             """select tag, count(*)::int n from items, unnest(tags) tag where status='ready' and not archived
-               group by tag order by n desc limit 40""")
+               and space <> 'hn' group by tag order by n desc limit 40""")
         ents = db.fetchall(
             """select e->>'name' as name, e->>'type' as type, count(*)::int n from items, jsonb_array_elements(entities) e
-               where status='ready' and not archived group by 1, 2 order by n desc limit 30""")
+               where status='ready' and not archived and space <> 'hn' group by 1, 2 order by n desc limit 30""")
         last = db.fetchone("select max(created_at) as d, count(*)::int n from items where status='ready' and not archived")
+        news = db.fetchone("""select max(created_at) as d, count(*)::int n from items
+                              where status='ready' and not archived and space = 'hn'""")
         perso = db.fetchall(
             """select coalesce(category, 'sans catégorie') as category, count(*)::int n from items
                where status='ready' and not archived and space = 'perso' group by 1 order by n desc""")
-        return kinds, tags, ents, last, perso, folders.all_folders()
+        return kinds, tags, ents, last, news, perso, folders.all_folders()
 
-    kinds, tags, ents, last, perso, shelves = await _run(load)
+    kinds, tags, ents, last, news, perso, shelves = await _run(load)
     if not last or not last["n"]:
         return "La KB est vide pour l'instant."
-    n_perso = sum(p["n"] for p in perso)
+    n_perso, n_hn = sum(p["n"] for p in perso), news["n"]
     return "\n".join([
-        f"{last['n']} éléments (veille {last['n'] - n_perso}, perso {n_perso}), dernier ajout le {str(last['d'])[:10]}.",
+        f"{last['n']} éléments (veille {last['n'] - n_perso - n_hn}, perso {n_perso}, hn {n_hn}), "
+        f"dernier ajout le {str(last['d'])[:10]}.",
+        (f'HN : {n_hn} fiches Hacker News, dernière le {str(news["d"])[:10]} (space="hn" ; l\'actualité du jour, '
+         "pas ses choix). Le reste de cette vue porte sur ses enregistrements.") if n_hn else
+        "HN : aucune fiche Hacker News pour l'instant.",
         "Perso par catégorie : " + (", ".join(f"{p['category']} {p['n']}" for p in perso) or "vide"),
         "Dossiers (browse_kb folder=…) : " + (", ".join(f"{f['name']} {f['count']}" for f in shelves) or "aucun"),
         "Par type : " + ", ".join(f"{k['kind']} {k['n']}" for k in kinds),

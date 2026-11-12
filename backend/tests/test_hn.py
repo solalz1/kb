@@ -538,3 +538,46 @@ def test_system_prompt_tells_hn_apart(hn_client, fake_llm):
     _vector_kb(hn_client, hn_count=2)
     _chat(hn_client, source="rag", scope="both")
     assert "Hacker News" in fake_llm["stream"][-1]["system"]
+
+
+# ---------------------------------------------------------------------------
+# The Claude connector
+
+from .test_e2e import _mcp  # noqa: E402
+
+
+def _tool(client, name, **arguments):
+    r = _mcp(client, "/mcp/mcp-secret", "tools/call", {"name": name, "arguments": arguments})
+    assert r.status_code == 200, r.text
+    return r.json()["result"]["content"][0]["text"]
+
+
+def test_mcp_knows_the_hn_space(hn_client):
+    _vector_kb(hn_client, hn_count=2)
+    init = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}
+    instructions = _mcp(hn_client, "/mcp/mcp-secret", "initialize", init).json()["result"]["instructions"]
+    assert 'space="hn"' in instructions and "Hacker News" in instructions
+
+    only_hn = _tool(hn_client, "search_kb", query="vector databases", space="hn")
+    assert "Une story HN" in only_hn and "Une page gardée" not in only_hn
+    assert 'Espace : HN (space="hn")' in only_hn and "Hacker News · 100 points · 10 commentaires" in only_hn
+    everything = _tool(hn_client, "search_kb", query="vector databases")
+    assert "Une story HN" in everything and "Une page gardée" in everything
+    mine = _tool(hn_client, "search_kb", query="vector databases", space="mes enregistrements")
+    assert "Une story HN" not in mine and "Une page gardée" in mine
+    assert "Une story HN" in _tool(hn_client, "find_for_project", project_description="un index vectoriel")
+
+    overview = _tool(hn_client, "kb_overview")
+    assert overview.startswith("5 éléments (veille 2, perso 1, hn 2)")
+    assert 'HN : 2 fiches Hacker News' in overview and 'space="hn"' in overview
+
+    recent = _tool(hn_client, "list_recent")
+    assert "Une page gardée" in recent and "Une story HN" not in recent
+    assert "Une page gardée" not in _tool(hn_client, "list_recent", space="hn")
+    assert "2 élément(s)" in _tool(hn_client, "browse_kb", space="hn")
+    assert "3 élément(s)" in _tool(hn_client, "browse_kb")           # what the user saved, by default
+    assert "5 élément(s)" in _tool(hn_client, "browse_kb", space="tout")
+
+    refused = _tool(hn_client, "add_to_kb", url="https://blog.example.com/new", space="hn")
+    assert refused.startswith("Impossible")
+    assert not db.fetchone("select 1 from items where input_url = 'https://blog.example.com/new'")

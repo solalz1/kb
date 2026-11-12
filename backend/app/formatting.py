@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from . import db
 from .config import get_settings
-from .taxonomy import CHARTER_CATEGORIES, KIND_LABELS, category_label
+from .taxonomy import CHARTER_CATEGORIES, KIND_LABELS, SPACE_LABELS, category_label
 
 
 def _date(value) -> str | None:
@@ -73,7 +73,9 @@ def source_card(n: int, it: dict) -> dict:
 
 def item_markdown(it: dict, *, full: bool = False, with_content: bool = False, max_content: int = 30_000) -> str:
     s = get_settings()
-    lines = [f"### {it.get('title') or '(sans titre)'}", item_meta_line(it)]
+    space = it.get("space") or "main"
+    lines = [f"### {it.get('title') or '(sans titre)'}", item_meta_line(it),
+             f'Espace : {SPACE_LABELS.get(space, space)} (space="{space}")']
     if it.get("source_url"):
         lines.append(f"Source originale : {it['source_url']}")
     lines.append(f"Fiche KB : {s.item_url(it['id'])}  (id : {it['id']})")
