@@ -84,8 +84,11 @@ def fake_hn(monkeypatch, stories, comments=None, fail=None):
             return {"id": int(story_id), "type": "story", "kids": [c["id"] for c in kids(story_id)]} \
                 if story_id in {h["objectID"] for h in stories} else next(
                     (c for cs in comments for c in kids(cs) if str(c["id"]) == story_id), None)
-        return {"id": int(story_id), "children": [{"id": c["id"], "author": c.get("by"), "text": c.get("text")}
-                                                  for c in kids(story_id) if not c.get("deleted")]}
+        # like Algolia: a deleted comment keeps its place without author or text, a dead one isn't there
+        return {"id": int(story_id), "children": [
+            {"id": c["id"], "author": None if c.get("deleted") else c.get("by"),
+             "text": None if c.get("deleted") else c.get("text")}
+            for c in kids(story_id) if not c.get("dead")]}
 
     monkeypatch.setattr(hackernews, "get_json", get_json)
     return asked
@@ -319,3 +322,83 @@ def test_run_endpoint(hn_client, monkeypatch):
     fake_hn(monkeypatch, STORIES)
     monkeypatch.setattr(hn, "_now", lambda: NOW)
     assert hn_client.post("/api/hn/run", headers=AUTH).json() == {"added": 30, "skipped": 0}
+
+
+
+# ---------------------------------------------------------------------------
+# A card holds the article and its discussion
+
+import httpx  # noqa: E402
+
+from app.extractors import hackernews  # noqa: E402
+
+
+def _card():
+    return db.fetchone("select status, title, content, source_url, site_name, metadata, error from items "
+                       "where space = 'hn'")
+
+
+def test_card_has_article_then_discussion(hn_client, monkeypatch):
+    _page(hn_client, STORIES[0]["url"], "Article body about compilers and their passes. " * 5, title="Compilers")
+    fake_hn(monkeypatch, STORIES[:1], comments={"1000": [("alice", "<p>Great &amp; fast</p>"), ("bob", "Meh")]})
+    hn.run(NOW)
+    drain()
+    card = _card()
+    assert card["status"] == "ready", card["error"]
+    content = card["content"]
+    assert content.index("Article body") < content.index("## Discussion Hacker News")
+    assert "41 points · 5 commentaires · https://news.ycombinator.com/item?id=1000" in content
+    assert content.index("**alice** : Great & fast") < content.index("**bob** : Meh")
+    assert card["metadata"]["hn"]["points"] == 41 and "article_unreadable" not in card["metadata"]["hn"]
+
+
+def test_ask_hn_card_is_post_then_discussion(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES[39:], comments={"1039": [("carol", "Read the abstract first.")]})
+    hn.run(NOW)
+    drain()
+    card = _card()
+    assert card["status"] == "ready", card["error"]
+    assert card["content"].startswith("I struggle & wonder.")
+    assert card["content"].index("I struggle") < card["content"].index("**carol** : Read the abstract first.")
+    assert card["title"] == "Ask HN: How do you read papers?"
+    assert card["source_url"] == "https://news.ycombinator.com/item?id=1039" and card["site_name"] == "Hacker News"
+
+
+def test_unreadable_article_still_makes_a_card(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES[:1], comments={"1000": [("alice", "The paywall again.")]})   # no page: unreadable
+    hn.run(NOW)
+    drain()
+    card = _card()
+    assert card["status"] == "ready", card["error"]
+    assert card["metadata"]["hn"]["article_unreadable"] is True and card["metadata"]["hn"]["points"] == 41
+    assert card["title"] == "Story 0 about compilers"
+    assert card["source_url"] == "https://story0.example.com/post"
+    assert "**alice** : The paywall again." in card["content"]
+
+
+def test_discussion_text_is_clean(monkeypatch):
+    fake_hn(monkeypatch, [_hit(0)], comments={"1000": [
+        ("alice", "<p>Great &amp; fast</p>"),
+        {"deleted": True},
+        {"by": "carol", "text": "A dead comment", "dead": True},
+        ("dave", 'See <a href="https://ref.example.com/a/b" rel="nofollow">https://ref.example.com/a/...</a>'
+                 "<p>It&#x27;s <i>really</i> &quot;good&quot; &gt; 2"),
+        ("erin", ""),
+        ("frank", "x" * 2000),
+        ("gina", "Past the limit"),
+    ]})
+    comments = hackernews.discussion("1000", limit=3)
+    assert [c["author"] for c in comments] == ["alice", "dave", "frank"]
+    assert comments[0]["text"] == "Great & fast"
+    assert comments[1]["text"] == 'See https://ref.example.com/a/b\n\nIt\'s *really* "good" > 2'
+    assert len(comments[2]["text"]) <= 1500 and comments[2]["text"].endswith("…")
+
+
+def test_network_error_is_retried(hn_client, monkeypatch):
+    _page(hn_client, STORIES[0]["url"], "Article body. " * 20)
+    fake_hn(monkeypatch, STORIES[:1])
+    hn.run(NOW)
+    fake_hn(monkeypatch, STORIES[:1], fail=httpx.ConnectError("HN is down"))
+    drain()
+    card = _card()
+    assert card["status"] == "pending" and "ConnectError" in card["error"]
