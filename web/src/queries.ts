@@ -8,6 +8,7 @@ export const PAGE = 30;
 /** The filters of a list of items, as the API takes them. */
 export interface ItemsQuery {
   q?: string; kind?: string; tag?: string; entity?: string; space?: Space; category?: string; folder?: string; archived?: boolean;
+  in?: string;      // where a search looks, when not the page's own space (Feed's « Dans »)
 }
 export type ItemsPage = Awaited<ReturnType<typeof api.items>>;
 

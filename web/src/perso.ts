@@ -36,8 +36,8 @@ export const CATEGORIES: Category[] = [
 export const categoryOf = (id: string | null | undefined) => CATEGORIES.find((c) => c.id === id);
 export const categoryLabel = (id: string | null | undefined) => categoryOf(id)?.label ?? null;
 
-export const SPACE_LABEL: Record<Space, string> = { main: t("Veille"), perso: t("Perso") };
-export const spaceHome = (space: Space | null | undefined) => (space === "perso" ? "/perso" : "/");
+export const SPACE_LABEL: Record<Space, string> = { main: t("Veille"), perso: t("Perso"), hn: "HN" };
+export const spaceHome = (space: Space | null | undefined) => (space === "perso" ? "/perso" : space === "hn" ? "/hn" : "/");
 
 /** Libellé d'en-tête d'une fiche : la catégorie en Perso (+ le type si ce n'est pas une note), le type sinon. */
 export function headLabel(item: { space?: Space; category?: string | null; kind: Kind | null }): string {

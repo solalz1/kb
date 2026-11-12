@@ -277,7 +277,8 @@ def _project_context(since: date) -> str:
            left join digest_feedback f on f.digest_id = d.id and f.target = 'project' and f.entry_key = p->>'key'
            where d.created_at > now() - interval '60 days' order by d.created_at desc limit 40""")
     projects_kb = db.fetchall(
-        """select title from items where 'projet' = any(tags) and status = 'ready' order by created_at desc limit 20""")
+        """select title from items where 'projet' = any(tags) and status = 'ready' and space <> 'hn'
+           order by created_at desc limit 20""")
     verdict = {2: "il l'a fait", 1: "intéressé", -1: "pas pour lui"}
     goals = _goals()
     wiki_pages, wiki_ideas = _wiki_context()

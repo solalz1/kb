@@ -13,7 +13,7 @@ KIND_LABELS_EN = {
     "tweet": "Tweet", "article": "Article", "youtube": "YouTube video", "video": "Video", "audio": "Audio",
     "pdf": "PDF", "image": "Image", "document": "Document", "note": "Note", "repo": "GitHub repository", "paper": "Paper",
 }
-SPACE_LABELS_EN = {"main": "Feed", "perso": "Personal"}
+SPACE_LABELS_EN = {"main": "Feed", "perso": "Personal", "hn": "HN"}
 CATEGORY_LABELS_EN = {
     "principe": "Principle", "valeur": "Value", "lecon": "Lesson", "objectif": "Goal", "habitude": "Habit",
     "reflexion": "Reflection", "journal": "Journal", "citation": "Quote", "ressource": "Resource",

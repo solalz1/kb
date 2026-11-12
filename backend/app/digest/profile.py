@@ -80,7 +80,7 @@ def signals() -> dict:
            group by 1, 2 order by n desc limit 40""")
     authors = db.fetchall(
         """select author, count(*)::int as n from items
-           where kind = 'tweet' and status = 'ready' and author is not null
+           where kind = 'tweet' and status = 'ready' and author is not null and space <> 'hn'
            group by author order by n desc limit 30""")
     recent = db.fetchall(
         """select title from items where status = 'ready' and space = 'main' and title is not null

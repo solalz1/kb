@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -33,6 +34,8 @@ PAGE_WAIT_SECONDS = 60
 # Reddit gives anything but a browser a bot check: a post shared from the Reddit app is opened in Safari (`x-safari-`
 # opens a link there whatever the default browser, on iOS and macOS), and shared from Safari it comes with its text.
 SAFARI_MESSAGE = "Reddit ne laisse lire ses posts qu'à un navigateur : partage-le depuis Safari pour l'ajouter."
+# nothing goes into the HN space by hand: only the daily run (app/hn.py) fills it
+HN_BY_HAND = "L'espace HN se remplit tout seul chaque matin : partage vers la Veille ou Perso"
 
 INGEST_KIND = {"tweet": "tweet", "youtube": "youtube", "paper": "paper", "repo": "repo", "media": "video", "web": "article"}
 # Types dont le titre d'origine est fiable (sinon on prend celui proposé par Claude)
@@ -143,11 +146,14 @@ def ingest(
     title: str | None = None,
     page_follows: bool = False,
     folder: str | None = None,
+    hn: dict | None = None,
 ) -> dict:
     """`page_follows`: the client (the Shortcut) can fetch the page from the phone. For a site that refuses the server,
     the answer then says `page_wanted`, and the item waits a little for POST /api/items/<id>/page.
     `folder`: where to file it, as the Shortcut's "Où le ranger ?" list says it (a folder's name, "Automatique",
-    "Espace Perso") or a folder id; nothing or "Automatique": Claude chooses."""
+    "Espace Perso") or a folder id; nothing or "Automatique": Claude chooses.
+    `hn`: a story of the daily Hacker News run (app/hn.py), kept as `metadata.hn`; a story already in the KB is left
+    as it is."""
     url = (url or "").strip() or None
     text = (text or "").strip() or None
     note = (note or "").strip() or None
@@ -167,6 +173,8 @@ def ingest(
     if not (url or file):
         text = _strip_tags(text, used)
     space = space or "main"
+    if space == "hn" and not hn:
+        raise ValueError(HN_BY_HAND)
     category = (category or tag_category) if space == "perso" else None
 
     if not url and not file and space != "perso":
@@ -179,6 +187,8 @@ def ingest(
     metadata = {"manual_title": True} if title else {}
     if folder_id:
         metadata["manual_folder"] = True
+    if hn:
+        metadata["hn"] = hn
 
     if file:
         data, filename, mime = file
@@ -202,6 +212,10 @@ def ingest(
         clause, params = urls.dedupe_filter(info)
         existing = db.fetchone(
             f"select id, status, user_note, space, metadata, input_url from items where {clause} limit 1", params)
+        if not existing and (story := urls.hn_story(url)):
+            # a story's discussion on Hacker News: the card of that story, whose source is the article
+            existing = db.fetchone("""select id, status, user_note, space, metadata, input_url from items
+                                       where metadata->'hn'->>'id' = %s limit 1""", (story,))
         retried = False
         if existing and page and existing["status"] == "error":
             # shared again from Safari after the server couldn't read it: this time the phone sends the page
@@ -211,6 +225,8 @@ def ingest(
                        (db.jsonb(meta), existing["id"]))
             existing["status"], retried = "pending", True
             _wake()
+        if existing and hn:     # the daily HN run never touches what is already in the KB
+            return {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
         if existing:
             if note and note not in (existing["user_note"] or ""):
                 merged = f"{existing['user_note']}\n{note}" if existing["user_note"] else note
@@ -218,9 +234,15 @@ def ingest(
             if space == "perso" and existing["space"] != "perso":   # repartagé exprès vers Perso : on le déplace
                 db.execute("update items set space = 'perso', category = coalesce(%s, category) where id = %s",
                            (category, existing["id"]))
+            elif existing["space"] == "hn":     # a story of the HN space shared by the user: kept in Veille
+                db.execute("update items set space = 'main' where id = %s", (existing["id"],))
             if folder_id:       # shared again into a chosen folder: it moves there
                 folders.move(str(existing["id"]), folder_id)
+            if existing["space"] == "hn":
+                _background(promote, str(existing["id"]))
             out = {"id": str(existing["id"]), "status": existing["status"], "duplicate": True}
+            if existing["space"] == "hn":
+                out["kept"] = "perso" if space == "perso" else "main"
             if retried:
                 out["retried"] = True
             elif (page_follows and not page and existing["status"] == "error" and info.kind == "web"
@@ -274,6 +296,8 @@ def create_note(
         raise ValueError("La note est vide")
     title = (title or "").strip()[:300] or None
     space = normalize_space(space) or "main"
+    if space == "hn":
+        raise ValueError(HN_BY_HAND)
     category = normalize_category(category) if space == "perso" else None
     tags = clean_tags(tags)
     metadata = {}
@@ -343,7 +367,7 @@ def _wake() -> None:
 def existing_tags(limit: int = 80) -> list[str]:
     rows = db.fetchall(
         """select tag, count(*) n from items, unnest(tags) tag
-           where status = 'ready' group by tag order by n desc, tag limit %s""",
+           where status = 'ready' and space <> 'hn' group by tag order by n desc, tag limit %s""",
         (limit,),
     )
     return [r["tag"] for r in rows]
@@ -398,6 +422,7 @@ def process(item: dict) -> None:
             log.warning("Vignette non stockée", exc_info=True)
 
     space = item.get("space") or "main"
+    is_hn = space == "hn"     # news, not a save: no folder, no to-do, no link, no wiki
     manual_folder = bool(metadata.get("manual_folder"))
     enr = llm.enrich(
         kind=ex.kind,
@@ -410,7 +435,7 @@ def process(item: dict) -> None:
         existing_tags=existing_tags(),
         space=space,
         category=item.get("category"),
-        folders=None if manual_folder else folders.for_enrich(),
+        folders=None if manual_folder or is_hn else folders.for_enrich(),
     )
     title = choose_title(ex.kind, ex.title, enr.get("title"))
     if metadata.get("manual_title") and item.get("title"):  # titre écrit ou corrigé à la main
@@ -444,7 +469,7 @@ def process(item: dict) -> None:
         "space": space,
         "category": category,
         "translations": _translations(enr, title),
-        "folder_id": item.get("folder_id") if manual_folder else folders.id_for(enr.get("folder")),
+        "folder_id": item.get("folder_id") if manual_folder or is_hn else folders.id_for(enr.get("folder")),
     }
 
     card = build_card(fields)
@@ -505,7 +530,7 @@ def process(item: dict) -> None:
                 + [(item_id, i, p, db.vec(v)) for i, (p, v) in enumerate(zip(pieces, vectors[1:]))],
             )
         c.execute("delete from actions where item_id = %s and not done", (item_id,))
-        actions = [a for a in (enr.get("action_items") or []) if a.get("text")]
+        actions = [a for a in (enr.get("action_items") or []) if a.get("text")] if current["space"] != "hn" else []
         if actions:
             with c.cursor() as cur:
                 cur.executemany(
@@ -515,6 +540,11 @@ def process(item: dict) -> None:
 
     if stale:
         reembed_card(item_id)      # fiche indexée refaite avec le titre, les tags ou la note modifiés entre-temps
+    if fields["space"] == "hn":
+        return
+    if is_hn:       # kept by the user while it was being read
+        promote(item_id)
+        return
     try:
         link_item(item_id, fields)
     except Exception:
@@ -592,9 +622,51 @@ def _translations(enr: dict, title: str | None) -> dict:
     return out
 
 
+def _background(fn, *args) -> None:
+    """Runs `fn(*args)` in a daemon thread, so an API call answers at once; a failure only goes to the logs."""
+    def run():
+        try:
+            fn(*args)
+        except Exception:  # noqa: BLE001
+            log.warning("%s%s a échoué", getattr(fn, "__name__", fn), args, exc_info=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def promote(item_id: str) -> None:
+    """A story of the HN space the user keeps (moved to Veille or Perso): it gets what a save gets, a folder (unless
+    one was chosen by hand), its links, its place in the wiki and an up-to-date card. Nothing if it isn't ready yet:
+    `process` then does it when it finishes."""
+    item = db.fetchone(
+        """select id::text, kind, coalesce(title, left(input_text, 90)) as title, left(summary, 400) as summary,
+                  tags, space, status, metadata from items where id = %s""", (item_id,))
+    if not item or item["space"] == "hn" or item["status"] != "ready":
+        return
+    if not (db.loads(item["metadata"]) or {}).get("manual_folder") and (shelves := folders.for_enrich()):
+        folder_id = folders.id_for(llm.classify_folders([item], shelves).get(item["id"]))
+        if folder_id:
+            db.execute("""update items set folder_id = %s::uuid where id = %s
+                          and not coalesce((metadata->>'manual_folder')::boolean, false)""", (folder_id, item_id))
+    reembed_card(item_id)
+    try:
+        link_item(item_id, item)
+    except Exception:
+        log.warning("Calcul des liens impossible pour %s", item_id, exc_info=True)
+    wiki.enqueue_item(item_id)
+
+
 def link_item(item_id: str, fields: dict) -> None:
     s = get_settings()
-    sims = db.fetchall("select * from similar_items(%s, 8, %s)", (item_id, s.link_min_similarity))
+    # similar_items(), minus the HN space: a save never links to the day's news (filtering the function's top 8
+    # afterwards would let ~30 HN stories a day push the saved neighbours out)
+    sims = db.fetchall(
+        """select c2.item_id, 1 - (c2.embedding <=> c1.embedding) as similarity
+             from chunks c1
+             join chunks c2 on c2.chunk_index = -1 and c2.item_id <> c1.item_id
+             join items i on i.id = c2.item_id and i.status = 'ready' and not i.archived and i.space <> 'hn'
+            where c1.item_id = %s and c1.chunk_index = -1 and 1 - (c2.embedding <=> c1.embedding) >= %s
+            order by c2.embedding <=> c1.embedding
+            limit 8""",
+        (item_id, s.link_min_similarity))
     if not sims:
         return
     dupes = [str(r["item_id"]) for r in sims if r["similarity"] >= 0.96]

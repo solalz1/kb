@@ -101,6 +101,23 @@ def test_measuring_never_breaks_the_call(clean_db, monkeypatch):
     costs.record("anthropic", 1.0)                      # logged, not raised
 
 
+def test_a_balance_counts_on_the_database_clock(client, monkeypatch):
+    """A balance's time and the spending's come from one clock, the database's: a server clock a little ahead (Docker
+    on a Mac after sleep, two hosts) must not hide what is spent right after the balance was set."""
+    ahead = datetime.now(timezone.utc) + timedelta(seconds=5)
+
+    class Ahead(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return ahead if tz else ahead.replace(tzinfo=None)
+
+    monkeypatch.setattr(costs, "datetime", Ahead)
+    client.put("/api/costs/anthropic", json={"balance": 20}, headers=AUTH)
+    costs.record("anthropic", 0.4)
+    by = {s["id"]: s for s in client.get("/api/costs", headers=AUTH).json()["services"]}
+    assert by["anthropic"]["remaining"] == 19.6
+
+
 def test_summary_balances_plans_and_totals(client):
     from app import db
 

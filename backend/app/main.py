@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +26,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, folders, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
+from . import chat, costs, db, export, folders, hn, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -34,7 +34,8 @@ from .digest import profile as digest_profile
 from .digest import render as digest_render
 from .digest import sources as digest_sources
 from .mcp_server import mcp, resurface_items
-from .taxonomy import CATEGORIES, SPACE_LABELS, normalize_category, normalize_space
+from .taxonomy import (CATEGORIES, SAVED_SPACES, SCOPES, SPACE_LABELS, normalize_category, normalize_space,
+                       scope_spaces)
 from .worker import Worker, wake
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -232,6 +233,9 @@ async def ingest(request: Request):
     dupes = sum(r["duplicate"] for r in results)
     if len(results) == 1 and results[0].get("retried"):
         message = "Page reçue, je la relis ✓"     # failed before; this time the phone sent the page
+    elif len(results) == 1 and results[0].get("kept"):
+        # a story of the HN space, shared by the user: it moves to what the user keeps
+        message = "Gardé dans Perso ✓" if results[0]["kept"] == "perso" else "Gardé dans ta Veille ✓"
     elif len(results) == 1:
         message = "Déjà dans ta KB ✓" if dupes else "Ajouté à ta KB ✓"
     else:
@@ -370,7 +374,8 @@ def sort_folders():
 @api.get("/api/taxonomy", dependencies=auth)
 def taxonomy():
     return {
-        "spaces": [{"id": k, "label": v} for k, v in SPACE_LABELS.items()],
+        # where something can be saved: the HN space is filled by the daily run only
+        "spaces": [{"id": k, "label": SPACE_LABELS[k]} for k in SAVED_SPACES],
         "categories": [{"id": k, "label": label, "plural": plural, "description": desc}
                        for k, (label, plural, desc) in CATEGORIES.items()],
     }
@@ -384,7 +389,7 @@ LIST_FIELDS = """id::text, kind, status, error, coalesce(title, left(input_text,
                  site_name, published_at, created_at, left(coalesce(summary, input_text), 320) as summary, tags,
                  thumbnail_url, user_note, pinned, archived, file_path, file_mime,
                  metadata->>'thumb_path' as thumb_path, genre, space, category, translations, entry_date,
-                 folder_id::text as folder_id, (metadata->>'duration')::float as duration"""
+                 folder_id::text as folder_id, (metadata->>'duration')::float as duration, metadata->'hn' as hn"""
 
 
 def _with_thumbs(rows: list[dict]) -> list[dict]:
@@ -416,9 +421,14 @@ def list_items(
     folder: str | None = None,          # a folder id, or "none": the items in no folder
     limit: int = 40,
     offset: int = 0,
+    scope: str | None = Query(None, alias="in"),   # where to look, over `space` and `folder` (_scope)
 ):
     limit = max(1, min(limit, 100))
     kinds = [k.strip() for k in (kind or "").split(",") if k.strip()]     # "youtube,video": any of them
+    spaces = None
+    if scope:
+        spaces, folder = _scope(scope)
+        space = None
     folder_id = None
     if folder and folder != "none":
         found = folders.get(folder)
@@ -429,9 +439,13 @@ def list_items(
         space, category = normalize_space(space), normalize_category(category)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if space:
+        spaces = [space]
+    elif folder and not spaces:
+        spaces = list(SAVED_SPACES)       # a folder holds what the user saved
     if q and q.strip():
         found = search.search_items(q.strip(), limit=limit, kinds=kinds or None, tags=[tag] if tag else None,
-                                    spaces=[space] if space else None)
+                                    spaces=spaces)
         if category:
             found = [f for f in found if f.get("category") == category]
         ids = [f["id"] for f in found]
@@ -446,9 +460,9 @@ def list_items(
         return {"items": _with_thumbs(rows), "total": len(rows), "search": True}
 
     where, params = ["archived = %s"], [archived]
-    if space:
-        where.append("space = %s")
-        params.append(space)
+    if spaces:
+        where.append("space = any(%s)")
+        params.append(spaces)
     if category:
         where.append("category = %s")
         params.append(category)
@@ -473,12 +487,34 @@ def list_items(
         where.append("pinned = %s")
         params.append(pinned)
     clause = " and ".join(where)
+    order = "pinned desc, created_at desc"
+    if spaces == ["hn"]:     # the HN page: each day's stories, the best first (a run ingests them best first)
+        order = ("pinned desc, (created_at at time zone %s)::date desc, "
+                 "coalesce((metadata->'hn'->>'points')::int, 0) desc, created_at desc")
     rows = db.fetchall(
-        f"select {LIST_FIELDS} from items where {clause} order by pinned desc, created_at desc limit %s offset %s",
-        (*params, limit, max(0, offset)),
+        f"select {LIST_FIELDS} from items where {clause} order by {order} limit %s offset %s",
+        (*params, *([settings.digest_timezone] if spaces == ["hn"] else []), limit, max(0, offset)),
     )
     total = db.fetchone(f"select count(*) n from items where {clause}", params)["n"]
     return {"items": _with_thumbs(rows), "total": total, "search": False}
+
+
+def _scope(value: str) -> tuple[list[str] | None, str | None]:
+    """`in` of /api/items → (spaces, folder): `all`, `mine` (Veille + Perso), a space, or `folder:<id>`."""
+    value = value.strip()
+    if value == "all":
+        return None, None
+    if value == "mine":
+        return list(SAVED_SPACES), None
+    if value.startswith("folder:") and value[len("folder:"):]:
+        return list(SAVED_SPACES), value[len("folder:"):]
+    try:
+        space = normalize_space(value)
+    except ValueError:
+        space = None
+    if not space:
+        raise HTTPException(400, f"Portée inconnue : {value} (au choix : all, mine, main, perso, hn, folder:<id>)")
+    return [space], None
 
 
 def _links(item_id: str) -> list[dict]:
@@ -486,7 +522,7 @@ def _links(item_id: str) -> list[dict]:
         """select i.id::text, i.title, i.kind, i.source_url, l.reason, l.similarity
            from item_links l
            join items i on i.id = case when l.source_id = %(id)s then l.target_id else l.source_id end
-           where (l.source_id = %(id)s or l.target_id = %(id)s) and i.status = 'ready'
+           where (l.source_id = %(id)s or l.target_id = %(id)s) and i.status = 'ready' and i.space <> 'hn'
            order by l.similarity desc limit 12""",
         {"id": item_id},
     )
@@ -540,7 +576,7 @@ def patch_item(item_id: str, patch: ItemPatch):
     changes = patch.model_dump(exclude_unset=True)
     if not changes:
         return {"ok": True}
-    item = db.fetchone("select kind, input_url, file_path, title from items where id = %s", (item_id,))
+    item = db.fetchone("select kind, input_url, file_path, title, space from items where id = %s", (item_id,))
     if not item:
         raise HTTPException(404, "Élément introuvable")
     if "folder_id" in changes:
@@ -554,6 +590,10 @@ def patch_item(item_id: str, patch: ItemPatch):
         category = normalize_category(changes["category"]) if "category" in changes else None
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    was_hn = item["space"] == "hn"
+    if space == "hn" and not was_hn:
+        raise HTTPException(400, "L'espace HN se remplit tout seul chaque matin")
+    kept = was_hn and space in ("main", "perso")      # « Garder dans la Veille »
     if space:
         sets.append("space = %s")
         params.append(space)
@@ -608,6 +648,8 @@ def patch_item(item_id: str, patch: ItemPatch):
 
     if requeue:
         wake.set()      # résumé, tags, index et liens refaits par le worker
+    elif kept:
+        pipeline._background(pipeline.promote, item_id)    # filed, linked, into the wiki, its card redone
     elif {"title", "user_note", "tags", "space", "category"} & changes.keys():
         threading.Thread(target=pipeline.reembed_card, args=(item_id,), daemon=True).start()
     notion.wake()
@@ -662,9 +704,9 @@ def tags(limit: int = 200, space: str | None = None):
     space = _space_param(space)
     return db.fetchall(
         """select tag, count(*)::int as count from items, unnest(tags) tag
-           where status = 'ready' and not archived and (%s::text is null or space = %s)
+           where status = 'ready' and not archived and coalesce(space = %s, space <> 'hn')
            group by tag order by count desc, tag limit %s""",
-        (space, space, max(1, min(limit, 1000))),
+        (space, max(1, min(limit, 1000))),
     )
 
 
@@ -675,9 +717,9 @@ def entities(limit: int = 100, type: str | None = None, space: str | None = None
         """select e->>'name' as name, e->>'type' as type, count(*)::int as count
            from items, jsonb_array_elements(entities) e
            where status = 'ready' and not archived and (%s::text is null or e->>'type' = %s)
-             and (%s::text is null or space = %s)
+             and coalesce(space = %s, space <> 'hn')
            group by 1, 2 having count(*) >= 1 order by count desc, name limit %s""",
-        (type, type, space, space, max(1, min(limit, 1000))),
+        (type, type, space, max(1, min(limit, 1000))),
     )
 
 
@@ -725,9 +767,12 @@ def resurface(count: int = 4, space: str | None = None):
 
 @api.get("/api/stats", dependencies=auth)
 def stats():
-    by_kind = db.fetchall("select kind, count(*)::int n from items where status='ready' group by kind order by n desc")
-    by_status = db.fetchall("select status, count(*)::int n from items group by status")
-    week = db.fetchone("select count(*)::int n from items where created_at > now() - interval '7 days'")
+    # what the user saved: the HN space only shows in by_space
+    by_kind = db.fetchall("""select kind, count(*)::int n from items where status='ready' and space <> 'hn'
+                             group by kind order by n desc""")
+    by_status = db.fetchall("select status, count(*)::int n from items where space <> 'hn' group by status")
+    week = db.fetchone("select count(*)::int n from items where created_at > now() - interval '7 days' "
+                       "and space <> 'hn'")
     open_actions = db.fetchone("select count(*)::int n from actions where not done")
     by_space = db.fetchall("select space, count(*)::int n from items where not archived group by space")
     return {
@@ -797,6 +842,7 @@ class ChatRequest(BaseModel):
     model: str | None = None     # un des modèles de /api/models ; défaut : CHAT_MODEL
     lang: str | None = None      # langue de l'app (fr, en) : celle de la réponse ; défaut : KB_LANGUAGE
     source: str = "rag"          # mode ask: "wiki" answers from the wiki's pages, "rag" from the items search finds
+    scope: str = "both"          # modes ask and project: the user's saves ("mine"), Hacker News ("hn") or "both"
 
 
 @api.get("/api/models", dependencies=auth)
@@ -831,18 +877,22 @@ def chat_endpoint(req: ChatRequest):
         raise HTTPException(400, f"Mode inconnu : {req.mode}")
     if req.source not in ("wiki", "rag"):
         raise HTTPException(400, f"Source inconnue : {req.source}")
+    if req.scope not in SCOPES:
+        raise HTTPException(400, f"Portée inconnue : {req.scope} (au choix : {', '.join(SCOPES)})")
+    spaces = scope_spaces(req.scope)
     lang = req.lang if req.lang in llm.LANG_NAMES else None
 
     def events():
         try:
             if req.mode == "project":
-                gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model, lang=lang)
-            elif req.mode == "advice":
+                gen = chat.project(str(req.messages[-1]["content"]), kinds=req.kinds, model=model, lang=lang,
+                                   spaces=spaces)
+            elif req.mode == "advice":     # the charter, Perso and a little Veille: never Hacker News
                 gen = chat.advise(req.messages, model=model, lang=lang)
-            elif req.source == "wiki":
-                gen = chat.ask_wiki(req.messages, model=model, lang=lang)
+            elif req.source == "wiki" and req.scope != "hn":    # the wiki is made of the user's saves only
+                gen = chat.ask_wiki(req.messages, model=model, lang=lang, scope=req.scope)
             else:
-                gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model, lang=lang)
+                gen = chat.ask(req.messages, kinds=req.kinds, tags=req.tags, model=model, lang=lang, spaces=spaces)
             for event in gen:
                 yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         except Exception as exc:
@@ -916,6 +966,19 @@ def _on_the_real_kb(request: Request, path: str, body: dict | None = None) -> di
     if r.status_code >= 400:
         raise HTTPException(r.status_code, (data.get("detail") if isinstance(data, dict) else None) or "La KB principale a refusé.")
     return data if isinstance(data, dict) else {"ok": True}
+
+
+@api.post("/api/hn/run", dependencies=auth)
+def run_hn(request: Request):
+    """« Récupérer maintenant » on the HN page: today's best stories, now (at most HN_DAILY_COUNT a day)."""
+    if (forwarded := _on_the_real_kb(request, "/api/hn/run")) is not None:
+        return forwarded
+    if not settings.hn_enabled:
+        raise HTTPException(400, "L'espace HN est désactivé (HN_ENABLED=false)")
+    try:
+        return hn.run()
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, "Hacker News ne répond pas : réessaie dans un instant.") from exc
 
 
 class DigestRequest(BaseModel):

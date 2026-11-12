@@ -111,6 +111,8 @@ Chaque matin à `DIGEST_HOUR`, le worker lit Hacker News, les papiers du jour de
 
 Coût : environ 0,10 à 0,20 $ d'API Claude par jour, plus 0,005 $ par post X lu (au plus `DIGEST_X_MAX_POSTS` par jour ; mets 0 pour ne pas lire X). Dans Claude, `get_digest` lit le dernier digest : tu peux en discuter avec ton abonnement.
 
+**L'espace Hacker News** (activé par défaut, `HN_ENABLED`). Chaque matin à `HN_HOUR` (6 h, dans `DIGEST_TIMEZONE`), le worker prend les `HN_DAILY_COUNT` (30) meilleures stories Hacker News publiées dans les 36 dernières heures et absentes de ta KB, et en fait des fiches dans l'espace **HN** : l'article complet, puis ses `HN_COMMENTS` (20) premiers commentaires de premier niveau. Une story dont l'article est illisible (paywall, site qui refuse les serveurs) a quand même sa fiche, tirée du titre et de la discussion. Ces fiches restent hors de ton wiki, de tes dossiers, de tes « À faire », des liens, du profil du digest, de « À redécouvrir » et de la copie Notion ; **Garder dans la Veille** (ou partager toi-même le lien) en fait passer une dans ta Veille, où elle est rangée et entre dans le wiki. Dans **Demander** et dans la barre de recherche, choisis tes enregistrements, HN ou les deux. **HN → Récupérer maintenant** lance un passage tout de suite (toujours 30 par jour au plus). Coût : environ 0,05 $ d'API Claude par jour ; rien n'est supprimé, environ 1,5 Go par an dans la base (Supabase Pro). Aucune clé : les API publiques de HN (Algolia et Firebase).
+
 ## 9. Sauvegardes : ne rien perdre
 
 - **Le plan gratuit de Supabase n'a aucune sauvegarde.** Si le projet est supprimé ou qu'une fausse manipulation vide une table, rien n'est récupérable. Dès que ton espace Perso compte pour toi, passe en **Pro** (25 $/mois) : sauvegarde quotidienne gardée 7 jours (la restauration à la minute près est une option payante).
@@ -235,6 +237,7 @@ Seuls le type d'une erreur, ses 300 premiers caractères et la pile d'appels qui
 | Le connecteur Claude ne répond pas | Teste : `curl -X POST https://kb.example.com/mcp/<secret> -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'` |
 | Recherche vide alors que la fiche existe | La fiche n'est pas encore « prête », ou `VOYAGE_API_KEY` manque (voir les logs). |
 | Notion : « page parente introuvable » | La page n'est pas connectée à l'intégration (étape 7.2), ou `NOTION_PARENT_PAGE_ID` pointe vers une autre page. |
+| Pas de stories HN le matin | `HN_ENABLED=true` ? Les logs affichent `Hacker News : 30 stories chaque jour` au démarrage et `Hacker News : N stories ajoutées` après le passage. **HN → Récupérer maintenant** affiche l'erreur si HN ne répond pas. |
 | Pas de digest le matin | `DIGEST_ENABLED=true` ? Les logs affichent `Digest activé` au démarrage et `Digest … prêt` chaque matin. **Régénérer** affiche l'erreur s'il y en a une. |
 | Le wiki ne se remplit pas | `WIKI_ENABLED=true` ? Les logs affichent `Wiki activé` au démarrage ; la page **Wiki** montre la file et les intégrations en erreur. |
 | Synchro Obsidian : « GitHub 401 » ou « 404 » | Le jeton a expiré, ou n'a pas Contents en lecture et écriture sur `WIKI_GIT_REPO`. |

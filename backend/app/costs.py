@@ -162,7 +162,8 @@ def set_service(service: str, *, balance: float | None = None, before: float | N
         cur.pop("balance_at", None)
     if balance is not None:
         cur["balance"] = round(float(balance), 2)
-        cur["balance_at"] = datetime.now(timezone.utc).isoformat()
+        # the database's clock, the one that stamps usage_log: what is spent afterwards always comes off the balance
+        cur["balance_at"] = db.fetchone("select now() as at")["at"].isoformat()
     if before is not None:
         cur["before"] = round(float(before), 2)
     if monthly is not None:

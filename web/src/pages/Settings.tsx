@@ -442,9 +442,31 @@ function SectionNav() {
              e.preventDefault();
              picked.current = Date.now();
              setCurrent(id);
-             document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+             const el = document.getElementById(id);
+             el?.scrollIntoView({ behavior: "smooth", block: "start" });
+             if (el) keepAtTop(el);
            }}>{label}</a>
       ))}
     </nav>
   );
+}
+
+/** For a moment after a section is picked, the page keeps it at the top while the sections above it fill in (the
+ *  costs arriving): a smooth scroll ends where the heading was when it started. The user's own wheel, touch or key
+ *  hands the scroll back at once. */
+function keepAtTop(el: HTMLElement) {
+  let height = document.documentElement.scrollHeight;
+  const observer = new ResizeObserver(() => {
+    const now = document.documentElement.scrollHeight;
+    if (now === height) return;
+    height = now;
+    el.scrollIntoView({ block: "start" });
+  });
+  const stop = () => {
+    observer.disconnect();
+    for (const type of ["wheel", "touchstart", "keydown"]) window.removeEventListener(type, stop);
+  };
+  observer.observe(document.body);
+  for (const type of ["wheel", "touchstart", "keydown"]) window.addEventListener(type, stop, { passive: true });
+  window.setTimeout(stop, 2000);
 }

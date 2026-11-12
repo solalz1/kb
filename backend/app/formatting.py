@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from . import db
 from .config import get_settings
-from .taxonomy import CHARTER_CATEGORIES, KIND_LABELS, category_label
+from .taxonomy import CHARTER_CATEGORIES, KIND_LABELS, SPACE_LABELS, category_label
 
 
 def _date(value) -> str | None:
@@ -18,6 +19,9 @@ def item_meta_line(it: dict) -> str:
         if it.get("category") in CHARTER_CATEGORIES:
             perso += " (charte)"
         parts.insert(0, perso)
+    if it.get("space") == "hn":
+        hn = (db.loads(it.get("metadata")) or {}).get("hn") or {}
+        parts.insert(0, f"Hacker News · {hn.get('points') or 0} points · {hn.get('comments') or 0} commentaires")
     if it.get("author"):
         parts.append(it["author"])
     if it.get("site_name") and it.get("site_name") not in (it.get("author") or ""):
@@ -25,7 +29,8 @@ def item_meta_line(it: dict) -> str:
     if d := _date(it.get("published_at")):
         parts.append(f"publié le {d}")
     if d := _date(it.get("created_at")):
-        parts.append(f"sauvé le {d}")
+        # an HN card wasn't saved by the user: the morning's run brought it
+        parts.append(f"récupéré le {d}" if it.get("space") == "hn" else f"sauvé le {d}")
     return " · ".join(parts)
 
 
@@ -69,7 +74,9 @@ def source_card(n: int, it: dict) -> dict:
 
 def item_markdown(it: dict, *, full: bool = False, with_content: bool = False, max_content: int = 30_000) -> str:
     s = get_settings()
-    lines = [f"### {it.get('title') or '(sans titre)'}", item_meta_line(it)]
+    space = it.get("space") or "main"
+    lines = [f"### {it.get('title') or '(sans titre)'}", item_meta_line(it),
+             f'Espace : {SPACE_LABELS.get(space, space)} (space="{space}")']
     if it.get("source_url"):
         lines.append(f"Source originale : {it['source_url']}")
     lines.append(f"Fiche KB : {s.item_url(it['id'])}  (id : {it['id']})")

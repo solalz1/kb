@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     digest_email_to: str = ""
     digest_email_from: str = ""
 
+    # --- Hacker News space (app/hn.py): the day's best stories, apart from what the user saves ---
+    hn_enabled: bool = True
+    hn_hour: int = 6              # local hour (digest_timezone) of the daily run
+    hn_daily_count: int = 30      # stories added per day: the best of the last 36 hours not already in the KB
+    hn_comments: int = 20         # top-level comments kept per story, in HN's order
+
     # --- Wiki: pages Claude writes and keeps up to date from the items (app/wiki.py) ---
     wiki_enabled: bool = True
     wiki_model: str = "claude-sonnet-5-5"         # integrates each new item into the pages
@@ -170,7 +176,8 @@ class Settings(BaseSettings):
     @property
     def notion_space_list(self) -> list[str]:
         spaces = [s.strip().lower() for s in self.notion_spaces.split(",") if s.strip()]
-        return [{"veille": "main"}.get(s, s) for s in spaces] or ["main", "perso"]
+        # the HN space is never copied: it is the day's news, not the user's material
+        return [{"veille": "main"}.get(s, s) for s in spaces if s != "hn"] or ["main", "perso"]
 
     @property
     def cors_origin_list(self) -> list[str]:

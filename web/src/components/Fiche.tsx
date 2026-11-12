@@ -1,12 +1,17 @@
-import type { ItemSummary } from "../api";
+import type { HnMeta, ItemSummary } from "../api";
 import { localized, t } from "../i18n";
 import { IconPin, IconSpinner } from "../icons";
 import { ago, agoShort, duration, fullDate, hostOf, kindLabel } from "../kinds";
 import { Link } from "../nav";
 import { headLabel } from "../perso";
 
+/** An HN story's score, as on Hacker News: « ▲ 120 · 40 commentaires ». */
+export const hnScore = (hn: HnMeta) =>
+  `▲ ${hn.points} · ${hn.comments === 1 ? t("1 commentaire") : t("{n} commentaires", { n: hn.comments })}`;
+
 /** A card of the feed. On phones a card with a picture keeps its "why" and drops its summary and tags. */
-export function Fiche({ item }: { item: ItemSummary }) {
+/** `pill`: the card's space, shown when it isn't the page's (a search « Dans » another space). */
+export function Fiche({ item, pill }: { item: ItemSummary; pill?: string | null }) {
   const pending = item.status === "pending" || item.status === "processing";
   const failed = item.status === "error";
   const perso = item.space === "perso";
@@ -21,8 +26,10 @@ export function Fiche({ item }: { item: ItemSummary }) {
       <div className="fiche-text">
         <div className="fiche-head">
           {!perso && item.kind && <span className="dot" data-kind={item.kind} />}
+          {pill && <span className="space-pill" data-space={item.space}>{pill}</span>}
           <span className="kind">{headLabel(item)}</span>
           {who && <span className="who">{who}</span>}
+          {item.hn && <span className="hn-score">{hnScore(item.hn)}</span>}
           {item.pinned && <IconPin size={14} className="pin" aria-label={t("Épinglé")} aria-hidden={false} role="img" />}
           <span className="when">
             {journal ? fullDate(item.entry_date)

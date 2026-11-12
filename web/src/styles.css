@@ -482,6 +482,23 @@ code { font-family: var(--mono); font-size: 0.9em; }
   .search kbd { display: inline-block; }
 }
 @media (hover: none) { .search kbd { display: none; } }
+/* « Dans »: where the search looks, next to the field */
+.search-row { display: flex; align-items: stretch; gap: 8px; }
+.search-row .search { flex: 1; min-width: 0; }
+.scope-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-3); font: inherit; font-size: 14px;
+  cursor: pointer; white-space: nowrap;
+}
+.scope-btn b { font-weight: 600; color: var(--ink-2); max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+.scope-btn[aria-expanded="true"] { border-color: var(--accent); }
+@media (hover: hover) { .scope-btn:hover { color: var(--ink); } }
+/* a card from another space than the page's */
+.space-pill {
+  flex: none; font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 1px 7px; border-radius: 8px;
+  background: var(--sand); color: var(--ink-2);
+}
+.space-pill[data-space="perso"], .space-pill[data-space="hn"] { background: var(--tint); }
 
 /* ---------- Feed (Veille, Perso, a folder) ---------- */
 
@@ -547,6 +564,10 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .fiche-head .kind { font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .fiche-head .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .fiche-head .pin { color: var(--accent); flex: none; }
+.fiche-head .hn-score { white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+/* HN: the cards under the day they arrived */
+.day-head { margin: 14px 0 2px; font-family: var(--serif); font-size: 20px; font-weight: 500; color: var(--ink); }
+.day-head:first-of-type { margin-top: 4px; }
 .fiche-head .when { margin-left: auto; white-space: nowrap; padding-left: 8px; }
 .fiche-head .when .long { display: none; }
 .fiche h3 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; }
@@ -623,6 +644,9 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .item-meta .kind { font-weight: 600; color: var(--ink-2); }
 .item-meta .pin { color: var(--accent); }
 .item-meta a { color: inherit; }
+.hn-line { margin: -4px 0 12px; font-size: 14px; color: var(--ink-3); }
+.hn-line a { color: var(--accent); text-decoration: none; }
+@media (hover: hover) { .hn-line a:hover { text-decoration: underline; } }
 .item-title { margin: 0; font-family: var(--serif); font-size: 30px; font-weight: 500; letter-spacing: -0.015em; line-height: 1.15; }
 .item-summary { margin: 0; font-size: 16px; color: var(--ink-2); }
 .item-actions { display: flex; flex-direction: column; gap: 10px; }

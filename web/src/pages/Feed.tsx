@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api, type Folder, type ItemSummary, type Space } from "../api";
 import { cache, useQuery } from "../cache";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { Fiche, ResurfaceCard, ResurfaceNote } from "../components/Fiche";
 import { CardsSkeleton } from "../components/Skeleton";
 import { SwipeRow, type SwipeAction, type SwipeSide } from "../components/Swipe";
 import { t } from "../i18n";
-import { IconArchive, IconBack, IconCalendar, IconClose, IconEdit, IconFolder, IconPin, IconSearch, IconSettings, IconTodo, IconTrash, IconWiki } from "../icons";
-import { KIND_FILTERS, kindsOf } from "../kinds";
+import { IconArchive, IconBack, IconCalendar, IconCheck, IconClose, IconDown, IconEdit, IconFeed, IconFolder, IconNews, IconPin, IconSearch, IconSettings, IconTodo, IconTrash, IconWiki } from "../icons";
+import { KIND_FILTERS, fullDate, kindsOf } from "../kinds";
 import { useDesktop } from "../layout";
 import { useFlip } from "../motion";
 import { Link, useNavigate } from "../nav";
-import { CATEGORIES, categoryOf } from "../perso";
+import { CATEGORIES, SPACE_LABEL, categoryOf } from "../perso";
 import { dropItem, fetchItems, fetchMore, forgetItem, keys, patchItem, type ItemsPage, type ItemsQuery } from "../queries";
 import { Toast } from "../components/Toast";
 
@@ -19,13 +20,30 @@ const UNDO_MS = 5000;     // how long the undo button stays, and how long a dele
 
 type Notice = { id: number; message: string; undo?: () => void };
 
-/** Veille, Perso, or one folder (`/folders/:folderId`, any space). Everything comes from the cache (cache.ts): coming
- *  back to the feed shows it at once, where it was. */
+/** The day a card arrived, as a heading of the HN page: « Aujourd'hui », « Hier », then the date. */
+function dayOf(iso: string): string {
+  const day = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (day.toDateString() === today.toDateString()) return t("Aujourd'hui");
+  if (day.toDateString() === yesterday.toDateString()) return t("Hier");
+  return fullDate(iso);
+}
+
+/** The heading a card of the HN page sits under: pinned cards first, under their own, then the days. */
+function groupOf(it: ItemSummary): string {
+  return it.pinned ? t("Épinglées") : dayOf(it.created_at);
+}
+
+/** Veille, Perso, HN, or one folder (`/folders/:folderId`, any space). Everything comes from the cache (cache.ts):
+ *  coming back to the feed shows it at once, where it was. */
 export default function Feed({ space }: { space?: Space }) {
   const { folderId } = useParams();
   const nav = useNavigate();
   const desktop = useDesktop();
   const perso = space === "perso";
+  const hn = space === "hn";           // the day's Hacker News stories: news, not something the user kept
+  const [fetching, setFetching] = useState(false);
   const inFolder = Boolean(folderId);
   const [params, setParams] = useSearchParams();
   const kind = params.get("kind") || "";
@@ -33,6 +51,10 @@ export default function Feed({ space }: { space?: Space }) {
   const tag = params.get("tag") || "";
   const entity = params.get("entity") || "";
   const archived = params.get("archived") === "1";
+  // « Dans »: where the search looks. The page's own scope by default; another one lives in the URL (?in=)
+  const pageScope = folderId ? `folder:${folderId}` : space ?? "main";
+  const scope = params.get("in") || pageScope;
+  const [scopeMenu, setScopeMenu] = useState<{ x: number; y: number } | null>(null);
   const [q, setQ] = useState(params.get("q") || "");
   const [query, setQuery] = useState(q);
   const [actionError, setError] = useState("");
@@ -53,6 +75,7 @@ export default function Feed({ space }: { space?: Space }) {
   const filters: ItemsQuery = {
     q: query || undefined, kind: kind ? kindsOf(kind) : undefined, tag: tag || undefined, entity: entity || undefined,
     category: category || undefined, space, folder: folderId, archived: archived || undefined,
+    in: query && scope !== pageScope ? scope : undefined,      // sent only with a query
   };
   const listKey = keys.items(filters);
   useEffect(() => { setError(""); }, [listKey]);       // an action that failed belongs to the list it was on
@@ -68,7 +91,7 @@ export default function Feed({ space }: { space?: Space }) {
   const error = actionError || list.error;
   useFlip(listBox, items);
 
-  const aside = !inFolder && !archived;
+  const aside = !inFolder && !archived && !hn;
   const resurfaceQuery = useQuery(aside ? keys.resurface(space) : null, () => api.resurface(space), { maxAge: 10 * 60_000 });
   const resurface = useMemo(() => (resurfaceQuery.data ?? []).filter((i) => !hidden.has(i.id)), [resurfaceQuery.data, hidden]);
   // On a first visit, the cards wait for "À redécouvrir" above them, so that it doesn't push them down as it arrives.
@@ -84,8 +107,23 @@ export default function Feed({ space }: { space?: Space }) {
   const archivedKey = keys.archivedCount(space);
   const archivedCount = useQuery(aside ? archivedKey : null,
                                  () => api.items({ space, archived: true, limit: 1 }).then((r) => r.total)).data ?? 0;
-  const folders = useQuery(inFolder && folderId !== "none" ? keys.folders : null, api.folders).data;
+  // the folders: for a folder's own page, and for « Dans » once its menu opens (or a folder is the scope)
+  const folders = useQuery((inFolder && folderId !== "none") || scopeMenu || scope.startsWith("folder:") ? keys.folders : null,
+                           api.folders).data;
   const folder: Folder | null = folders?.folders.find((f) => f.id === folderId) ?? null;
+  const scopes: { id: string; label: string }[] = [
+    { id: "all", label: t("Tout") }, { id: "mine", label: t("Mes enregistrements") }, { id: "main", label: t("Veille") },
+    { id: "perso", label: t("Perso") }, { id: "hn", label: "HN" },
+    ...(folders?.folders ?? []).map((f) => ({ id: `folder:${f.id}`, label: f.name })),
+  ];
+  const scopeLabel = scopes.find((s) => s.id === scope)?.label ?? (folderId === "none" ? t("Sans dossier") : t("Dossier"));
+  const scopeItems: MenuItem[] = scopes.map((s) => ({
+    id: s.id, label: s.label, icon: s.id === scope ? <IconCheck size={16} /> : undefined,
+    run: () => setFilter("in", s.id === pageScope ? "" : s.id),
+  }));
+  // a card from another space than the page's (a folder holds what the user saved) shows which one
+  const pageSpaces: string[] = folderId ? ["main", "perso"] : [space ?? "main"];
+  const pillOf = (it: ItemSummary) => (pageSpaces.includes(it.space) ? null : SPACE_LABEL[it.space]);
 
   // ---- swipe actions: pin, archive, delete, each with an undo ----
 
@@ -169,11 +207,42 @@ export default function Feed({ space }: { space?: Space }) {
       return { end: [del, { id: "unarchive", label: t("Ressortir"), icon: <IconArchive size={19} />, tone: "ink",
                             run: () => setArchived(it, false) }] };
     }
+    const pin: SwipeAction = { id: "pin", label: it.pinned ? t("Désépingler") : t("Épingler"), icon: <IconPin size={19} />,
+                               tone: "pin", run: () => togglePin(it) };
+    if (hn) {
+      return { start: pin, end: [del, { id: "keep", label: t("Garder dans la Veille"), icon: <IconFeed size={19} />,
+                                        tone: "ink", run: () => keep(it) }] };
+    }
     return {
-      start: { id: "pin", label: it.pinned ? t("Désépingler") : t("Épingler"), icon: <IconPin size={19} />,
-               tone: "pin", run: () => togglePin(it) },
+      start: pin,
       end: [del, { id: "archive", label: t("Archiver"), icon: <IconArchive size={19} />, tone: "ink", run: () => setArchived(it, true) }],
     };
+  };
+
+  // HN: a story the user keeps goes to Veille, where it is filed and joins the wiki (no undo: it is the user's now)
+  const keep = async (it: ItemSummary) => {
+    const putBack = dropItem(it.id, listKey);
+    try {
+      await api.patch(it.id, { space: "main" });
+      notify(t("Gardé dans la Veille"));
+    } catch (e) {
+      putBack();
+      setError((e as Error).message);
+    }
+  };
+
+  const fetchHn = async () => {
+    setFetching(true);
+    try {
+      const r = await api.runHn();
+      const n = r.added ?? 0;
+      notify(r.busy ? t("Un passage est déjà en cours") : n > 1 ? t("{n} nouvelles fiches", { n })
+        : n === 1 ? t("1 nouvelle fiche") : t("Rien de nouveau"));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFetching(false);
+    }
   };
 
   const setFilter = (key: string, value: string) => {
@@ -198,7 +267,7 @@ export default function Feed({ space }: { space?: Space }) {
   const showResurface = !archived && !inFolder && browsing && resurface.length > 0;
 
   return (
-    <div className={`page feed${inFolder || archived ? " solo" : ""}`}>
+    <div className={`page feed${inFolder || archived || hn ? " solo" : ""}`}>
       <div className="feed-main">
         {archived ? (
           <>
@@ -229,6 +298,18 @@ export default function Feed({ space }: { space?: Space }) {
               </>
             )}
           </>
+        ) : hn ? (
+          <>
+            <Link className="back phone-only" to="/"><IconBack size={18} /> {t("Veille")}</Link>
+            <header className="page-head">
+              <h1 className="title">HN</h1>
+              {headCount && <span className="feed-count desk-only">{headCount}</span>}
+            </header>
+            <div className="feed-top" style={{ alignItems: "center" }}>
+              <p className="lede">{t("Les 30 meilleures stories du jour, avec leurs commentaires.")}</p>
+              <button type="button" className="btn small" onClick={fetchHn} disabled={fetching}>{t("Récupérer maintenant")}</button>
+            </div>
+          </>
         ) : perso ? (
           <>
             <header className="page-head">
@@ -248,6 +329,7 @@ export default function Feed({ space }: { space?: Space }) {
           <header className="page-head">
             <h1 className="title">{t("Veille")}</h1>
             {headCount && <span className="feed-count desk-only">{headCount}</span>}
+            <Link className="icon-link" to="/hn" aria-label="HN"><IconNews size={22} /></Link>
             <Link className="icon-link" to="/wiki" aria-label={t("Wiki")}><IconWiki size={22} /></Link>
             <Link className="icon-link" to="/folders" aria-label={t("Dossiers")}><IconFolder size={22} /></Link>
             <Link className="icon-link" to="/todo" aria-label={pending > 0 ? t("À faire, {n} en attente", { n: pending }) : t("À faire")}>
@@ -258,14 +340,22 @@ export default function Feed({ space }: { space?: Space }) {
         )}
 
         {!archived && <>
-          <label className="search">
-            <IconSearch size={20} />
-            <span className="sr-only">{perso ? t("Chercher dans tes notes perso") : t("Chercher dans ta veille")}</span>
-            <input ref={searchBox} type="search" autoComplete="off" enterKeyHint="search"
-                   placeholder={perso ? t("Une leçon, un principe, un souvenir…") : desktop ? t("Chercher un sujet, une idée, une personne…") : t("Chercher un sujet, une personne…")}
-                   value={q} onChange={(e) => setQ(e.target.value)} />
-            <kbd>⌘K</kbd>
-          </label>
+          <div className="search-row">
+            <label className="search">
+              <IconSearch size={20} />
+              <span className="sr-only">{perso ? t("Chercher dans tes notes perso") : hn ? t("Chercher dans HN") : t("Chercher dans ta veille")}</span>
+              <input ref={searchBox} type="search" autoComplete="off" enterKeyHint="search"
+                     placeholder={perso ? t("Une leçon, un principe, un souvenir…") : desktop ? t("Chercher un sujet, une idée, une personne…") : t("Chercher un sujet, une personne…")}
+                     value={q} onChange={(e) => setQ(e.target.value)} />
+              <kbd>⌘K</kbd>
+            </label>
+            <button type="button" className="scope-btn" aria-haspopup="menu" aria-expanded={Boolean(scopeMenu)}
+                    aria-label={t("Dans : {scope}", { scope: scopeLabel })}
+                    onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setScopeMenu({ x: r.left, y: r.bottom - 4 }); }}>
+              <span className="desk-only">{t("Dans :")} </span><b>{scopeLabel}</b><IconDown size={14} />
+            </button>
+            {scopeMenu && <ContextMenu at={scopeMenu} items={scopeItems} onClose={() => setScopeMenu(null)} />}
+          </div>
 
           {perso ? (
             <div className="chips scroll" role="group" aria-label={t("Filtrer par catégorie")}>
@@ -331,7 +421,12 @@ export default function Feed({ space }: { space?: Space }) {
               <p>{t("Claude y range ce qui correspond à sa description. Tu peux aussi y déplacer un élément depuis sa fiche, ou le choisir dans le Raccourci.")}</p>
             </div>
           ) : browsing ? (
-            perso ? (
+            hn ? (
+              <div className="empty">
+                <h2>{t("Pas encore de stories HN")}</h2>
+                <p>{t("Elles arrivent chaque matin : les meilleures du jour sur Hacker News, avec l'article et les commentaires. « Récupérer maintenant » les va chercher tout de suite.")}</p>
+              </div>
+            ) : perso ? (
               <div className="empty">
                 <h2>{t("Ton espace perso est vide")}</h2>
                 <p>{t("Commence par tes principes et tes valeurs : ce sont eux que le mode Conseil relit en entier pour t'aider à décider. "
@@ -360,11 +455,16 @@ export default function Feed({ space }: { space?: Space }) {
         {items.length > 0 && !stripComing && (
           <div className={`feed-list${list.previous ? " refreshing" : ""}${cold ? " appear" : ""}`} ref={listBox}>
             <span className={`feed-count${searching || archived ? "" : " phone-only"}`}>{countLabel}</span>
-            {items.map((it) => (
-              <SwipeRow key={it.id} flipId={it.id} {...actionsFor(it)} open={opened?.id === it.id ? opened.side : null}
-                        onOpenChange={(side) => setOpened(side ? { id: it.id, side } : (cur) => (cur?.id === it.id ? null : cur))}>
-                <Fiche item={it} />
-              </SwipeRow>
+            {items.map((it, i) => (
+              <Fragment key={it.id}>
+                {hn && !searching && (i === 0 || groupOf(items[i - 1]) !== groupOf(it)) && (
+                  <h2 className="day-head">{groupOf(it)}</h2>
+                )}
+                <SwipeRow flipId={it.id} {...actionsFor(it)} open={opened?.id === it.id ? opened.side : null}
+                          onOpenChange={(side) => setOpened(side ? { id: it.id, side } : (cur) => (cur?.id === it.id ? null : cur))}>
+                  <Fiche item={it} pill={searching ? pillOf(it) : null} />
+                </SwipeRow>
+              </Fragment>
             ))}
           </div>
         )}
@@ -389,7 +489,7 @@ export default function Feed({ space }: { space?: Space }) {
         </Toast>
       </div>
 
-      {!inFolder && !archived && (
+      {!inFolder && !archived && !hn && (
         <aside className="feed-aside" aria-label={t("Explorer")}>
           {resurface.length > 0 && (
             <section className="aside-block">

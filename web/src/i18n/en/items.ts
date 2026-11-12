@@ -5,10 +5,32 @@ export default {
   "Nouvel élément": "New item",
   "Sans titre": "Untitled",
   "Épinglé": "Pinned",
+  "Épinglées": "Pinned",
   "Rangement et résumé en cours…": "Filing and summarizing…",
   "Lecture et résumé en cours…": "Reading and summarizing…",
   "Échec du traitement : ouvre la fiche pour réessayer": "Processing failed: open the card to retry",
   "Vidéo YouTube": "YouTube video",
+
+  // HN: the day's Hacker News stories
+  "Les 30 meilleures stories du jour, avec leurs commentaires.": "The day's 30 best stories, with their comments.",
+  "Récupérer maintenant": "Fetch now",
+  "{n} nouvelles fiches": "{n} new cards",
+  "1 nouvelle fiche": "1 new card",
+  "Rien de nouveau": "Nothing new",
+  "Un passage est déjà en cours": "A run is already going",
+  "Garder dans la Veille": "Keep in Feed",
+  "Gardé dans la Veille": "Kept in Feed",
+  "Hier": "Yesterday",
+  "1 commentaire": "1 comment",
+  "{n} commentaires": "{n} comments",
+  "Hacker News · {points} points · {comments} commentaires": "Hacker News · {points} points · {comments} comments",
+  "Discussion HN ↗": "HN discussion ↗",
+  "Chercher dans HN": "Search HN",
+  "Dans : {scope}": "In: {scope}",
+  "Dans :": "In:",
+  "Pas encore de stories HN": "No HN stories yet",
+  "Elles arrivent chaque matin : les meilleures du jour sur Hacker News, avec l'article et les commentaires. « Récupérer maintenant » les va chercher tout de suite.":
+    "They arrive every morning: the day's best on Hacker News, with the article and the comments. “Fetch now” gets them right away.",
 
   // feeds (Veille and Perso)
   "Tes principes, tes valeurs, tes leçons et tes objectifs. Le mode Conseil s'appuie dessus pour t'aider à décider.":
@@ -61,6 +83,7 @@ export default {
   "publié le {date}": "published on {date}",
   "écrit le {date}": "written on {date}",
   "sauvé le {date}": "saved on {date}",
+  "récupéré le {date}": "fetched on {date}",
   "{n} pages": "{n} pages",
   "{n} page": "{n} page",
   "Lecture, résumé et indexation en cours…": "Reading, summarizing and indexing…",

@@ -7,7 +7,16 @@ export type Kind =
   | "image" | "document" | "note" | "repo" | "paper";
 
 // "main" = la veille ; "perso" = développement personnel
-export type Space = "main" | "perso";
+export type Space = "main" | "perso" | "hn";
+
+/** A story of the HN space: its score and its discussion on Hacker News (metadata.hn). */
+export interface HnMeta {
+  id: string;
+  points: number;
+  comments: number;
+  discussion_url: string;
+  article_unreadable?: boolean;
+}
 
 export interface ItemSummary {
   id: string;
@@ -35,6 +44,7 @@ export interface ItemSummary {
   entry_date?: string | null;   // journal notes: the day they belong to
   folder_id?: string | null;    // the folder it's filed in (by Claude, or by hand)
   duration?: number | null;     // seconds, for a video or a podcast
+  hn?: HnMeta | null;           // a story of the HN space
 }
 
 /** One of the user's folders (backend/app/folders.py). */
@@ -124,6 +134,8 @@ export interface NotionStatus {
 export type ChatMode = "ask" | "project" | "advice";
 /** Where a question's answer comes from: the wiki's pages, or the items search finds (RAG). */
 export type AskSource = "wiki" | "rag";
+/** Where a question looks: the user's saves (Veille + Perso), the HN space, or both. */
+export type AskScope = "mine" | "hn" | "both";
 
 export type WikiSection = "personal" | "research" | "reading" | "business" | "competitive";
 export type WikiKind = "theme" | "entity" | "book" | "synthesis" | "answer";
@@ -494,8 +506,9 @@ export function cleanDetail(item: ItemDetail): ItemDetail {
 
 export const api = {
   health: () => request<{ ok: boolean; sso_login?: string | null; real_url?: string | null }>("/api/health"),
+  /** `in`: where a search looks (all, mine, main, perso, hn, folder:<id>), over `space` and `folder`. */
   items: (params: { q?: string; kind?: string; tag?: string; entity?: string; space?: Space; category?: string;
-                    folder?: string; limit?: number; offset?: number; archived?: boolean }) =>
+                    folder?: string; limit?: number; offset?: number; archived?: boolean; in?: string }) =>
     request<{ items: ItemSummary[]; total: number; search: boolean }>(`/api/items${qs(params)}`)
       .then((r) => ({ ...r, items: r.items.map(cleanSummary) })),
   /** `view`: counts as the user opening it (once per visit; a refresh in the background doesn't). */
@@ -506,6 +519,8 @@ export const api = {
                         entry_date?: string; folder?: string }) =>
     request<{ ok: boolean; id: string }>("/api/notes", { method: "POST", body: JSON.stringify(body) }),
   remove: (id: string) => request<{ ok: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
+  /** « Récupérer maintenant »: today's best Hacker News stories now (at most 30 a day). */
+  runHn: () => request<{ added?: number; skipped?: number; busy?: boolean }>("/api/hn/run", { method: "POST" }),
   journalMonth: (month: string) =>
     request<{ month: string; today: string; days: Record<string, number> }>(`/api/journal${qs({ month })}`),
   journalDay: (day: string) => request<{ date: string; entries: JournalEntry[] }>(`/api/journal/${day}`),
@@ -597,7 +612,7 @@ export type ChatEvent =
 
 export async function streamChat(
   body: { messages: { role: "user" | "assistant"; content: string }[]; mode: ChatMode; kinds?: string[]; model?: string;
-          source?: AskSource },
+          source?: AskSource; scope?: AskScope },
   onEvent: (e: ChatEvent) => void,
   signal?: AbortSignal,
 ) {

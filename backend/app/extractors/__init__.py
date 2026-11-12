@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .. import storage, urls
-from . import arxiv, av, document, github, image, note, pdf, reddit, twitter, web, youtube
+from . import arxiv, av, document, github, hackernews, image, note, pdf, reddit, twitter, web, youtube
 from .base import ExtractionError, Extracted
 
 log = logging.getLogger(__name__)
@@ -22,6 +22,8 @@ def extract_item(item: dict) -> Extracted:
     if item.get("file_path"):
         data = storage.download(item["file_path"])
         ex = extract_file(data, item.get("file_name"), item.get("file_mime"))
+    elif item.get("input_url") and _meta(item).get("hn"):
+        ex = hackernews.extract({**item, "metadata": _meta(item)}, read_article=_read_url)   # a story of the HN space
     elif item.get("input_url"):
         fetched, received = _phone_html(item)
         try:

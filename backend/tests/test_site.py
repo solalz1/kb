@@ -69,11 +69,14 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     """Opens pages as a signed-in user; fails the test on any page error, console error or failed request."""
     from app import folders
 
+    from app.extractors import hackernews
+
     folders.seed()          # as the app does when it starts
+    monkeypatch.setattr(hackernews, "get_json", lambda url, params=None: {})     # Hacker News: nothing, ever reached
     monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
         kind="article", title="Mesurer un agent sur de vraies tâches", source_url=url, author="Jane Doe",
         content="Un benchmark d'agents doit utiliser de vraies tâches et mesurer le coût. " * 30))
-    contexts, problems = [], []
+    contexts, browsers, problems = [], [], []
 
     def open_page(path: str = "/", viewport: dict = PHONE, lang: str = "fr", signed_in: bool = True,
                   expected_status: int | None = None, touch: bool = False, expected_errors: tuple = (),
@@ -82,8 +85,15 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
         `touch`: a touch screen, as on an iPhone (see _swipe).
         `expected_errors`: console errors the test causes on purpose (a page made to crash), by a piece of their text.
         `setup`: called with the browser context before the page opens (cookies, routes)."""
-        ctx = browser.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
-                                  has_touch=touch)
+        # a touch screen gets a Chromium of its own: after an earlier test's swipe from the left edge, Chromium
+        # sometimes takes the first touchmove of the next one, in another context, for a scroll of its own
+        # (pointercancel, then no more touch events), and the swipe never reaches the page
+        owner = browser
+        if touch:
+            owner = browser.browser_type.launch()
+            browsers.append(owner)
+        ctx = owner.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
+                                has_touch=touch)
         # first visit only: switching the language in the app (which reloads it) must stick
         init = f"if (!localStorage.getItem('kb_lang')) localStorage.setItem('kb_lang', '{lang}');"
         if signed_in:
@@ -104,6 +114,8 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     yield open_page
     for ctx in contexts:
         ctx.close()
+    for b in browsers:
+        b.close()
     assert not problems, "\n".join(problems)
 
 
@@ -176,6 +188,7 @@ def test_every_page_opens(site, viewport):
         ("/add", page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")),
         ("/folders", page.get_by_role("heading", name="Dossiers", exact=True)),
         ("/wiki", page.get_by_role("heading", name="Wiki", exact=True)),
+        ("/hn", page.get_by_role("heading", name="HN", exact=True)),
         ("/todo", page.get_by_text("Tester l'outil mentionné").first),
         ("/settings", page.get_by_role("heading", name="Réglages")),
         (f"/item/{ids['article']}", page.get_by_role("heading", name="Mesurer un agent sur de vraies tâches")),
@@ -1047,12 +1060,12 @@ def test_keys_and_taps_answer_at_once(site):
     lost."""
     page = site("/wiki", viewport=DESKTOP)
     expect(page.get_by_role("heading", name="Wiki", exact=True)).to_be_visible()
-    page.keyboard.press("Control+k")
+    page.keyboard.press("ControlOrMeta+k")
     expect(page.locator(".main .search input")).to_be_focused()
     # …but never while something is being typed elsewhere: the draft stays where it is
     page.goto("/ask")
     page.locator("#ask-input").fill("Une question en cours")
-    page.keyboard.press("Control+k")
+    page.keyboard.press("ControlOrMeta+k")
     page.wait_for_timeout(300)
     expect(page).to_have_url(re.compile(r"/ask"))
     expect(page.locator("#ask-input")).to_have_value("Une question en cours")
@@ -1348,3 +1361,190 @@ def test_ask_the_wiki_and_keep_the_answer(site):
     page.reload()
     expect(page.get_by_role("group", name="Répondre à partir de").get_by_role("button", name="Éléments")) \
         .to_have_attribute("aria-pressed", "true")
+
+
+def _hn_story(story_id: str, title: str, *, days_ago: int = 0, points: int = 120, comments: int = 40) -> str:
+    """A story of the HN space, as the daily run makes it (the article, then its discussion), processed."""
+    from app import db, pipeline
+
+    url = f"https://news{story_id}.example.com/post"
+    res = pipeline.ingest(url=url, space="hn", hn={
+        "id": story_id, "title": title, "points": points, "comments": comments, "author": "pg",
+        "discussion_url": f"https://news.ycombinator.com/item?id={story_id}", "posted_at": "2026-11-12T05:00:00+00:00"})
+    drain()
+    if days_ago:
+        db.execute("update items set created_at = now() - make_interval(days => %s) where id = %s", (days_ago, res["id"]))
+    return res["id"]
+
+
+def test_hn_page_and_keep_in_veille(site, monkeypatch):
+    titles = {"https://news1.example.com/post": "Un compilateur en un week-end",
+              "https://news2.example.com/post": "Le retour des bases de données embarquées"}
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=titles[url], source_url=url, content="Un article de fond sur le sujet. " * 30))
+    page = site("/hn", viewport=DESKTOP)
+    today = _hn_story("1", titles["https://news1.example.com/post"])
+    yesterday = _hn_story("2", titles["https://news2.example.com/post"], days_ago=1, points=88, comments=12)
+    page.reload()
+    expect(page.get_by_role("heading", name="HN", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Aujourd'hui")).to_be_visible()
+    expect(page.get_by_role("heading", name="Hier")).to_be_visible()
+    expect(page.get_by_text("▲ 120 · 40 commentaires")).to_be_visible()
+    expect(page.get_by_text("À redécouvrir")).to_have_count(0)
+
+    # « Garder dans la Veille »: the card leaves HN for Veille, filed and in the wiki
+    card = page.locator(".fiche", has_text=titles["https://news1.example.com/post"])
+    _settled(page)
+    card.click(button="right")
+    page.get_by_role("menuitem", name="Garder dans la Veille").click()
+    expect(page.get_by_text("Gardé dans la Veille")).to_be_visible()
+    expect(card).to_have_count(0)
+    _wait_for(lambda: _api(page, "GET", f"/api/items/{today}")["body"]["space"] == "main", page)
+    page.goto("/")
+    expect(page.locator(".fiche", has_text=titles["https://news1.example.com/post"])).to_be_visible()
+
+    # an HN card's page: its score, the discussion on HN, and the same button
+    page.goto(f"/item/{yesterday}")
+    expect(page.get_by_text("Hacker News · 88 points · 12 commentaires")).to_be_visible()
+    expect(page.get_by_role("link", name="Discussion HN ↗")).to_have_attribute(
+        "href", "https://news.ycombinator.com/item?id=2")
+    expect(page.get_by_role("button", name="Garder dans la Veille")).to_be_visible()
+
+    # « Récupérer maintenant »: nothing new from HN here
+    page.goto("/hn")
+    page.get_by_role("button", name="Récupérer maintenant").click()
+    expect(page.get_by_text("Rien de nouveau")).to_be_visible()
+
+    # on a phone, Veille's head leads to it
+    phone = site("/")
+    phone.get_by_role("link", name="HN", exact=True).click()
+    expect(phone.get_by_role("heading", name="HN", exact=True)).to_be_visible()
+
+
+def test_ask_chooses_its_sources(site, monkeypatch):
+    """« Demander »: the user's saves, HN or both (« Les deux » by default, remembered on the device)."""
+    hn_title = "Les agents de code en production, vus par HN"
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=hn_title if "news" in url else "Mesurer un agent sur de vraies tâches", source_url=url,
+        content="Les agents de code en production : retours d'expérience et benchmark. " * 30))
+    page = site("/ask", viewport=DESKTOP)
+    _seed(page)
+    _hn_story("7", hn_title)
+    page.reload()
+    where = page.get_by_role("group", name="Chercher dans")
+    expect(where.get_by_role("button", name="Les deux")).to_have_attribute("aria-pressed", "true")
+    expect(page.get_by_role("group", name="Répondre à partir de")).to_be_visible()
+
+    where.get_by_role("button", name="HN", exact=True).click()
+    expect(page.get_by_role("group", name="Répondre à partir de")).to_have_count(0)
+    page.locator("#ask-input").fill("Que dit-on des agents de code ?")
+    with page.expect_request(lambda r: r.url.endswith("/api/chat")) as sent:
+        page.keyboard.press("Enter")
+    assert sent.value.post_data_json["scope"] == "hn" and "source" not in sent.value.post_data_json
+    expect(page.locator(".answer")).to_contain_text("Réponse sourcée")
+    titles = page.locator(".source .st")
+    expect(titles.first).to_be_visible()
+    assert set(titles.all_inner_texts()) == {hn_title}
+    expect(page.get_by_text("d'après HN")).to_be_visible()
+
+    page.reload()
+    expect(page.get_by_role("group", name="Chercher dans").get_by_role("button", name="HN", exact=True)) \
+        .to_have_attribute("aria-pressed", "true")
+    page.get_by_role("group", name="Mode").get_by_role("button", name="Conseil").click()
+    expect(page.get_by_role("group", name="Chercher dans")).to_have_count(0)
+    page.get_by_role("group", name="Mode").get_by_role("button", name="Nouveau projet").click()
+    expect(page.get_by_role("group", name="Chercher dans")).to_be_visible()
+    expect(page.get_by_role("group", name="Répondre à partir de")).to_have_count(0)
+
+
+def test_search_in_another_space(site, monkeypatch):
+    """The feed's search looks where « Dans » says: the page's space by default, then everywhere, HN, a folder…"""
+    hn_title = "Un benchmark d'agents qui fait débat sur HN"
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=hn_title if "news" in url else "Mesurer un agent sur de vraies tâches", source_url=url,
+        content="Un benchmark d'agents doit utiliser de vraies tâches et mesurer le coût. " * 30))
+    page = site("/", viewport=DESKTOP)
+    _seed(page)
+    _hn_story("9", hn_title)
+    page.reload()
+    page.locator(".main .search input").fill("benchmark")
+    cards = page.locator(".fiche:not(.sk-card)")
+    expect(cards).to_have_count(1)
+    expect(cards.first).to_contain_text("Mesurer un agent sur de vraies tâches")
+
+    page.get_by_role("button", name="Dans : Veille").click()
+    page.get_by_role("menuitem", name="HN", exact=True).click()
+    expect(cards).to_have_count(1)
+    expect(cards.first).to_contain_text(hn_title)
+    expect(cards.first.locator(".space-pill")).to_have_text("HN")
+    expect(page).to_have_url(re.compile(r"in=hn"))
+
+    page.get_by_role("button", name="Dans : HN").click()
+    page.get_by_role("menuitem", name="Tout", exact=True).click()
+    expect(page).to_have_url(re.compile(r"in=all"))
+    expect(page.locator(".fiche", has_text=hn_title).locator(".space-pill")).to_have_text("HN")
+    expect(page.locator(".fiche", has_text="Mesurer un agent")).to_be_visible()
+    expect(page.locator(".fiche", has_text="Mesurer un agent").locator(".space-pill")).to_have_count(0)
+    expect(page.locator(".fiche", has_text="Je tiens mes promesses").locator(".space-pill")).to_have_text("Perso")
+
+    page.locator(".main .search input").blur()
+    page.keyboard.press("ControlOrMeta+k")
+    expect(page.locator(".main .search input")).to_be_focused()
+
+
+def test_hn_page_pins_the_side_column_and_questions(site, monkeypatch):
+    """The HN page: pinned stories under their own heading, no empty side column, no archiving a story; its item
+    page lights HN in the sidebar; a question about a story searches HN even when the device asks the saves only."""
+    from app import db
+
+    titles = {"https://news1.example.com/post": "Un compilateur en un week-end",
+              "https://news2.example.com/post": "Le retour des bases de données embarquées"}
+    monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
+        kind="article", title=titles[url], source_url=url, content="Un article de fond sur le sujet. " * 30))
+    page = site("/hn", viewport=DESKTOP, setup=lambda ctx: ctx.add_init_script(
+        "if (!localStorage.getItem('kb_ask_scope')) localStorage.setItem('kb_ask_scope', 'mine');"))
+    today = _hn_story("1", titles["https://news1.example.com/post"])
+    old = _hn_story("2", titles["https://news2.example.com/post"], days_ago=3)
+    db.execute("update items set pinned = true where id = %s", (old,))
+    page.reload()
+    heads = page.locator(".day-head")
+    expect(heads).to_have_count(2)
+    assert heads.all_inner_texts() == ["Épinglées", "Aujourd'hui"]
+    expect(page.locator(".feed-aside")).to_have_count(0)
+
+    _settled(page)
+    page.locator(".fiche", has_text=titles["https://news1.example.com/post"]).click()
+    expect(page.locator(".item-title")).to_have_text(titles["https://news1.example.com/post"])
+    expect(page.locator(".item-meta")).to_contain_text("récupéré le")            # the morning's run brought it
+    expect(page.locator(".item-meta")).not_to_contain_text("sauvé le")
+    expect(page.locator(".rail").get_by_role("link", name="HN", exact=True)).to_have_class(re.compile(r"\bactive\b"))
+    expect(page.locator(".rail").get_by_role("link", name="Veille", exact=True)).not_to_have_class(re.compile(r"\bactive\b"))
+    tools = page.locator(".item-tools")                  # on a computer, the actions sit under the side column
+    expect(tools.get_by_role("button", name="Retraiter")).to_be_visible()
+    expect(tools.get_by_role("button", name="Archiver")).to_have_count(0)
+
+    page.goto(f"/ask?about={today}")
+    where = page.get_by_role("group", name="Chercher dans")
+    expect(where.get_by_role("button", name="Les deux")).to_have_attribute("aria-pressed", "true")
+    assert page.evaluate("localStorage.getItem('kb_ask_scope')") == "mine"       # the device's choice stays
+
+
+def test_a_settings_link_keeps_its_section_while_the_page_fills_in(site, billing_apis):
+    """A section picked in the strip stays at the top when what is above it arrives while the page scrolls there (the
+    costs table, a little slow): the scroll used to end where the heading had been, the costs pushing it down."""
+    import time as _time
+
+    from app import costs
+
+    costs.record("anthropic", 0.42, model="claude-haiku-5-5")
+
+    def slow_costs(route):
+        _time.sleep(0.3)
+        route.continue_()
+
+    desk = site("/settings", viewport=DESKTOP, setup=lambda ctx: ctx.route("**/api/costs", slow_costs))
+    desk.get_by_role("navigation", name="Sections des réglages").get_by_role("link", name="Connecteur Claude").click()
+    expect(desk.locator("#couts .cost-totals")).to_contain_text("Ce mois-ci", timeout=10_000)
+    desk.wait_for_timeout(700)
+    top = desk.locator("h2", has_text="Connecteur Claude").first.evaluate("h => h.getBoundingClientRect().top")
+    assert 0 <= top < 260, top

@@ -23,6 +23,8 @@ def old_database(database):
     migrate.run(OLD_DB)
     with psycopg.connect(OLD_DB, autocommit=True) as c:
         c.execute("alter table items drop column translations, drop column entry_date")
+        c.execute("alter table items drop constraint items_space_check, "
+                  "add constraint items_space_check check (space in ('main', 'perso'))")
         c.execute("insert into items (kind, title, status) values ('note', 'Une note d''avant', 'ready')")
     yield OLD_DB
     with psycopg.connect(ADMIN_DB, autocommit=True) as c:
@@ -39,10 +41,12 @@ def test_brings_an_old_database_up_to_date(old_database):
     from app import migrate
 
     assert {"translations", "entry_date"} - _columns(old_database) == {"translations", "entry_date"}
-    assert migrate.run(old_database) == ["20261002000000_init.sql", "20261016000000_wiki.sql"]
+    assert migrate.run(old_database) == ["20261002000000_init.sql", "20261016000000_wiki.sql",
+                                         "20261111000000_hn.sql"]
     assert {"translations", "entry_date"} <= _columns(old_database)
     with psycopg.connect(old_database) as c:
         assert c.execute("select title, translations from items").fetchall() == [("Une note d'avant", {})]
+        c.execute("insert into items (input_url, space) values ('https://news.example.com', 'hn')")
 
 
 def test_running_again_changes_nothing(clean_db):
