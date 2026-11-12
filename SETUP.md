@@ -111,6 +111,8 @@ Every morning at `DIGEST_HOUR`, the worker reads Hacker News, the Hugging Face p
 
 Cost: about $0.10–0.20 of Claude API per day, plus $0.005 per X post read (at most `DIGEST_X_MAX_POSTS` a day; set it to 0 to skip X). In Claude, `get_digest` reads the latest digest, so you can discuss it on your plan.
 
+**The Hacker News space** (on by default, `HN_ENABLED`). Every morning at `HN_HOUR` (6, in `DIGEST_TIMEZONE`), the worker takes the `HN_DAILY_COUNT` (30) best Hacker News stories posted in the last 36 hours that aren't in your KB yet, and makes each a card in the **HN** space: the whole article, then its `HN_COMMENTS` (20) first top-level comments. A story whose article can't be read (paywall, a site that refuses servers) still gets a card, from its title and discussion. These cards stay out of your wiki, folders, to-dos, links, digest profile, « À redécouvrir » and Notion copy; **Garder dans la Veille** (or sharing the link yourself) moves one into your Veille, where it is filed and joins the wiki. In **Demander** and in the search bar, choose your saves, HN or both. **HN → Récupérer maintenant** runs it at once (still at most 30 a day). Cost: about $0.05 of Claude API a day; nothing is deleted, about 1.5 GB a year in the database (Supabase Pro). No key needed: the public HN APIs (Algolia and Firebase).
+
 ## 9. Backups: don't lose anything
 
 - **The Supabase free plan has no backups.** If the project is deleted or a bad manipulation wipes a table, nothing can be restored. Once your Perso space matters to you, switch to **Pro** ($25/month): daily backups kept 7 days (point-in-time recovery is an add-on).
@@ -234,6 +236,7 @@ Only an error's type, its first 300 characters and the stack leave the KB: no re
 | The Claude connector doesn't answer | Test: `curl -X POST https://kb.example.com/mcp/<secret> -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'` |
 | Search is empty although the item exists | The item isn't "ready" yet, or `VOYAGE_API_KEY` is missing (check the logs). |
 | Notion: "page parente introuvable" | The page isn't connected to the integration (step 7.2), or `NOTION_PARENT_PAGE_ID` points to another page. |
+| No HN stories in the morning | `HN_ENABLED=true`? The logs show `Hacker News : 30 stories chaque jour` at startup and `Hacker News : N stories ajoutées` after the run. **HN → Récupérer maintenant** shows the error if HN doesn't answer. |
 | No digest in the morning | `DIGEST_ENABLED=true`? The logs show `Digest activé` at startup and `Digest … prêt` each morning. **Régénérer** shows the error if there is one. |
 | The wiki doesn't fill | `WIKI_ENABLED=true`? The logs show `Wiki activé` at startup; **Wiki** shows the queue and failed integrations. |
 | Obsidian sync: "GitHub 401" or "404" | The token expired, or doesn't have Contents read and write on `WIKI_GIT_REPO`. |

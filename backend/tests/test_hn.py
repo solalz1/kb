@@ -3,6 +3,7 @@
 import pytest
 
 from app import db, migrate
+from app.config import get_settings
 from app.taxonomy import normalize_space, scope_spaces
 
 
@@ -46,11 +47,48 @@ def hn_client(clean_db, fake_llm, monkeypatch):
         return page
 
     monkeypatch.setattr(extractors, "extract_url", fake_extract_url)
+    fake_hn(monkeypatch, [])       # no test reaches Hacker News
     from app.main import app
 
     with TestClient(app) as c:
         c.pages = pages
         yield c
+
+
+def fake_hn(monkeypatch, stories, comments=None, fail=None):
+    """Hacker News from dicts: `stories` are Algolia hits (the search honours `numericFilters`), `comments` maps a
+    story id to its top-level comments, in HN's order: (author, html) or a dict of Firebase fields ("deleted",
+    "dead"…). `fail`: an exception every call raises. Returns the list of URLs asked."""
+    from app.extractors import hackernews
+
+    comments = comments or {}
+    asked = []
+
+    def kids(story_id):
+        out = []
+        for n, c in enumerate(comments.get(story_id, [])):
+            c = {"by": c[0], "text": c[1]} if isinstance(c, tuple) else c
+            out.append({"id": int(f"{story_id}{n:03d}"), "parent": int(story_id), "type": "comment", **c})
+        return out
+
+    def get_json(url, params=None):
+        asked.append(url)
+        if fail:
+            raise fail
+        if url.endswith("/search"):
+            floor = {k: int(v) for k, v in (f.split(">") for f in params["numericFilters"].split(","))}
+            hits = [h for h in stories if h["created_at_i"] > floor["created_at_i"] and h["points"] > floor["points"]]
+            return {"hits": hits[: int(params.get("hitsPerPage", 20))]}
+        story_id = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".json")
+        if "firebaseio" in url:
+            return {"id": int(story_id), "type": "story", "kids": [c["id"] for c in kids(story_id)]} \
+                if story_id in {h["objectID"] for h in stories} else next(
+                    (c for cs in comments for c in kids(cs) if str(c["id"]) == story_id), None)
+        return {"id": int(story_id), "children": [{"id": c["id"], "author": c.get("by"), "text": c.get("text")}
+                                                  for c in kids(story_id) if not c.get("deleted")]}
+
+    monkeypatch.setattr(hackernews, "get_json", get_json)
+    return asked
 
 
 def _page(client, url, body, title="Une page"):
@@ -191,3 +229,93 @@ def test_folder_scope_searches_saved_items_only(hn_client):
 def test_meta_line_says_hacker_news():
     line = item_meta_line({"kind": "article", "space": "hn", "metadata": {"hn": {"points": 512, "comments": 230}}})
     assert line.startswith("Hacker News · 512 points · 230 commentaires")
+
+
+# ---------------------------------------------------------------------------
+# The daily run
+
+from datetime import datetime, timedelta  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from app import hn  # noqa: E402
+
+NOW = datetime(2026, 11, 12, 6, 30, tzinfo=ZoneInfo("Europe/Paris"))
+
+
+def _hit(i, **kw):
+    return {"objectID": str(1000 + i), "title": f"Story {i} about compilers", "url": f"https://story{i}.example.com/post",
+            "points": 41 + i, "num_comments": 5 + i, "author": f"user{i}",
+            "created_at_i": int((NOW - timedelta(minutes=45 * i)).timestamp()), "story_text": None, **kw}
+
+
+# 40 stories posted over the last 30 hours (points 41…80), the best one an Ask HN, plus one too old
+STORIES = [_hit(i) for i in range(39)] + [_hit(39, title="Ask HN: How do you read papers?", url=None,
+                                               story_text="<p>I struggle &amp; wonder.</p>")]
+TOO_OLD = _hit(60, points=900, created_at_i=int((NOW - timedelta(hours=37)).timestamp()))
+
+
+def _hn_rows():
+    return db.fetchall("select id::text, space, metadata->'hn' as hn from items where metadata ? 'hn'")
+
+
+def test_run_adds_the_30_best(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES + [TOO_OLD])
+    assert hn.run(NOW) == {"added": 30, "skipped": 0}
+    rows = _hn_rows()
+    assert len(rows) == 30 and {r["space"] for r in rows} == {"hn"}
+    assert min(r["hn"]["points"] for r in rows) == 51
+    assert TOO_OLD["objectID"] not in {r["hn"]["id"] for r in rows}
+    ask = next(r["hn"] for r in rows if r["hn"]["id"] == "1039")
+    assert set(ask) >= {"id", "points", "comments", "author", "discussion_url", "posted_at", "text"}
+    assert ask["discussion_url"] == "https://news.ycombinator.com/item?id=1039" and ask["comments"] == 44
+    assert db.fetchone("select input_url from items where metadata->'hn'->>'id' = '1039'")["input_url"] \
+        == "https://news.ycombinator.com/item?id=1039"
+    assert hn.run(NOW + timedelta(hours=1)) == {"added": 0, "skipped": 0}      # at most 30 a day
+
+
+def test_run_due_once_a_day(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES)
+    assert hn.run_due(NOW.replace(hour=5)) is None
+    assert hn.run_due(NOW.replace(hour=6))["added"] == 30
+    assert hn.run_due(NOW.replace(hour=7)) is None
+    monkeypatch.setattr(get_settings(), "hn_enabled", False)
+    assert hn.run_due(NOW + timedelta(days=1)) is None
+
+
+def test_failed_run_retries(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES, fail=RuntimeError("HN is down"))
+    with pytest.raises(RuntimeError):
+        hn.run_due(NOW)
+    fake_hn(monkeypatch, STORIES)
+    assert hn.run_due(NOW + timedelta(minutes=1))["added"] == 30
+
+
+def test_already_saved_article_is_skipped(hn_client, monkeypatch):
+    saved = _saved(hn_client, "https://blog.example.com/x")
+    fake_hn(monkeypatch, STORIES + [_hit(70, points=900, url="https://blog.example.com/x?utm_source=hn",
+                                                 created_at_i=STORIES[0]["created_at_i"])])
+    assert hn.run(NOW) == {"added": 30, "skipped": 1}
+    assert "1070" not in {r["hn"]["id"] for r in _hn_rows()}
+    assert db.fetchone("select space from items where id = %s", (saved,))["space"] == "main"
+
+
+def test_deleted_story_is_not_readded(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES)
+    hn.run(NOW)
+    gone = next(r for r in _hn_rows() if r["hn"]["id"] == "1012")      # posted 9 hours before the first run
+    assert hn_client.delete(f"/api/items/{gone['id']}", headers=AUTH).status_code == 200
+    assert hn.run(NOW + timedelta(days=1))["added"] == 10             # the 10 left in the window, not the deleted one
+    assert "1012" not in {r["hn"]["id"] for r in _hn_rows()}
+
+
+def test_concurrent_run_is_busy(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES)
+    with hn._lock:
+        assert hn.run(NOW) == {"busy": True}
+    assert not _hn_rows()
+
+
+def test_run_endpoint(hn_client, monkeypatch):
+    fake_hn(monkeypatch, STORIES)
+    monkeypatch.setattr(hn, "_now", lambda: NOW)
+    assert hn_client.post("/api/hn/run", headers=AUTH).json() == {"added": 30, "skipped": 0}

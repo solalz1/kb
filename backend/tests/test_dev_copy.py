@@ -68,3 +68,26 @@ def test_jobs_and_syncs_from_a_copy_run_on_the_real_kb(client, monkeypatch):
     assert client.post("/api/notion/sync", headers={**AUTH, "x-kb-forwarded": "1"}).json()["ok"] is True
     assert len(sent) == 2
     assert client.get("/api/health").json()["real_url"] == "https://kb.example.com"
+
+
+def test_hn_run_from_a_copy_runs_on_the_real_kb(client, monkeypatch):
+    """« Récupérer maintenant » in a copy: the real KB runs it (its worker reads the stories), never the copy."""
+    from app import hn, main
+
+    from .test_e2e import AUTH
+
+    s = get_settings()
+    monkeypatch.setattr(s, "dev_copy", True)
+    monkeypatch.setattr(s, "public_base_url", "https://kb.example.com")
+    sent = []
+
+    class Answer:
+        status_code = 200
+
+        def json(self):
+            return {"added": 30, "skipped": 0}
+
+    monkeypatch.setattr(main.httpx, "post", lambda url, **kw: sent.append(url) or Answer())
+    monkeypatch.setattr(hn, "run", lambda now=None: (_ for _ in ()).throw(AssertionError("no run in the copy")))
+    assert client.post("/api/hn/run", headers=AUTH).json() == {"added": 30, "skipped": 0}
+    assert sent == ["https://kb.example.com/api/hn/run"]

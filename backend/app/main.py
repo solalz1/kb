@@ -26,7 +26,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, folders, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
+from . import chat, costs, db, export, folders, hn, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -947,6 +947,19 @@ def _on_the_real_kb(request: Request, path: str, body: dict | None = None) -> di
     if r.status_code >= 400:
         raise HTTPException(r.status_code, (data.get("detail") if isinstance(data, dict) else None) or "La KB principale a refusé.")
     return data if isinstance(data, dict) else {"ok": True}
+
+
+@api.post("/api/hn/run", dependencies=auth)
+def run_hn(request: Request):
+    """« Récupérer maintenant » on the HN page: today's best stories, now (at most HN_DAILY_COUNT a day)."""
+    if (forwarded := _on_the_real_kb(request, "/api/hn/run")) is not None:
+        return forwarded
+    if not settings.hn_enabled:
+        raise HTTPException(400, "L'espace HN est désactivé (HN_ENABLED=false)")
+    try:
+        return hn.run()
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, "Hacker News ne répond pas : réessaie dans un instant.") from exc
 
 
 class DigestRequest(BaseModel):
