@@ -76,7 +76,7 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     monkeypatch.setattr(extractors, "extract_url", lambda url: Extracted(
         kind="article", title="Mesurer un agent sur de vraies tâches", source_url=url, author="Jane Doe",
         content="Un benchmark d'agents doit utiliser de vraies tâches et mesurer le coût. " * 30))
-    contexts, problems = [], []
+    contexts, browsers, problems = [], [], []
 
     def open_page(path: str = "/", viewport: dict = PHONE, lang: str = "fr", signed_in: bool = True,
                   expected_status: int | None = None, touch: bool = False, expected_errors: tuple = (),
@@ -85,8 +85,15 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
         `touch`: a touch screen, as on an iPhone (see _swipe).
         `expected_errors`: console errors the test causes on purpose (a page made to crash), by a piece of their text.
         `setup`: called with the browser context before the page opens (cookies, routes)."""
-        ctx = browser.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
-                                  has_touch=touch)
+        # a touch screen gets a Chromium of its own: after an earlier test's swipe from the left edge, Chromium
+        # sometimes takes the first touchmove of the next one, in another context, for a scroll of its own
+        # (pointercancel, then no more touch events), and the swipe never reaches the page
+        owner = browser
+        if touch:
+            owner = browser.browser_type.launch()
+            browsers.append(owner)
+        ctx = owner.new_context(viewport=viewport, base_url=server, locale="fr-FR", timezone_id="Europe/Paris",
+                                has_touch=touch)
         # first visit only: switching the language in the app (which reloads it) must stick
         init = f"if (!localStorage.getItem('kb_lang')) localStorage.setItem('kb_lang', '{lang}');"
         if signed_in:
@@ -107,6 +114,8 @@ def site(browser, server, clean_db, fake_llm, monkeypatch):
     yield open_page
     for ctx in contexts:
         ctx.close()
+    for b in browsers:
+        b.close()
     assert not problems, "\n".join(problems)
 
 
