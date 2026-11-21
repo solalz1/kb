@@ -68,6 +68,13 @@ export interface JournalEntry {
   day: string;
 }
 
+/** « Ce jour-là »: what was written on the same day some months or years before. */
+export interface JournalEcho {
+  months: number;               // 1, 3, 6, then 12, 24… (years)
+  date: string;
+  entries: JournalEntry[];
+}
+
 export interface ItemTranslation { title?: string | null; summary?: string | null; key_points?: string[]; use_cases?: string[] }
 
 export interface Entity { name: string; type: string }
@@ -124,6 +131,8 @@ export interface NotionStatus {
   synced?: number;
   pending?: number;
   url?: string | null;
+  journal_url?: string | null;  // the Journal database: one page per day written
+  journal_days?: number;
   last_sync_at?: string | null;
   last_error?: string | null;
   last_error_at?: string | null;
@@ -523,7 +532,7 @@ export const api = {
   runHn: () => request<{ added?: number; skipped?: number; busy?: boolean }>("/api/hn/run", { method: "POST" }),
   journalMonth: (month: string) =>
     request<{ month: string; today: string; days: Record<string, number> }>(`/api/journal${qs({ month })}`),
-  journalDay: (day: string) => request<{ date: string; entries: JournalEntry[] }>(`/api/journal/${day}`),
+  journalDay: (day: string) => request<{ date: string; entries: JournalEntry[]; echoes?: JournalEcho[] }>(`/api/journal/${day}`),
   reprocess: (id: string) => request<{ ok: boolean }>(`/api/items/${id}/reprocess`, { method: "POST" }),
   ingest: (body: { url?: string; text?: string; note?: string; space?: Space; category?: string; folder?: string;
                    entry_date?: string }) =>

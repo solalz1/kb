@@ -4,6 +4,7 @@ Shared by the API (the calendar), advice mode (the recent days, read in full) an
 
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,8 @@ WHERE = "space = 'perso' and category = 'journal' and not archived"
 RECENT_DAYS = 14          # advice mode reads these last days of the journal in full
 RECENT_BUDGET = 12_000    # characters of journal text sent with them, newest first
 MAX_RANGE_DAYS = 90       # get_journal: the longest period asked at once
+# « Ce jour-là »: the same day 1, 3 and 6 months ago, then every year back to 10 years
+ECHO_MONTHS = (1, 3, 6, *(12 * n for n in range(1, 11)))
 
 _WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 _MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
@@ -98,3 +101,33 @@ def recent(today: date, days: int = RECENT_DAYS, budget: int = RECENT_BUDGET) ->
         r["excerpts"] = [text[:6000]] if text else []
         out.append(r)
     return out
+
+
+def months_before(day: date, months: int) -> date:
+    """The same day `months` months earlier; a day the month doesn't have (the 31st) is its last day."""
+    y, m = divmod(day.year * 12 + day.month - 1 - months, 12)
+    return date(y, m + 1, min(day.day, calendar.monthrange(y, m + 1)[1]))
+
+
+def ago(months: int) -> str:
+    """« il y a 3 mois », « il y a 1 an », « il y a 2 ans »."""
+    if months % 12:
+        return f"il y a {months} mois"
+    years = months // 12
+    return f"il y a {years} an" + ("s" if years > 1 else "")
+
+
+def echoes(day: date) -> list[dict]:
+    """« Ce jour-là »: what was written on the same day 1, 3, 6 months and 1 to 10 years before `day`, only for the
+    dates that have something, the nearest first. Each: {months, date, entries}."""
+    targets = {months_before(day, n): n for n in ECHO_MONTHS}
+    rows = db.fetchall(
+        f"""select id::text, kind, status, title, coalesce(input_text, summary, title) as text, source_url,
+                   created_at, updated_at, {day_sql()} as day
+            from items where {WHERE} and {day_sql()} = any(%(days)s) order by {day_sql()} desc, created_at""",
+        {"tz": tz(), "days": list(targets)},
+    )
+    found: dict[date, list[dict]] = {}
+    for r in rows:
+        found.setdefault(r["day"], []).append(r)
+    return [{"months": targets[d], "date": d, "entries": found[d]} for d in sorted(found, reverse=True)]

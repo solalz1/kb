@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useQuery } from "../cache";
-import { dayLabel, keyOf } from "../days";
+import { agoLabel, dayLabel, journalHref, keyOf } from "../days";
 import { t } from "../i18n";
 import { IconCalendar, IconSpinner } from "../icons";
 import { Link } from "../nav";
@@ -20,6 +20,8 @@ export function JournalToday() {
   const [saved, setSaved] = useState(false);
   const n = entries?.length ?? 0;
   const last = entries?.length ? entries[entries.length - 1] : null;
+  // the furthest « Ce jour-là »: a year ago reads better than a month ago
+  const echo = day.data?.echoes?.length ? day.data.echoes[day.data.echoes.length - 1] : null;
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +72,12 @@ export function JournalToday() {
         <button type="button" className="btn small primary jt-write" onClick={() => { setWriting(true); setSaved(false); }}>{t("Écrire")}</button>
       )}
       {error && <div className="error-box">{error}</div>}
+      {echo && (
+        <Link className="jt-echo" to={journalHref(echo.date, today)}>
+          <span className="meta"><b>{t("Ce jour-là")}</b> · {agoLabel(echo.months).toLowerCase()}</span>
+          <span className="t">{echo.entries[0].kind === "note" ? echo.entries[0].text : echo.entries[0].title}</span>
+        </Link>
+      )}
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import { lang, locale } from "./i18n";
+import { lang, locale, t } from "./i18n";
 
 /** "2026-10-07" for a local date (never toISOString: that would be the UTC day). */
 export const keyOf = (d: Date) =>
@@ -18,6 +18,11 @@ export const capitalize = (s: string) => (lang === "fr" ? s.charAt(0).toUpperCas
 /** "Samedi 21 novembre 2026" (without the year: "Samedi 21 novembre"). */
 export const dayLabel = (d: Date, year = true) =>
   capitalize(d.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", ...(year ? { year: "numeric" } : {}) }));
+
+/** « Il y a 3 mois », « Il y a 1 an », « Il y a 2 ans ». */
+export const agoLabel = (months: number) =>
+  months % 12 ? (months > 1 ? t("Il y a {n} mois", { n: months }) : t("Il y a 1 mois"))
+    : months === 12 ? t("Il y a 1 an") : t("Il y a {n} ans", { n: months / 12 });
 
 /** Where a journal day opens: /journal for today, /journal/<day> otherwise. */
 export const journalHref = (key: string, today = keyOf(new Date())) => (key === today ? "/journal" : `/journal/${key}`);

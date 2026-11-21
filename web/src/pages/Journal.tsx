@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { api, type JournalEntry } from "../api";
 import { useQuery } from "../cache";
 import { Lines } from "../components/Skeleton";
-import { capitalize, dayLabel, isDayKey, journalHref, keyOf, parseKey } from "../days";
+import { agoLabel, capitalize, dayLabel, isDayKey, journalHref, keyOf, parseKey } from "../days";
 import { locale, t } from "../i18n";
 import { IconBack, IconEdit, IconNext, IconPrev, IconSpinner, IconTrash } from "../icons";
 import { useDesktop } from "../layout";
@@ -47,6 +47,7 @@ export default function Journal() {
   const counts = monthQuery.data?.days ?? {};
   const dayQuery = useQuery(keys.journalDay(selected), () => api.journalDay(selected));
   const entries = dayQuery.data?.entries ?? null;
+  const echoes = dayQuery.data?.echoes ?? [];
   useEffect(() => { setEditing(null); setError(""); }, [selected]);
   // following a link to another month's day shows that month
   useEffect(() => {
@@ -208,6 +209,20 @@ export default function Journal() {
             </div>
           </form>
           {(error || dayQuery.error || monthQuery.error) && <div className="error-box">{error || dayQuery.error || monthQuery.error}</div>}
+
+          {echoes.length > 0 && (
+            <section className="echoes" aria-labelledby="echoes-title">
+              <h3 id="echoes-title">{t("Ce jour-là")}</h3>
+              {echoes.map((echo) => (
+                <Link key={echo.date} className="echo" to={journalHref(echo.date, todayKey)} viewTransition={false}>
+                  <span className="meta"><b>{agoLabel(echo.months)}</b> · {dayLabel(parseKey(echo.date))}</span>
+                  <span className="t">{echo.entries[0].kind === "note" ? echo.entries[0].text : echo.entries[0].title}</span>
+                  {echo.entries.length > 1 && <span className="more">{echo.entries.length > 2
+                    ? t("et {n} autres notes", { n: echo.entries.length - 1 }) : t("et 1 autre note")}</span>}
+                </Link>
+              ))}
+            </section>
+          )}
         </section>
       </div>
     </div>

@@ -813,7 +813,7 @@ def journal_month(month: str | None = None):
 @api.get("/api/journal/{day}", dependencies=auth)
 def journal_day(day: date):
     """The day's journal notes, in the order they were written: the user's own text, whatever their processing."""
-    return {"date": day.isoformat(), "entries": journal.entries(day, day)}
+    return {"date": day.isoformat(), "entries": journal.entries(day, day), "echoes": journal.echoes(day)}
 
 
 # ---------------------------------------------------------------------------

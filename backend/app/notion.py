@@ -11,11 +11,12 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from . import db, locales
+from . import db, journal, locales
 from .config import get_settings
 
 log = logging.getLogger(__name__)
@@ -28,7 +29,9 @@ SWEEP_EVERY = 600          # secondes entre deux passes quand rien ne réveille 
 MAX_BODY = 60_000          # caractères de contenu copiés pour un élément capturé (une note est copiée en entier)
 SHORT_BODY = 8_000         # repli si Notion refuse un contenu trop long ou trop complexe
 STATE_KEY = "notion"
+JOURNAL_KEY = "notion_journal"    # kb_settings: {"days": {"2026-11-21": {"page": <page id>, "hash": <its notes>}}}
 LIVE = "(status = 'ready' or (status = 'error' and kind = 'note' and input_text is not null))"
+IS_JOURNAL = "(space = 'perso' and category = 'journal')"   # copied as days in the Journal database, not as cards
 
 wake_event = threading.Event()
 _pass_lock = threading.Lock()
@@ -150,6 +153,17 @@ def _forget_pages() -> None:
     db.execute("update items set notion_page_id = null, notion_synced_at = null "
                "where notion_page_id is not null or notion_synced_at is not null")
     db.execute("delete from notion_trash")
+
+
+def _journal_state() -> dict:
+    row = db.fetchone("select value from kb_settings where key = %s", (JOURNAL_KEY,))
+    return dict(row["value"]) if row else {"days": {}}
+
+
+def _save_journal_state(value: dict) -> None:
+    db.execute("""insert into kb_settings (key, value) values (%s, %s)
+                  on conflict (key) do update set value = excluded.value, updated_at = now()""",
+               (JOURNAL_KEY, db.jsonb(value)))
 
 
 # ---------------------------------------------------------------------------
@@ -395,10 +409,10 @@ def sync_pending(limit: int = BATCH) -> dict:
         synced, failed = 0, 0
         for it in rows:
             try:
-                if it["space"] in spaces:
+                if it["space"] in spaces and not _in_journal(it):
                     page_id = upsert_page(state, it, lang)
-                else:                       # espace exclu de la copie (NOTION_SPACES) : la page part à la corbeille
-                    _trash(it["notion_page_id"])
+                else:                       # espace exclu de la copie (NOTION_SPACES), ou une note du journal, copiée
+                    _trash(it["notion_page_id"])    # avec son jour dans la base Journal : la page part à la corbeille
                     page_id = None
             except DataSourceGone:
                 log.warning("Base Notion introuvable : elle sera recréée")
@@ -423,13 +437,177 @@ def sync_pending(limit: int = BATCH) -> dict:
                 wake_event.set()
             synced += 1
 
+        days_left = 0
+        if "perso" in spaces:
+            try:
+                state, written, days_failed, days_left, error = sync_journal(state, lang, limit)
+            except DataSourceGone:
+                log.warning("Base Notion Journal introuvable : elle sera recréée")
+                _save_state(journal_data_source_id=None, journal_database_id=None, journal_url=None)
+                _save_journal_state({"days": {}})
+                wake_event.set()
+                written, days_failed, error = 0, 0, None
+            synced, failed = synced + written, failed + days_failed
+            last_error = error or last_error
+
         remaining = db.fetchone(
             f"select count(*)::int n from items where notion_synced_at is null and {LIVE} and space = any(%s)",
             (spaces,),
-        )["n"]
+        )["n"] + days_left
         _save_state(last_sync_at=_now(), last_error=last_error,
                     last_error_at=_now() if last_error else state.get("last_error_at"))
         return {"enabled": True, "synced": synced, "trashed": trashed, "failed": failed, "remaining": remaining}
+
+
+def _in_journal(it: dict) -> bool:
+    return it.get("space") == "perso" and it.get("category") == "journal"
+
+
+# ---------------------------------------------------------------------------
+# The journal: a database of its own, one page per day written
+# ---------------------------------------------------------------------------
+
+def _journal_schema(lang: str) -> dict:
+    p = locales.journal_props(lang)
+    return {p["name"]: {"type": "title", "title": {}}, p["day"]: {"type": "date", "date": {}},
+            p["notes"]: {"type": "number", "number": {"format": "number"}}, p["kb_url"]: {"type": "url", "url": {}}}
+
+
+def ensure_journal_database(state: dict, lang: str) -> dict:
+    """The Journal database, next to the Knowledge base one. A new parent page or language: a new database, every day
+    written again there (the old one stays in Notion, untouched)."""
+    parent = parent_page_id()
+    if (state.get("journal_data_source_id") and state.get("journal_parent_page_id") == parent
+            and state.get("journal_language") == lang):
+        return state
+    _save_journal_state({"days": {}})
+    created = _request("POST", "/databases", {
+        "parent": {"type": "page_id", "page_id": parent},
+        "title": [{"type": "text", "text": {"content": locales.journal_props(lang)["title"]}}],
+        "icon": {"type": "emoji", "emoji": "📔"},
+        "initial_data_source": {"properties": _journal_schema(lang)},
+    })
+    sources = created.get("data_sources") or []
+    if not sources:
+        raise NotionError(500, "no_data_source", "Notion n'a pas renvoyé de source de données pour la base Journal")
+    log.info("Base Notion Journal créée : %s", created.get("url"))
+    return _save_state(journal_parent_page_id=parent, journal_database_id=created["id"],
+                       journal_data_source_id=sources[0]["id"], journal_url=created.get("url"), journal_language=lang)
+
+
+def _journal_days() -> dict[str, dict]:
+    """Every day of the journal, with a fingerprint of its notes: a day whose fingerprint changed is written again."""
+    day = journal.day_sql()
+    rows = db.fetchall(
+        f"""select {day} as day, count(*)::int as n,
+                   md5(string_agg(id::text || '@' || updated_at::text, ',' order by created_at, id)) as hash
+            from items where {journal.WHERE} group by 1""",
+        {"tz": journal.tz()},
+    )
+    return {r["day"].isoformat(): {"hash": r["hash"], "n": r["n"]} for r in rows}
+
+
+def _day_entries(day: date) -> list[dict]:
+    return db.fetchall(
+        f"""select id::text, kind, title, coalesce(input_text, content) as text, summary, source_url, created_at
+            from items where {journal.WHERE} and {journal.day_sql()} = %(day)s order by created_at, id""",
+        {"tz": journal.tz(), "day": day},
+    )
+
+
+def day_markdown(entries: list[dict], max_note: int | None = None, lang: str = "fr") -> str:
+    """A day of the journal: each note at its time, the user's words as they are; a link with its title, address and
+    summary."""
+    tz = ZoneInfo(journal.tz())
+    parts = []
+    for e in entries:
+        time = e["created_at"].astimezone(tz).strftime("%H:%M")
+        if e["kind"] == "note":
+            text = (e["text"] or "").strip()
+            if max_note and len(text) > max_note:
+                text = text[:max_note] + f"\n\n*[{locales.text(lang)['note_truncated']}]*"
+            parts.append(f"**{time}**\n\n{_md(text)}")
+        else:
+            title = _md(e["title"] or f"({locales.text(lang)['untitled']})")
+            url = _url(e["source_url"])
+            head = f"**{time}** · " + (f"[{title}]({url})" if url else title)
+            parts.append(head + (f"\n\n{_md(e['summary'])}" if e.get("summary") else ""))
+    return "\n\n---\n\n".join(parts) or "*(vide)*"
+
+
+def _day_properties(day: date, n: int, lang: str) -> dict:
+    p = locales.journal_props(lang)
+    return {p["name"]: {"title": _text(locales.day_title(day, lang))}, p["day"]: {"date": {"start": day.isoformat()}},
+            p["notes"]: {"number": n}, p["kb_url"]: {"url": _url(get_settings().journal_url(day.isoformat()))}}
+
+
+def _write_day(state: dict, page_id: str | None, day: date, lang: str) -> str:
+    entries = _day_entries(day)
+    props = _day_properties(day, len(entries), lang)
+    variants = [day_markdown(entries, lang=lang), day_markdown(entries, max_note=SHORT_BODY, lang=lang)]
+    if page_id:
+        try:
+            _request("PATCH", f"/pages/{page_id}", {"properties": props, "in_trash": False})
+        except NotionError as exc:
+            if exc.status != 404:
+                raise
+            log.info("Page Notion du journal %s supprimée : recréée", day)
+        else:
+            for i, md in enumerate(variants):
+                try:
+                    _request("PATCH", f"/pages/{page_id}/markdown",
+                             {"type": "replace_content", "replace_content": {"new_str": md}})
+                    return page_id
+                except NotionError as exc:
+                    if exc.status != 400 or i == len(variants) - 1:
+                        raise
+    base = {"parent": {"type": "data_source_id", "data_source_id": state["journal_data_source_id"]}, "properties": props}
+    for i, md in enumerate(variants):
+        try:
+            return _request("POST", "/pages", {**base, "markdown": md})["id"]
+        except NotionError as exc:
+            if exc.status == 404:
+                raise DataSourceGone(exc.status, exc.code, str(exc)) from exc
+            if exc.status != 400 or i == len(variants) - 1:
+                raise
+    raise AssertionError("inaccessible")
+
+
+def sync_journal(state: dict, lang: str, limit: int = BATCH) -> tuple[dict, int, int, int, str | None]:
+    """Writes the days whose notes changed, sends the days left empty to the trash.
+    Returns (state, days written, days failed, days still to write, last error)."""
+    current = _journal_days()
+    saved = _journal_state()
+    known: dict[str, dict] = saved.get("days") or {}
+    if not current and not known:
+        return state, 0, 0, 0, None
+    state = ensure_journal_database(state, lang)
+    known = _journal_state().get("days") or {}          # a new database starts with no day
+    gone = [d for d in known if d not in current]
+    todo = sorted((d for d, v in current.items() if (known.get(d) or {}).get("hash") != v["hash"]), reverse=True)
+    written, failed, error = 0, 0, None
+    for d in gone[:limit]:
+        try:
+            _trash(known[d].get("page"))
+        except NotionError as exc:
+            failed, error = failed + 1, f"journal du {d} : {exc}"
+            continue
+        known.pop(d)
+        _save_journal_state({"days": known})
+    for d in todo[:limit]:
+        try:
+            page = _write_day(state, (known.get(d) or {}).get("page"), date.fromisoformat(d), lang)
+        except DataSourceGone:
+            raise
+        except NotionError as exc:
+            failed, error = failed + 1, f"journal du {d} : {exc}"
+            log.warning("Copie Notion du journal du %s impossible : %s", d, exc)
+            continue
+        known[d] = {"page": page, "hash": current[d]["hash"]}
+        _save_journal_state({"days": known})
+        written += 1
+    left = max(0, len(todo) - limit) + max(0, len(gone) - limit) + failed
+    return state, written, failed, left, error
 
 
 def status() -> dict:
@@ -448,7 +626,8 @@ def status() -> dict:
         (s.notion_space_list,),
     )
     out.update(counts)
-    out.update({k: state.get(k) for k in ("url", "last_sync_at", "last_error", "last_error_at")})
+    out.update({k: state.get(k) for k in ("url", "journal_url", "last_sync_at", "last_error", "last_error_at")})
+    out["journal_days"] = len(_journal_state().get("days") or {})
     return out
 
 

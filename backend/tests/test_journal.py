@@ -262,3 +262,36 @@ def test_the_connector_reads_the_journal(client):
     assert "(Journal du jeudi 2 avril 2026" in listed
     found = _tool(client, "search_kb", query="printemps", space="perso")
     assert "Perso · Journal du jeudi 2 avril 2026" in found
+
+
+def test_on_this_day(client):
+    """« Ce jour-là »: the same day 1, 3, 6 months and 1 to 10 years before, only the dates with something."""
+    from app import journal
+
+    assert journal.months_before(date(2026, 3, 31), 1) == date(2026, 2, 28)      # no 31 February: its last day
+    assert journal.months_before(date(2028, 3, 31), 1) == date(2028, 2, 29)
+    assert journal.months_before(date(2026, 1, 15), 3) == date(2025, 10, 15)
+    assert journal.months_before(date(2026, 11, 21), 120) == date(2016, 11, 21)
+    assert [journal.ago(n) for n in (1, 3, 12, 24)] == ["il y a 1 mois", "il y a 3 mois", "il y a 1 an", "il y a 2 ans"]
+
+    _write(client, "Aujourd'hui.", "2026-11-21")
+    _write(client, "Un mois avant.", "2026-10-21")
+    _write(client, "Un an avant, le matin.", "2025-11-21")
+    _write(client, "Un an avant, le soir.", "2025-11-21")
+    _write(client, "Cinq ans avant.", "2021-11-21")
+    _write(client, "Deux mois avant : pas un rendez-vous.", "2026-09-21")
+    _write(client, "Onze ans avant : trop loin.", "2015-11-21")
+    body = client.get("/api/journal/2026-11-21", headers=AUTH).json()
+    assert [e["text"] for e in body["entries"]] == ["Aujourd'hui."]
+    echoes = body["echoes"]
+    assert [(e["months"], e["date"]) for e in echoes] == [(1, "2026-10-21"), (12, "2025-11-21"), (60, "2021-11-21")]
+    assert [e["text"] for e in echoes[1]["entries"]] == ["Un an avant, le matin.", "Un an avant, le soir."]
+    assert client.get("/api/journal/2026-11-22", headers=AUTH).json()["echoes"] == []
+
+    from .test_e2e import _mcp
+
+    r = _mcp(client, "/mcp/mcp-secret", "tools/call", {"name": "get_journal", "arguments": {"day": "2026-11-21"}})
+    text = r.json()["result"]["content"][0]["text"]
+    assert "## Ce jour-là" in text
+    assert text.index("### Il y a 1 mois · Journal du mercredi 21 octobre 2026") < text.index("### Il y a 1 an · ")
+    assert "Cinq ans avant." in text and "trop loin" not in text and "pas un rendez-vous" not in text

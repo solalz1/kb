@@ -37,7 +37,8 @@ Outils :
   recopier le journal.
 - get_journal pour lire son journal (une page par jour) : un jour précis (« qu'est-ce que j'ai écrit le 3 novembre ? »,
   « hier »), une période, ou, sans argument, ses 7 derniers jours. Convertis toi-même les dates relatives en AAAA-MM-JJ
-  à partir de la date du jour que l'outil indique.
+  à partir de la date du jour que l'outil indique. Pour un jour, il ajoute « Ce jour-là » (le même jour il y a 1, 3,
+  6 mois, 1 an…) : utile pour « qu'est-ce que je vivais il y a un an ? ».
 - Cite toujours les éléments utilisés avec leur URL d'origine (« Source originale ») et, si utile, le lien « Fiche KB ».
 - Distingue clairement ce qui vient de sa KB de tes connaissances générales.
 - get_digest : son digest tech du jour (kind="daily") ou de la semaine (kind="weekly"), avec les projets proposés ;
@@ -158,6 +159,7 @@ def _day_arg(value: str | None, name: str) -> date | None:
 @mcp.tool()
 async def get_journal(day: str | None = None, start: str | None = None, end: str | None = None) -> str:
     """Son journal : ce qu'il a écrit chaque jour, ses pensées et ses notes, dans l'ordre d'écriture, avec leur date.
+    Pour un jour précis, ajoute « Ce jour-là » : ce qu'il avait écrit le même jour il y a 1, 3, 6 mois et 1 à 10 ans.
 
     Args:
         day: un jour précis, AAAA-MM-JJ.
@@ -184,20 +186,31 @@ async def get_journal(day: str | None = None, start: str | None = None, end: str
         first = last - timedelta(days=journal.MAX_RANGE_DAYS - 1)
         note = f" (période ramenée aux {journal.MAX_RANGE_DAYS} derniers jours demandés)"
     rows = await _run(journal.entries, first, last)
+    echoes = await _run(journal.echoes, first) if first == last else []
     span = journal.label(first) if first == last else f"Journal du {journal.day_name(first)} au {journal.day_name(last)}"
     head = f"Aujourd'hui : {today.isoformat()}. {span}{note}."
+    out = [head]
     if not rows:
-        return f"{head}\n\nRien d'écrit dans son journal sur cette période."
-    s = get_settings()
-    out, current = [head], None
+        out.append("\nRien d'écrit dans son journal sur cette période.")
+    current = None
     for r in rows:
         if r["day"] != current:
             current = r["day"]
             out.append(f"\n## {journal.label(current)} ({current.isoformat()})")
-        time = r["created_at"].astimezone(ZoneInfo(journal.tz())).strftime("%H:%M")
-        text = (r["text"] or "").strip() if r["kind"] == "note" else f"{r['title'] or '(sans titre)'} : {r['source_url'] or ''}"
-        out.append(f"\n{time} · {text}\nFiche KB : {s.item_url(r['id'])}")
+        out.append(_journal_line(r))
+    if echoes:
+        out.append("\n## Ce jour-là : le même jour, les mois et les années d'avant")
+        for echo in echoes:
+            out.append(f"\n### {journal.ago(echo['months']).capitalize()} · {journal.label(echo['date'])} "
+                       f"({echo['date'].isoformat()})")
+            out.extend(_journal_line(r) for r in echo["entries"])
     return "\n".join(out)
+
+
+def _journal_line(r: dict) -> str:
+    time = r["created_at"].astimezone(ZoneInfo(journal.tz())).strftime("%H:%M")
+    text = (r["text"] or "").strip() if r["kind"] == "note" else f"{r['title'] or '(sans titre)'} : {r['source_url'] or ''}"
+    return f"\n{time} · {text}\nFiche KB : {get_settings().item_url(r['id'])}"
 
 
 @mcp.tool()

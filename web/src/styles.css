@@ -1139,6 +1139,19 @@ label.group-row { cursor: pointer; }
 .journal-today .jt-write { align-self: flex-start; }
 .journal-today .composer-journal .field { background: var(--surface); }
 .journal-today .composer-journal .btn { flex: none; }
+.jt-echo { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink); }
+@media (hover: hover) { .jt-echo:hover { color: var(--ink); } .jt-echo:hover .t { text-decoration: underline; text-decoration-color: var(--line); } }
+.jt-echo .meta, .echo .meta { font-size: 12px; color: var(--ink-3); }
+.jt-echo .meta b, .echo .meta b { font-weight: 600; color: var(--accent-ink); }
+.jt-echo .t, .echo .t {
+  font-family: var(--serif); font-size: 16px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.echoes { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
+.echoes h3 { margin: 0; font-family: var(--serif); font-size: 19px; font-weight: 500; }
+.echo { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); }
+@media (hover: hover) { .echo:hover { color: var(--ink); border-color: var(--ink-3); } }
+.echo .more { font-size: 13px; color: var(--ink-3); }
 @media (min-width: 900px) {
   .journal-layout { flex-direction: row; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
   .calendar { flex: 0 1 340px; padding: 20px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); position: sticky; top: 24px; }

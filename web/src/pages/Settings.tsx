@@ -287,6 +287,7 @@ function Notion() {
       {notion.last_error && <p className="hint" style={{ color: "var(--accent-ink)" }}>{t("Dernière erreur :")} {notion.last_error}</p>}
       <div className="btn-row">
         {notion.url && <a className="btn small" href={notion.url} target="_blank" rel="noreferrer">{t("Ouvrir la base Notion")}</a>}
+        {notion.journal_url && <a className="btn small" href={notion.journal_url} target="_blank" rel="noreferrer">{t("Ouvrir le journal dans Notion")}</a>}
         <button className="btn small" onClick={syncNow} disabled={syncing}>{syncing ? t("Synchronisation…") : t("Synchroniser maintenant")}</button>
       </div>
       {(notion.languages?.length ?? 0) > 1 && (

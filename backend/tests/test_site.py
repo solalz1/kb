@@ -323,6 +323,27 @@ def test_perso_shows_today_in_the_journal(site):
     expect(page.locator(".entry-text")).to_have_text("Une pensée en passant.")
 
 
+def test_on_this_day_in_the_journal(site):
+    page = site("/journal")
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()       # the browser's day, not the test runner's (UTC)
+    year_ago = today.replace(year=today.year - 1) if not (today.month == 2 and today.day == 29) else today.replace(year=today.year - 1, day=28)
+    _api(page, "POST", "/api/notes", content="Il y a un an : le premier jour du projet.", category="journal",
+         entry_date=year_ago.isoformat())
+    page.reload()
+    echo = page.locator(".echoes .echo")
+    expect(echo).to_have_count(1)
+    expect(echo).to_contain_text("Il y a 1 an")
+    expect(echo).to_contain_text("le premier jour du projet.")
+    echo.click()
+    expect(page).to_have_url(re.compile(rf"/journal/{year_ago.isoformat()}$"))
+    expect(page.locator(".entry-text")).to_have_text("Il y a un an : le premier jour du projet.")
+
+    page.goto("/perso")
+    teaser = page.locator(".journal-today .jt-echo")
+    expect(teaser).to_contain_text("Ce jour-là · il y a 1 an")
+    expect(teaser).to_contain_text("le premier jour du projet.")
+
+
 def test_phone_head_and_tab_bar(site):
     """On a phone, Veille's head carries the folders, the To do badge and the settings cog; the + in the tab bar opens
     Add."""

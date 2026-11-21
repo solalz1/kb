@@ -33,4 +33,12 @@ export default {
   "1 note aujourd'hui.": "1 note today.",
   "Écrire dans le journal d'aujourd'hui": "Write in today's journal",
   "Écrire": "Write",
+  // « Ce jour-là »: the same day, months and years before
+  "Ce jour-là": "On this day",
+  "Il y a 1 mois": "1 month ago",
+  "Il y a {n} mois": "{n} months ago",
+  "Il y a 1 an": "1 year ago",
+  "Il y a {n} ans": "{n} years ago",
+  "et 1 autre note": "and 1 more note",
+  "et {n} autres notes": "and {n} more notes",
 } as Record<string, string>;
