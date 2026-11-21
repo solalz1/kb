@@ -91,6 +91,8 @@ Every item gets a page in a Notion database, rewritten whenever it changes: a se
 5. Optional: `NOTION_SPACES=perso` to copy only the Perso space.
 6. Save the variables: Railway redeploys. Within a minute, a **Knowledge base** database appears in the page, then fills up (about 3 items per second). In the app, **Réglages → Copie dans Notion** shows the progress, the last error if any, and a **Synchroniser maintenant** button.
 
+The journal has a database of its own next to it, **Journal**: one page per day written (title « Samedi 21 novembre 2026 », a `Date` column for Notion's calendar view), with that day's notes in order, each at its time. It is written again whenever a note of the day changes; a day left empty goes to the trash. Journal notes don't appear a second time in **Knowledge base**. **Réglages → Copie dans Notion → Ouvrir le journal dans Notion** opens it. Leaving Perso out (`NOTION_SPACES=main`) leaves the journal out too.
+
 Good to know: the copy goes one way, from the app to Notion. Edit in the app; changes made in Notion are overwritten the next time the item changes. Deleting an item in the app moves its page to Notion's trash. If you delete the database, it's recreated and refilled. In Notion, add views: filter `Espace` = `Perso` and group by `Catégorie`, for example.
 
 Language: **Settings → Copy in Notion → Copy language** (French or English). Switching creates a new database with its columns, cards and headings in that language and copies everything into it; the old database stays in Notion until you delete it. The Markdown export has the same choice (**Export language**).

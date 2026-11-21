@@ -1130,13 +1130,13 @@ label.group-row { cursor: pointer; }
 .jt-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .jt-head h2 { margin: 0; font-family: var(--serif); font-size: 21px; font-weight: 500; letter-spacing: -0.01em; }
 .jt-day { font-size: 13px; color: var(--ink-3); }
-.jt-cal { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
+.jt-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.jt-cal { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; font-size: 14px; font-weight: 500; }
 .jt-count { margin: 0; font-size: 14px; color: var(--ink-2); }
 .jt-last {
   margin: 0; font-family: var(--serif); font-size: 17px; line-height: 1.4; color: var(--ink); white-space: pre-wrap;
   overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.journal-today .jt-write { align-self: flex-start; }
 .journal-today .composer-journal .field { background: var(--surface); }
 .journal-today .composer-journal .btn { flex: none; }
 .jt-echo { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink); }

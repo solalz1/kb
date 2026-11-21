@@ -47,7 +47,6 @@ export function JournalToday() {
       <div className="jt-head">
         <h2 id="journal-today-title">{t("Journal")}</h2>
         <span className="jt-day">{dayLabel(new Date(), false)}</span>
-        <Link className="jt-cal" to="/journal"><IconCalendar size={16} /> {t("Voir le calendrier")}</Link>
       </div>
       <p className="jt-count" aria-live="polite">
         {entries === null ? " "
@@ -69,7 +68,10 @@ export function JournalToday() {
           </div>
         </form>
       ) : (
-        <button type="button" className="btn small primary jt-write" onClick={() => { setWriting(true); setSaved(false); }}>{t("Écrire")}</button>
+        <div className="jt-actions">
+          <button type="button" className="btn small primary" onClick={() => { setWriting(true); setSaved(false); }}>{t("Écrire")}</button>
+          <Link className="jt-cal" to="/journal"><IconCalendar size={16} /> {t("Voir le calendrier")}</Link>
+        </div>
       )}
       {error && <div className="error-box">{error}</div>}
       {echo && (

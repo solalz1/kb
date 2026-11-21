@@ -52,7 +52,12 @@ update both.
     on the 5.x models and get `THINKING_ROOM` on top of their `max_tokens`; Settings → Réflexion (`kb_settings` key
     `thinking`) turns it off where the API allows: Haiku 5.5 `disabled`, Sonnet 5.5 `between_tools` (Opus 5.5 and
     Fable always think).
-  - `chat.py`: RAG, project mode and advice mode (`advise`: charter + Perso search + a little Veille), SSE.
+  - `chat.py`: RAG, project mode and advice mode (`advise`: charter + the last 14 days of the journal in full +
+    Perso search, older journal pages included + a little Veille), SSE.
+  - `journal.py`: the journal (Perso notes of category `journal`, one calendar day each: `entry_date`, or the day it
+    was written for older notes, `day_sql()`). `entries` for a day or a period (API, MCP `get_journal`), `recent` for
+    advice mode and `get_principles` (`RECENT_DAYS`, `RECENT_BUDGET`), `echoes` for « Ce jour-là » (`ECHO_MONTHS`:
+    1, 3, 6 months, 1 to 10 years; a 31st without one is the month's last day), French day labels.
   - `wiki.py`: the wiki (Karpathy's "LLM Wiki"): `wiki_pages` written by Claude, one per theme, concept, entity or book
     (never one per item), in five sections (`SECTIONS`: personal, research, reading, business, competitive). Content is
     Markdown with `[[Title]]` links (`links` keeps their lowercased targets, for backlinks) and `[src:xxxxxxxx]` item
@@ -78,7 +83,11 @@ update both.
     the user's own frontmatter (`metadata.frontmatter`) and subfolder (`metadata.folder`).
   - `notion.py`: optional one-way copy to a Notion database (API version `2026-03-11`, data sources, `markdown` page
     content, `in_trash`). A `Syncer` thread in the worker, throttled to ~3 req/s; deleted items go through the
-    `notion_trash` table; database IDs live in `kb_settings`.
+    `notion_trash` table; database IDs live in `kb_settings`. The journal has its own « Journal » database, one page
+    per day (`sync_journal`): each pass fingerprints every day's notes in SQL (ids + `updated_at`) and rewrites the
+    days whose fingerprint changed, trashing the days left empty (`kb_settings.notion_journal` keeps each day's page
+    and fingerprint), so no code path has to tell it what changed. Journal notes never get a card in the Knowledge
+    base database (`_in_journal`).
   - `costs.py`: Settings → Costs. Every paid call is recorded in `usage_log` (`costs.record*`, priced from the public
     price lists). The Claude Console Cost API (`ANTHROPIC_ADMIN_KEY`, cents per UTC day) and the X credit balance are
     synced and cached 10 min; tests never reach them (the autouse `billing_apis` fixture fakes `_http_get`).

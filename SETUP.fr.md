@@ -91,6 +91,8 @@ Chaque élément a sa page dans une base Notion, réécrite à chaque modificati
 5. Facultatif : `NOTION_SPACES=perso` pour ne copier que l'espace Perso.
 6. Enregistre les variables : Railway redéploie. En moins d'une minute, une base **Knowledge base** apparaît dans la page, puis se remplit (environ 3 éléments par seconde). Dans l'app, **Réglages → Copie dans Notion** montre l'avancement, la dernière erreur s'il y en a une, et un bouton **Synchroniser maintenant**.
 
+Le journal a sa propre base à côté, **Journal** : une page par jour écrit (titre « Samedi 21 novembre 2026 », une colonne `Date` pour la vue calendrier de Notion), avec les notes de ce jour dans l'ordre, chacune à son heure. Elle est réécrite dès qu'une note du jour change ; un jour vidé part à la corbeille. Les notes du journal n'apparaissent pas une deuxième fois dans **Knowledge base**. **Réglages → Copie dans Notion → Ouvrir le journal dans Notion** l'ouvre. Sans Perso dans la copie (`NOTION_SPACES=main`), pas de journal non plus.
+
 À savoir : la copie va dans un seul sens, de l'app vers Notion. Modifie dans l'app ; une retouche faite dans Notion est écrasée à la modification suivante de l'élément. Supprimer un élément dans l'app met sa page à la corbeille Notion. Si tu supprimes la base, elle est recréée et re-remplie. Dans Notion, ajoute des vues : par exemple un filtre `Espace` = `Perso`, groupé par `Catégorie`.
 
 Langue : **Réglages → Copie dans Notion → Langue de la copie** (français ou anglais). En changer crée une nouvelle base avec ses colonnes, ses fiches et ses intitulés dans cette langue et y recopie tout ; l'ancienne base reste dans Notion jusqu'à ce que tu la supprimes. L'export Markdown a le même choix (**Langue de l'export**).
