@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import anyio
 from mcp.server.mcpserver import MCPServer
 
-from . import chat, db, folders, pipeline, search
+from . import chat, db, folders, journal, pipeline, search
 from .config import get_settings
 from .formatting import item_markdown
 from .search import ITEM_FIELDS
@@ -31,7 +32,13 @@ Outils :
 - get_item pour lire un élément en entier avant d'en tirer une conclusion précise.
 - get_principles quand il demande un conseil sur sa vie, une décision personnelle ou une situation difficile : fonde
   ton conseil sur SES principes et SES valeurs (cite-les), signale quand deux principes se contredisent, ne fais pas
-  de morale, et propose de parler à un professionnel si la situation touche à sa santé ou à une crise.
+  de morale, et propose de parler à un professionnel si la situation touche à sa santé ou à une crise. get_principles
+  renvoie aussi son journal des 14 derniers jours : relie le conseil à ce qu'il vit en ce moment, avec les dates, sans
+  recopier le journal.
+- get_journal pour lire son journal (une page par jour) : un jour précis (« qu'est-ce que j'ai écrit le 3 novembre ? »,
+  « hier »), une période, ou, sans argument, ses 7 derniers jours. Convertis toi-même les dates relatives en AAAA-MM-JJ
+  à partir de la date du jour que l'outil indique. Pour un jour, il ajoute « Ce jour-là » (le même jour il y a 1, 3,
+  6 mois, 1 an…) : utile pour « qu'est-ce que je vivais il y a un an ? ».
 - Cite toujours les éléments utilisés avec leur URL d'origine (« Source originale ») et, si utile, le lien « Fiche KB ».
 - Distingue clairement ce qui vient de sa KB de tes connaissances générales.
 - get_digest : son digest tech du jour (kind="daily") ou de la semaine (kind="weekly"), avec les projets proposés ;
@@ -105,8 +112,9 @@ async def search_kb(
 
 @mcp.tool()
 async def get_principles(situation: str | None = None) -> str:
-    """Charte personnelle de l'utilisateur : tous ses principes et ses valeurs (texte intégral), et, si une situation
-    est décrite, ses notes personnelles (leçons, réflexions, objectifs…) et éléments de veille qui s'en rapprochent.
+    """Charte personnelle de l'utilisateur : tous ses principes et ses valeurs (texte intégral), son journal des 14
+    derniers jours (texte intégral, daté), et, si une situation est décrite, ses notes personnelles (leçons,
+    réflexions, objectifs, pages plus anciennes du journal…) et éléments de veille qui s'en rapprochent.
 
     À appeler avant tout conseil de vie, de décision personnelle ou de conduite à tenir.
 
@@ -114,20 +122,95 @@ async def get_principles(situation: str | None = None) -> str:
         situation: la situation ou la décision, en quelques phrases (facultatif).
     """
     if situation and situation.strip():
-        charter, related = await _run(chat.gather_for_advice, situation.strip())
+        charter, recent, related = await _run(chat.gather_for_advice, situation.strip())
     else:
-        charter, related = await _run(chat.charter_items), []
+        charter, recent, related = await _run(chat.charter_items), await _run(journal.recent, journal.today()), []
     parts = []
     if charter:
-        parts.append("## Charte : principes et valeurs\n\n" + "\n\n".join(
-            item_markdown({**it, "content": (it.get("excerpts") or [""])[0], "excerpts": []}, with_content=True)
-            for it in charter))
+        parts.append("## Charte : principes et valeurs\n\n" + _in_full(charter))
     else:
         parts.append("## Charte\n\nAucun principe ni aucune valeur notés pour l'instant (espace Perso, catégories "
                      "Principe et Valeur). Propose-lui d'en formuler.")
+    days = journal.RECENT_DAYS
+    if recent:
+        parts.append(f"## Journal récent ({days} derniers jours, du plus récent au plus ancien)\n\n" + _in_full(recent))
+    else:
+        parts.append(f"## Journal récent\n\nRien d'écrit dans son journal ces {days} derniers jours.")
     if related:
         parts.append("## Notes et éléments liés à la situation\n\n" + _render(related, ""))
     return "\n\n".join(parts)
+
+
+def _in_full(items: list[dict]) -> str:
+    """Charter or journal notes: their text in full (it was put in their first excerpt)."""
+    return "\n\n".join(item_markdown({**it, "content": (it.get("excerpts") or [""])[0], "excerpts": []},
+                                       with_content=True) for it in items)
+
+
+def _day_arg(value: str | None, name: str) -> date | None:
+    if not value or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        raise ValueError(f"{name} invalide : attendu AAAA-MM-JJ (reçu « {value} »).") from None
+
+
+@mcp.tool()
+async def get_journal(day: str | None = None, start: str | None = None, end: str | None = None) -> str:
+    """Son journal : ce qu'il a écrit chaque jour, ses pensées et ses notes, dans l'ordre d'écriture, avec leur date.
+    Pour un jour précis, ajoute « Ce jour-là » : ce qu'il avait écrit le même jour il y a 1, 3, 6 mois et 1 à 10 ans.
+
+    Args:
+        day: un jour précis, AAAA-MM-JJ.
+        start: début d'une période, AAAA-MM-JJ (avec end, ou jusqu'à aujourd'hui).
+        end: fin d'une période, AAAA-MM-JJ (incluse).
+        Sans argument : ses 7 derniers jours. Une période fait au plus 90 jours.
+    """
+    today = journal.today()
+    try:
+        one, first, last = _day_arg(day, "day"), _day_arg(start, "start"), _day_arg(end, "end")
+    except ValueError as exc:
+        return str(exc)
+    if one:
+        first = last = one
+    elif first or last:
+        last = last or (today if first and first <= today else first)
+        first = first or last - timedelta(days=6)
+    else:
+        first, last = today - timedelta(days=6), today
+    if first > last:
+        first, last = last, first
+    note = ""
+    if (last - first).days + 1 > journal.MAX_RANGE_DAYS:
+        first = last - timedelta(days=journal.MAX_RANGE_DAYS - 1)
+        note = f" (période ramenée aux {journal.MAX_RANGE_DAYS} derniers jours demandés)"
+    rows = await _run(journal.entries, first, last)
+    echoes = await _run(journal.echoes, first) if first == last else []
+    span = journal.label(first) if first == last else f"Journal du {journal.day_name(first)} au {journal.day_name(last)}"
+    head = f"Aujourd'hui : {today.isoformat()}. {span}{note}."
+    out = [head]
+    if not rows:
+        out.append("\nRien d'écrit dans son journal sur cette période.")
+    current = None
+    for r in rows:
+        if r["day"] != current:
+            current = r["day"]
+            out.append(f"\n## {journal.label(current)} ({current.isoformat()})")
+        out.append(_journal_line(r))
+    if echoes:
+        out.append("\n## Ce jour-là : le même jour, les mois et les années d'avant")
+        for echo in echoes:
+            out.append(f"\n### {journal.ago(echo['months']).capitalize()} · {journal.label(echo['date'])} "
+                       f"({echo['date'].isoformat()})")
+            out.extend(_journal_line(r) for r in echo["entries"])
+    return "\n".join(out)
+
+
+def _journal_line(r: dict) -> str:
+    time = r["created_at"].astimezone(ZoneInfo(journal.tz())).strftime("%H:%M")
+    text = (r["text"] or "").strip() if r["kind"] == "note" else f"{r['title'] or '(sans titre)'} : {r['source_url'] or ''}"
+    return f"\n{time} · {text}\nFiche KB : {get_settings().item_url(r['id'])}"
 
 
 @mcp.tool()
@@ -288,7 +371,7 @@ async def browse_kb(
         total = db.fetchone(f"select count(*)::int n from items where {clause}", params)["n"]
         rows = db.fetchall(
             f"""select id::text, kind, title, source_url, author, created_at, left(summary, 220) as summary,
-                       space, category
+                       space, category, entry_date
                 from items where {clause} order by created_at desc limit %s offset %s""",
             (*params, max(1, min(limit, 100)), max(0, offset)),
         )
@@ -301,8 +384,9 @@ async def browse_kb(
     for r in rows:
         label = {"perso": f"perso{'/' + r['category'] if r['category'] else ''}", "hn": f"hn/{r['kind']}"}.get(
             r["space"], r["kind"])
+        day = journal.day_of(r)
         lines.append(
-            f"- [{label}] {r['title'] or '(sans titre)'} ({str(r['created_at'])[:10]}"
+            f"- [{label}] {r['title'] or '(sans titre)'} ({journal.label(day) if day else str(r['created_at'])[:10]}"
             f"{', ' + r['author'] if r['author'] else ''}) id={r['id']} {r['source_url'] or ''}\n  {r['summary'] or ''}"
         )
     if offset + len(rows) < total:

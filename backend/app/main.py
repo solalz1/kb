@@ -26,7 +26,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import chat, costs, db, export, folders, hn, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
+from . import chat, costs, db, export, folders, hn, journal, llm, migrate, monitoring, notion, obsidian, pipeline, search, sso, storage, wiki
 from .config import get_settings
 from .digest import agent as digest_agent
 from .digest import following as digest_following
@@ -199,7 +199,7 @@ async def ingest(request: Request):
         if "multipart/form-data" in ctype or "application/x-www-form-urlencoded" in ctype:
             form = await request.form()
             url, text, note = _str(form.get("url")), _str(form.get("text")), _str(form.get("note"))
-            extra = {k: _str(form.get(k)) for k in ("space", "category", "title", "folder")}
+            extra = {k: _str(form.get(k)) for k in ("space", "category", "title", "folder", "entry_date")}
             files = [f for key in ("file", "files", "file[]") for f in form.getlist(key) if isinstance(f, UploadFile)]
             for f in files:
                 data = await f.read()
@@ -221,7 +221,7 @@ async def ingest(request: Request):
             results.append(await run_in_threadpool(
                 pipeline.ingest, url=_str(body.get("url")), text=_str(body.get("text")), note=_str(body.get("note")),
                 space=_str(body.get("space")), category=_str(body.get("category")), title=_str(body.get("title")),
-                folder=_str(body.get("folder")), page_follows=page_follows))
+                folder=_str(body.get("folder")), entry_date=_str(body.get("entry_date")), page_follows=page_follows))
         else:
             raw = (await request.body()).decode("utf-8", errors="replace")
             results.append(await run_in_threadpool(pipeline.ingest, text=raw))
@@ -789,14 +789,6 @@ def stats():
 # Journal: Perso notes of category 'journal', one calendar day each
 # ---------------------------------------------------------------------------
 
-JOURNAL_WHERE = "space = 'perso' and category = 'journal' and not archived"
-
-
-def _journal_day_sql() -> str:
-    # notes filed in the journal before the calendar existed: the day they were written
-    return "coalesce(entry_date, (created_at at time zone %(tz)s)::date)"
-
-
 @api.get("/api/journal", dependencies=auth)
 def journal_month(month: str | None = None):
     """Number of journal notes per day of `month` (YYYY-MM, default: this month)."""
@@ -808,11 +800,11 @@ def journal_month(month: str | None = None):
     except ValueError as exc:
         raise HTTPException(400, "Mois invalide : attendu AAAA-MM") from exc
     after = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
-    day = _journal_day_sql()
+    day = journal.day_sql()
     rows = db.fetchall(
         f"""select {day} as day, count(*)::int as n from items
-            where {JOURNAL_WHERE} and {day} >= %(first)s and {day} < %(after)s group by 1 order by 1""",
-        {"tz": settings.digest_timezone, "first": first, "after": after},
+            where {journal.WHERE} and {day} >= %(first)s and {day} < %(after)s group by 1 order by 1""",
+        {"tz": journal.tz(), "first": first, "after": after},
     )
     return {"month": first.isoformat()[:7], "today": today.isoformat(),
             "days": {r["day"].isoformat(): r["n"] for r in rows}}
@@ -821,13 +813,7 @@ def journal_month(month: str | None = None):
 @api.get("/api/journal/{day}", dependencies=auth)
 def journal_day(day: date):
     """The day's journal notes, in the order they were written: the user's own text, whatever their processing."""
-    rows = db.fetchall(
-        f"""select id::text, kind, status, title, coalesce(input_text, summary, title) as text, source_url,
-                   created_at, updated_at, {_journal_day_sql()} as day
-            from items where {JOURNAL_WHERE} and {_journal_day_sql()} = %(day)s order by created_at""",
-        {"tz": settings.digest_timezone, "day": day},
-    )
-    return {"date": day.isoformat(), "entries": rows}
+    return {"date": day.isoformat(), "entries": journal.entries(day, day), "echoes": journal.echoes(day)}
 
 
 # ---------------------------------------------------------------------------

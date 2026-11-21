@@ -274,6 +274,76 @@ def test_journal_other_days(site):
     expect(page.locator(".fiche .when").first).to_contain_text(str(last_month.year))
 
 
+def test_add_into_the_journal(site):
+    """The « + » has a Journal choice: the text goes, word for word, on the day chosen (today by default)."""
+    page = site("/add?space=journal")
+    expect(page.get_by_role("button", name="Journal", exact=True)).to_have_attribute("aria-pressed", "true")
+    expect(page.get_by_text("Pourquoi tu gardes ça ?")).to_have_count(0)
+    expect(page.get_by_text(re.compile(r"^Aujourd'hui · "))).to_be_visible()
+    page.get_by_label("Ta journée, tes pensées").fill("Matinée au calme.\nPuis un déjeuner avec Léa.")
+    page.get_by_role("button", name="Ajouter", exact=True).click()
+    toast = page.locator(".toast")
+    expect(toast).to_contain_text("Ajouté à ton journal ✓")
+    toast.get_by_role("link", name="Voir le jour").click()
+    expect(page).to_have_url(re.compile(r"/journal$"))
+    expect(page.locator(".entry-text")).to_have_text("Matinée au calme.\nPuis un déjeuner avec Léa.")
+
+    # another day, chosen in the « + »; Veille and Perso bring back the folder and the « why »
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()       # the browser's day, not the test runner's (UTC)
+    before = (today - timedelta(days=3)).isoformat()
+    page.goto("/add")
+    expect(page.get_by_text("Pourquoi tu gardes ça ?")).to_be_visible()
+    page.get_by_role("button", name="Journal", exact=True).click()
+    expect(page.get_by_text("Pourquoi tu gardes ça ?")).to_have_count(0)
+    page.get_by_label("Jour du journal").fill(before)
+    expect(page.get_by_role("button", name="aujourd'hui", exact=True)).to_be_visible()
+    page.get_by_label("Ta journée, tes pensées").fill("Un souvenir de ce jour-là.")
+    page.get_by_role("button", name="Ajouter", exact=True).click()
+    page.locator(".toast").get_by_role("link", name="Voir le jour").click()
+    expect(page).to_have_url(re.compile(rf"/journal/{before}$"))
+    expect(page.locator(".entry-text")).to_have_text("Un souvenir de ce jour-là.")
+    day = _api(page, "GET", f"/api/journal/{before}")["body"]
+    assert [e["text"] for e in day["entries"]] == ["Un souvenir de ce jour-là."]
+
+
+def test_perso_shows_today_in_the_journal(site):
+    page = site("/perso")
+    box = page.locator(".journal-today")
+    expect(box.get_by_role("heading", name="Journal")).to_be_visible()
+    expect(box).to_contain_text("Rien d'écrit aujourd'hui.")
+    box.get_by_role("button", name="Écrire", exact=True).click()
+    box.get_by_label("Écrire dans le journal d'aujourd'hui").fill("Une pensée en passant.")
+    box.get_by_role("button", name="Ajouter au journal").click()
+    expect(box).to_contain_text("Ajouté. 1 note aujourd'hui.")
+    expect(box.locator(".jt-last")).to_have_text("Une pensée en passant.")
+    page.reload()
+    expect(page.locator(".journal-today")).to_contain_text("1 note aujourd'hui.")
+    page.locator(".journal-today").get_by_role("link", name="Voir le calendrier").click()
+    expect(page).to_have_url(re.compile(r"/journal$"))
+    expect(page.locator(".entry-text")).to_have_text("Une pensée en passant.")
+
+
+def test_on_this_day_in_the_journal(site):
+    page = site("/journal")
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()       # the browser's day, not the test runner's (UTC)
+    year_ago = today.replace(year=today.year - 1) if not (today.month == 2 and today.day == 29) else today.replace(year=today.year - 1, day=28)
+    _api(page, "POST", "/api/notes", content="Il y a un an : le premier jour du projet.", category="journal",
+         entry_date=year_ago.isoformat())
+    page.reload()
+    echo = page.locator(".echoes .echo")
+    expect(echo).to_have_count(1)
+    expect(echo).to_contain_text("Il y a 1 an")
+    expect(echo).to_contain_text("le premier jour du projet.")
+    echo.click()
+    expect(page).to_have_url(re.compile(rf"/journal/{year_ago.isoformat()}$"))
+    expect(page.locator(".entry-text")).to_have_text("Il y a un an : le premier jour du projet.")
+
+    page.goto("/perso")
+    teaser = page.locator(".journal-today .jt-echo")
+    expect(teaser).to_contain_text("Ce jour-là · il y a 1 an")
+    expect(teaser).to_contain_text("le premier jour du projet.")
+
+
 def test_phone_head_and_tab_bar(site):
     """On a phone, Veille's head carries the folders, the To do badge and the settings cog; the + in the tab bar opens
     Add."""

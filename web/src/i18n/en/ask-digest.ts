@@ -32,8 +32,8 @@ export default {
   "Conseil": "Advice",
   "Un conseil fidèle à tes principes": "Advice true to your principles",
   "Ta situation": "Your situation",
-  "Décris la situation ou la décision. Je relis tes principes et tes valeurs, puis tes leçons et tes notes perso, et je te réponds à partir de ce qui compte pour toi, en citant chaque note.":
-    "Describe the situation or the decision. I'll reread your principles and values, then your lessons and personal notes, and answer based on what matters to you, citing each note.",
+  "Décris la situation ou la décision. Je relis tes principes et tes valeurs, ton journal des deux dernières semaines, puis tes leçons et tes notes perso, et je te réponds à partir de ce qui compte pour toi, en citant chaque note.":
+    "Describe the situation or the decision. I'll reread your principles and values, your journal of the last two weeks, then your lessons and personal notes, and answer based on what matters to you, citing each note.",
   "Décris la situation ou la décision…": "Describe the situation or the decision…",
 
   // Ask: conversation
@@ -68,6 +68,7 @@ export default {
   "Recherche dans ta KB…": "Searching your KB…",
   "Recherche dans Hacker News…": "Searching Hacker News…",
   "Je relis tes principes et tes notes…": "Rereading your principles and notes…",
+  "Je relis tes principes, ton journal et tes notes…": "Rereading your principles, journal and notes…",
   "Je prépare les recherches…": "Planning the searches…",
   "le plus rapide, ≈ 0,3 ct la question": "fastest, ≈ 0.3¢ per question",
   "équilibré, ≈ 4 ct la question": "balanced, ≈ 4¢ per question",

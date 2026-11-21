@@ -187,6 +187,10 @@ class Settings(BaseSettings):
         base = self.public_base_url.rstrip("/")
         return f"{base}/item/{item_id}" if base else f"/item/{item_id}"
 
+    def journal_url(self, day) -> str:
+        base = self.public_base_url.rstrip("/")
+        return f"{base}/journal/{day}" if base else f"/journal/{day}"
+
     def wiki_url(self, slug: str) -> str:
         base = self.public_base_url.rstrip("/")
         return f"{base}/wiki/{slug}" if base else f"/wiki/{slug}"

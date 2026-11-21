@@ -112,4 +112,5 @@ export default {
   "Voir le compte": "Open the account",
   "Le digest de la semaine existe déjà. Le réécrire ?": "This week's digest already exists. Write it again?",
   "Le digest d'aujourd'hui existe déjà. Le réécrire ?": "Today's digest already exists. Write it again?",
+  "Ouvrir le journal dans Notion": "Open the journal in Notion",
 } as Record<string, string>;

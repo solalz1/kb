@@ -15,6 +15,7 @@ import { Link, useNavigate } from "../nav";
 import { CATEGORIES, SPACE_LABEL, categoryOf } from "../perso";
 import { dropItem, fetchItems, fetchMore, forgetItem, keys, patchItem, type ItemsPage, type ItemsQuery } from "../queries";
 import { Toast } from "../components/Toast";
+import { JournalToday } from "../components/JournalToday";
 
 const UNDO_MS = 5000;     // how long the undo button stays, and how long a deletion waits before it happens
 
@@ -387,6 +388,8 @@ export default function Feed({ space }: { space?: Space }) {
             </div>
           )}
         </>}
+
+        {!archived && perso && browsing && <JournalToday />}
 
         {!archived && perso && !loading && browsing && items.length > 0 && charterCount === 0 && (
           <div className="warn">

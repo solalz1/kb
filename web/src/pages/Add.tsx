@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type Space } from "../api";
+import { api } from "../api";
 import { useQuery } from "../cache";
 import { t, tServer } from "../i18n";
 import { IconClip, IconSpinner } from "../icons";
@@ -9,13 +9,22 @@ import { CATEGORIES } from "../perso";
 import { keys } from "../queries";
 import { Toast } from "../components/Toast";
 import { canGoBack } from "../motion";
+import { dayLabel, isDayKey, journalHref, keyOf, parseKey } from "../days";
+
+/** Where the « + » files what is added: Veille, Perso, or the journal (a Perso note on a calendar day). */
+type Place = "main" | "perso" | "journal";
+const placeOf = (v: string | null): Place => (v === "perso" || v === "journal" ? v : "main");
 
 export default function Add() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const [value, setValue] = useState(params.get("url") || params.get("text") || "");
   const [note, setNote] = useState("");
-  const [space, setSpace] = useState<Space>(params.get("space") === "perso" ? "perso" : "main");
+  const [space, setSpace] = useState<Place>(() => placeOf(params.get("space")));
+  // computed once: a page left open past midnight keeps the day it showed
+  const [todayKey] = useState(() => keyOf(new Date()));
+  const [day, setDay] = useState(() => (isDayKey(params.get("day")) ? params.get("day")! : todayKey));
+  const journal = space === "journal";
   const [category, setCategory] = useState("");
   const [folder, setFolder] = useState(params.get("folder") || "");
   const folders = useQuery(keys.folders, api.folders).data?.folders ?? [];
@@ -24,7 +33,7 @@ export default function Add() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);   // upload fraction, null when not uploading
   const [error, setError] = useState("");
-  const [done, setDone] = useState<{ message: string; id: string } | null>(null);
+  const [done, setDone] = useState<{ message: string; id: string; day?: string } | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -53,23 +62,31 @@ export default function Add() {
     setError("");
     try {
       let res;
-      // Veille: nothing forced, a #perso in the note can still file it in Perso
-      const where: Record<string, string> = space === "perso" ? { space, ...(category ? { category } : {}) } : {};
-      if (folder) where.folder = folder;
+      // Veille: nothing forced, a #perso in the note can still file it in Perso; the journal: a Perso note of the day
+      const where: Record<string, string> = journal ? { space: "perso", category: "journal", entry_date: day }
+        : space === "perso" ? { space, ...(category ? { category } : {}) } : {};
+      if (folder && !journal) where.folder = folder;
+      const why = journal ? "" : note.trim();
+      const text = value.trim();
+      const isUrl = /^https?:\/\/\S+$/i.test(text);
       if (files.length) {
         const form = new FormData();
         files.forEach((f) => form.append("file", f, f.name));
-        if (note.trim()) form.append("note", note.trim());
-        if (value.trim()) form.append("text", value.trim());
+        if (why) form.append("note", why);
+        if (text) form.append("text", text);
         Object.entries(where).forEach(([k, v]) => form.append(k, v));
         setProgress(0);
         res = await api.uploadFiles(form, setProgress);
+      } else if (journal && !isUrl) {
+        // the user's own words, kept as they are
+        const note = await api.createNote({ content: text, space: "perso", category: "journal", entry_date: day });
+        res = { message: "Ajouté à ton journal ✓", id: note.id, items: [] };
       } else {
-        const text = value.trim();
-        const isUrl = /^https?:\/\/\S+$/i.test(text);
-        res = await api.ingest(isUrl ? { url: text, note, ...where } : { text, note, ...where });
+        res = await api.ingest(isUrl ? { url: text, note: why, ...where } : { text, note: why, ...where });
       }
-      setDone({ message: tServer(res.message), id: res.id });
+      const fresh = !res.items.some((i) => i.duplicate);
+      setDone({ message: journal && fresh ? t("Ajouté à ton journal ✓") : tServer(res.message), id: res.id,
+                day: journal ? day : undefined });
       setValue(""); setNote(""); setFiles([]);
     } catch (err) {
       setError((err as Error).message);
@@ -92,10 +109,10 @@ export default function Add() {
       <h1 className="add-title">{t("Qu'est-ce que tu gardes ?")}</h1>
 
       <label className="stack">
-        <span className="label">{t("Lien, idée ou citation")}</span>
-        <textarea className="field serif" rows={4} value={value} onChange={(e) => { setValue(e.target.value); setError(""); }}
+        <span className="label">{journal ? t("Ta journée, tes pensées") : t("Lien, idée ou citation")}</span>
+        <textarea className="field serif" rows={journal ? 6 : 4} value={value} onChange={(e) => { setValue(e.target.value); setError(""); }}
                   style={{ fontSize: 19, padding: "14px 16px", borderRadius: 14, resize: "none" }}
-                  placeholder={t("Colle un lien, ou écris directement…")} />
+                  placeholder={journal ? t("Ce qui s'est passé, ce que tu as ressenti, ce que tu retiens…") : t("Colle un lien, ou écris directement…")} />
       </label>
 
       <div className="stack-8">
@@ -128,7 +145,19 @@ export default function Add() {
         <div className="seg wide" role="group" aria-label={t("Espace")}>
           <button type="button" aria-pressed={space === "main"} onClick={() => setSpace("main")}>{t("Veille")}</button>
           <button type="button" aria-pressed={space === "perso"} onClick={() => setSpace("perso")}>{t("Perso")}</button>
+          <button type="button" aria-pressed={journal} onClick={() => setSpace("journal")}>{t("Journal")}</button>
         </div>
+        {journal && (
+          <div className="journal-day">
+            <label className="sr-only" htmlFor="add-day">{t("Jour du journal")}</label>
+            <input id="add-day" className="field" type="date" value={day} required
+                   onChange={(e) => { if (isDayKey(e.target.value)) setDay(e.target.value); }} />
+            <span className="hint">
+              {day === todayKey ? t("Aujourd'hui · {day}", { day: dayLabel(parseKey(day), false) }) : dayLabel(parseKey(day))}
+              {day !== todayKey && <> · <button type="button" className="linkish" onClick={() => setDay(todayKey)}>{t("aujourd'hui")}</button></>}
+            </span>
+          </div>
+        )}
         {space === "perso" && (
           <div className="chips" role="group" aria-label={t("Catégorie")}>
             {CATEGORIES.map((c) => (
@@ -139,7 +168,7 @@ export default function Add() {
         )}
       </div>
 
-      {folders.length > 0 && (
+      {folders.length > 0 && !journal && (
         <label className="stack">
           <span className="label">{t("Dossier")}</span>
           <select className="field" value={folder} onChange={(e) => setFolder(e.target.value)} style={{ height: 50, borderRadius: 14 }}>
@@ -149,12 +178,12 @@ export default function Add() {
         </label>
       )}
 
-      <label className="stack">
+      {!journal && <label className="stack">
         <span className="label">{t("Pourquoi tu gardes ça ?")} <span className="opt">{t("facultatif")}</span></span>
         <input className="field" value={note} onChange={(e) => setNote(e.target.value)} style={{ height: 50, borderRadius: 14, padding: "0 16px", fontSize: 16 }}
                placeholder={t("ex. pour mon projet d'agent, idée de feature…")} />
         <span className="hint">{t("Cette phrase oriente le résumé et aide à le retrouver plus tard.")}</span>
-      </label>
+      </label>}
 
       {error && <div className="error-box">{error}</div>}
 
@@ -162,9 +191,15 @@ export default function Add() {
         <b>{t("Plus rapide encore")}</b>
         <span>{t("Depuis n'importe quelle app, bouton Partager → « Ajouter à ma KB ». Pas besoin d'ouvrir l'app.")}</span>
       </div>
-      <p className="hint">{t("Pour un texte long, ")}<Link to={`/note/new${space === "perso" ? "" : "?space=main"}`}>{t("écris une note")}</Link>.</p>
+      {journal ? (
+        <p className="hint">{t("Chaque jour a sa page : ")}<Link to={journalHref(day, todayKey)}>{t("ouvre le calendrier du journal")}</Link>.</p>
+      ) : (
+        <p className="hint">{t("Pour un texte long, ")}<Link to={`/note/new${space === "perso" ? "" : "?space=main"}`}>{t("écris une note")}</Link>.</p>
+      )}
 
-      <Toast id={done?.id}>{done && <>{done.message} <Link to={`/item/${done.id}`}>{t("Voir")}</Link></>}</Toast>
+      <Toast id={done?.id}>{done && <>{done.message} {done.day
+        ? <Link to={journalHref(done.day, todayKey)}>{t("Voir le jour")}</Link>
+        : <Link to={`/item/${done.id}`}>{t("Voir")}</Link>}</>}</Toast>
     </form>
   );
 }

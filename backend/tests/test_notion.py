@@ -1,6 +1,7 @@
 """Copie Notion : API Notion simulée (httpx.MockTransport), vraie base Postgres."""
 
 import json
+import re
 
 import httpx
 import pytest
@@ -22,6 +23,7 @@ class FakeNotion:
     def __init__(self):
         self.calls: list[tuple[str, str, dict]] = []
         self.databases = 0
+        self.sources: set[str] = set()      # data sources that exist (the Knowledge base and the Journal ones)
         self.pages: dict[str, dict] = {}
         self.deleted: set[str] = set()
         self.source_gone = False
@@ -39,12 +41,15 @@ class FakeNotion:
             return httpx.Response(429, headers={"Retry-After": "0"}, json={"code": "rate_limited", "message": "slow"})
         if request.method == "POST" and path == "/databases":
             self.databases += 1
+            if self.source_gone:            # what was deleted stays deleted
+                self.sources.clear()
             self.source_gone = False
             n = self.databases
+            self.sources.add(f"ds{n}")
             return httpx.Response(200, json={"id": f"db{n}", "url": f"https://www.notion.so/db{n}",
                                              "data_sources": [{"id": f"ds{n}", "name": "Knowledge base"}]})
         if request.method == "POST" and path == "/pages":
-            if self.source_gone or body["parent"]["data_source_id"] != f"ds{self.databases}":
+            if self.source_gone or body["parent"]["data_source_id"] not in self.sources:
                 return httpx.Response(404, json={"code": "object_not_found", "message": "Could not find data source"})
             if self.max_markdown and len(body.get("markdown", "")) > self.max_markdown:
                 return httpx.Response(400, json={"code": "validation_error", "message": "Content too large"})
@@ -373,3 +378,100 @@ def test_page_not_given_to_the_connection(client, fake_notion, monkeypatch):
     notion._record_error(err.value)                    # what the background sync does with it
     error = notion.status()["last_error"]
     assert "page parente introuvable" in error and "Ajouter une connexion" in error
+
+
+def _journal_pages(fake: FakeNotion, source: str) -> dict[str, dict]:
+    return {pid: p for pid, p in fake.pages.items() if p["parent"]["data_source_id"] == source}
+
+
+def test_the_journal_has_its_own_database_one_page_per_day(client, fake_notion):
+    from app import db, pipeline
+
+    today = pipeline.today()
+    morning = client.post("/api/notes", json={"content": "Réveil tôt, envie d'écrire.", "category": "journal"},
+                          headers=AUTH).json()["id"]
+    client.post("/api/notes", json={"content": "Le soir : <b>fatigué</b> mais content.", "category": "journal"},
+                headers=AUTH)
+    old = client.post("/api/notes", json={"content": "Une journée à Lyon.", "category": "journal",
+                                          "entry_date": "2026-09-14"}, headers=AUTH).json()["id"]
+    value = client.post("/api/notes", json={"content": "Je tiens parole.", "category": "valeur"}, headers=AUTH).json()["id"]
+    # a journal note copied as a card before the Journal database existed
+    db.execute("update items set notion_page_id = 'old-card', notion_synced_at = null where id = %s", (old,))
+    fake_notion.pages["old-card"] = {"parent": {"data_source_id": "ds1"}}
+    drain()
+
+    res = notion.sync_pending()
+    assert res["enabled"] and res["failed"] == 0 and res["remaining"] == 0
+    created = fake_notion.made("POST", "/databases")
+    assert [d["title"][0]["text"]["content"] for d in created] == ["Knowledge base", "Journal"]
+    assert set(created[1]["initial_data_source"]["properties"]) == {"Jour", "Date", "Notes", "Dans la KB"}
+
+    # the Knowledge base keeps the value, not the journal notes, whose old card went to the trash
+    cards = _journal_pages(fake_notion, "ds1")
+    assert [p["properties"]["ID KB"]["rich_text"][0]["text"]["content"] for p in cards.values() if "properties" in p] == [value]
+    assert fake_notion.pages["old-card"].get("in_trash") is True
+    assert db.fetchone("select notion_page_id from items where id = %s", (old,))["notion_page_id"] is None
+
+    days = {p["properties"]["Date"]["date"]["start"]: (pid, p) for pid, p in _journal_pages(fake_notion, "ds2").items()}
+    assert set(days) == {today.isoformat(), "2026-09-14"}
+    pid, page = days[today.isoformat()]
+    assert page["properties"]["Notes"] == {"number": 2}
+    assert page["properties"]["Dans la KB"]["url"] == f"https://kb.example.com/journal/{today.isoformat()}"
+    assert days["2026-09-14"][1]["properties"]["Jour"]["title"][0]["text"]["content"] == "Lundi 14 septembre 2026"
+    md = page["markdown"]
+    assert md.index("Réveil tôt, envie d'écrire.") < md.index("Le soir : \\<b>fatigué\\</b> mais content.")
+    assert re.search(r"^\*\*\d\d:\d\d\*\*$", md, re.M) and "\n\n---\n\n" in md
+    st = client.get("/api/notion", headers=AUTH).json()
+    assert st["journal_url"] == "https://www.notion.so/db2" and st["journal_days"] == 2
+
+    # nothing changed: nothing written again
+    calls = len(fake_notion.calls)
+    notion.sync_pending()
+    assert len(fake_notion.calls) == calls
+
+    # a note rewritten: only its day is written again
+    client.patch(f"/api/items/{morning}", json={"content": "Réveil tôt, puis une longue marche."}, headers=AUTH)
+    notion.sync_pending()
+    rewritten = [p for m, p, b in fake_notion.calls[calls:] if m == "PATCH" and p.endswith("/markdown")]
+    assert rewritten == [f"/pages/{pid}/markdown"]
+    assert "longue marche" in fake_notion.pages[pid]["markdown"]
+
+    # moved to another day: the day it left is emptied (trash), the new day gets a page
+    client.patch(f"/api/items/{old}", json={"entry_date": "2026-09-15"}, headers=AUTH)
+    notion.sync_pending()
+    assert fake_notion.pages[days["2026-09-14"][0]].get("in_trash") is True
+    moved = [p for p in _journal_pages(fake_notion, "ds2").values() if p["properties"]["Date"]["date"]["start"] == "2026-09-15"]
+    assert len(moved) == 1 and "Une journée à Lyon." in moved[0]["markdown"]
+
+    # deleted: its day loses it
+    client.delete(f"/api/items/{morning}", headers=AUTH)
+    notion.sync_pending()
+    assert fake_notion.pages[pid]["properties"]["Notes"] == {"number": 1}
+    assert "longue marche" not in fake_notion.pages[pid]["markdown"]
+
+
+def test_no_journal_database_without_a_journal(client, fake_notion, monkeypatch):
+    _setup(client)
+    notion.sync_pending()
+    assert fake_notion.databases == 1 and client.get("/api/notion", headers=AUTH).json()["journal_days"] == 0
+    # Perso left out of the copy: no journal either
+    client.post("/api/notes", json={"content": "Un jour.", "category": "journal"}, headers=AUTH)
+    monkeypatch.setattr(get_settings(), "notion_spaces", "main")
+    notion.sync_pending()
+    assert fake_notion.databases == 1
+
+
+def test_journal_database_deleted_in_notion_is_made_again(client, fake_notion):
+    client.post("/api/notes", json={"content": "Un jour.", "category": "journal"}, headers=AUTH)
+    drain()
+    notion.sync_pending()
+    assert fake_notion.databases == 2
+    fake_notion.sources.discard("ds2")
+    for page in _journal_pages(fake_notion, "ds2"):
+        fake_notion.deleted.add(page)
+    client.post("/api/notes", json={"content": "Un autre moment.", "category": "journal"}, headers=AUTH)
+    notion.sync_pending()                       # the page is gone and so is its database: noticed
+    notion.sync_pending()                       # made again, the day written there
+    assert fake_notion.databases == 3
+    page = next(iter(_journal_pages(fake_notion, "ds3").values()))
+    assert "Un jour." in page["markdown"] and "Un autre moment." in page["markdown"]

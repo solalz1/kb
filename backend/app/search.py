@@ -9,7 +9,7 @@ from .taxonomy import SPACES
 
 ITEM_FIELDS = """id::text, kind, title, source_url, author, author_url, site_name, published_at, created_at,
                  summary, key_points, tags, entities, use_cases, user_note, thumbnail_url, metadata, genre, file_path,
-                 space, category, pinned, translations"""
+                 space, category, pinned, translations, entry_date"""
 
 
 def search_chunks(

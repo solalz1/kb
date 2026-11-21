@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import db
+from . import db, journal
 from .config import get_settings
 from .taxonomy import CHARTER_CATEGORIES, KIND_LABELS, SPACE_LABELS, category_label
 
@@ -18,6 +18,8 @@ def item_meta_line(it: dict) -> str:
         perso = "Perso" + (f" · {cat}" if cat else "")
         if it.get("category") in CHARTER_CATEGORIES:
             perso += " (charte)"
+        if day := journal.day_of(it):
+            perso = f"Perso · {journal.label(day)}"
         parts.insert(0, perso)
     if it.get("space") == "hn":
         hn = (db.loads(it.get("metadata")) or {}).get("hn") or {}
@@ -67,6 +69,7 @@ def source_card(n: int, it: dict) -> dict:
         "summary": (it.get("summary") or "")[:400],
         "space": it.get("space") or "main",
         "category": it.get("category"),
+        "entry_date": _date(journal.day_of(it)),
         "translations": {code: {k: (v[:400] if k == "summary" else v) for k, v in tr.items() if k in ("title", "summary")}
                          for code, tr in (it.get("translations") or {}).items()},
     }

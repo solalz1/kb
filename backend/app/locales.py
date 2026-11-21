@@ -45,6 +45,30 @@ TEXT = {
     },
 }
 
+# The Notion « Journal » database: one page per day
+JOURNAL_PROPS = {
+    "fr": {"title": "Journal", "name": "Jour", "day": "Date", "notes": "Notes", "kb_url": "Dans la KB"},
+    "en": {"title": "Journal", "name": "Day", "day": "Date", "notes": "Notes", "kb_url": "In the KB"},
+}
+_WEEKDAYS_EN = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_MONTHS_EN = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+              "November", "December")
+
+
+def journal_props(lang: str) -> dict[str, str]:
+    return JOURNAL_PROPS.get(lang) or JOURNAL_PROPS["en"]
+
+
+def day_title(day, lang: str) -> str:
+    """« Samedi 21 novembre 2026 » / « Saturday, November 21, 2026 »."""
+    if lang == "fr":
+        from .journal import day_name
+
+        name = day_name(day)
+        return name[0].upper() + name[1:]
+    return f"{_WEEKDAYS_EN[day.weekday()]}, {_MONTHS_EN[day.month - 1]} {day.day}, {day.year}"
+
+
 # Notion column names, by language (keys are ours, values what Notion shows)
 NOTION_PROPS = {
     "fr": {"name": "Nom", "space": "Espace", "category": "Catégorie", "kind": "Type", "tags": "Tags",
