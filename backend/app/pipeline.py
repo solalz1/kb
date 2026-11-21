@@ -147,13 +147,15 @@ def ingest(
     page_follows: bool = False,
     folder: str | None = None,
     hn: dict | None = None,
+    entry_date: date | str | None = None,
 ) -> dict:
     """`page_follows`: the client (the Shortcut) can fetch the page from the phone. For a site that refuses the server,
     the answer then says `page_wanted`, and the item waits a little for POST /api/items/<id>/page.
     `folder`: where to file it, as the Shortcut's "Où le ranger ?" list says it (a folder's name, "Automatique",
     "Espace Perso") or a folder id; nothing or "Automatique": Claude chooses.
     `hn`: a story of the daily Hacker News run (app/hn.py), kept as `metadata.hn`; a story already in the KB is left
-    as it is."""
+    as it is.
+    `entry_date`: for the journal, the day it belongs to (YYYY-MM-DD; default: today)."""
     url = (url or "").strip() or None
     text = (text or "").strip() or None
     note = (note or "").strip() or None
@@ -176,6 +178,7 @@ def ingest(
     if space == "hn" and not hn:
         raise ValueError(HN_BY_HAND)
     category = (category or tag_category) if space == "perso" else None
+    entry_date = _journal_day(entry_date) if category == "journal" else None
 
     if not url and not file and space != "perso":
         url = _primary_url(text)
@@ -199,10 +202,10 @@ def ingest(
         path = storage.upload(f"uploads/{item_id}/{safe}", data, mime)
         row = db.fetchone(
             """insert into items (id, file_path, file_name, file_mime, input_text, user_note, kind, title,
-                                  space, category, metadata, folder_id)
-               values (%s, %s, %s, %s, %s, %s, null, %s, %s, %s, %s, %s::uuid) returning id, status""",
+                                  space, category, metadata, folder_id, entry_date)
+               values (%s, %s, %s, %s, %s, %s, null, %s, %s, %s, %s, %s::uuid, %s) returning id, status""",
             (item_id, path, filename, mime, text, note, title or filename, space, category, db.jsonb(metadata),
-             folder_id),
+             folder_id, entry_date),
         )
         _wake()
         return {"id": str(row["id"]), "status": row["status"], "duplicate": False}
@@ -232,8 +235,10 @@ def ingest(
                 merged = f"{existing['user_note']}\n{note}" if existing["user_note"] else note
                 db.execute("update items set user_note = %s where id = %s", (merged, existing["id"]))
             if space == "perso" and existing["space"] != "perso":   # repartagé exprès vers Perso : on le déplace
-                db.execute("update items set space = 'perso', category = coalesce(%s, category) where id = %s",
-                           (category, existing["id"]))
+                db.execute("""update items set space = 'perso', category = coalesce(%s, category),
+                                     entry_date = case when coalesce(%s, category) = 'journal' then %s end
+                               where id = %s""",
+                           (category, category, entry_date or today(), existing["id"]))
             elif existing["space"] == "hn":     # a story of the HN space shared by the user: kept in Veille
                 db.execute("update items set space = 'main' where id = %s", (existing["id"],))
             if folder_id:       # shared again into a chosen folder: it moves there
@@ -257,20 +262,34 @@ def ingest(
                   and web_blocks_servers(url))
         row = db.fetchone(
             """insert into items (id, input_url, input_text, user_note, source_url, kind, title, space, category,
-                                  metadata, next_attempt_at, folder_id)
+                                  metadata, next_attempt_at, folder_id, entry_date)
                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       case when %s then now() + make_interval(secs => %s) end, %s::uuid) returning id, status""",
+                       case when %s then now() + make_interval(secs => %s) end, %s::uuid, %s) returning id, status""",
             (item_id, url, text, note, info.canonical, INGEST_KIND.get(info.kind), title, space, category,
-             db.jsonb(metadata), wanted, PAGE_WAIT_SECONDS, folder_id),
+             db.jsonb(metadata), wanted, PAGE_WAIT_SECONDS, folder_id, entry_date),
         )
         _wake()
         out = {"id": str(row["id"]), "status": row["status"], "duplicate": False}
         return {**out, "page_wanted": True, "page_url": url} if wanted else out
 
     if text:
-        return create_note(content=text, title=title, space=space, category=category, why=note, folder_id=folder_id)
+        return create_note(content=text, title=title, space=space, category=category, why=note, folder_id=folder_id,
+                           entry_date=entry_date)
 
     raise ValueError("Envoie une URL, un texte ou un fichier")
+
+
+def _journal_day(value: date | str | None) -> date:
+    """The journal day a share asks for (YYYY-MM-DD), today when it names none."""
+    if isinstance(value, date):
+        return value
+    value = (value or "").strip()
+    if not value:
+        return today()
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        raise ValueError("Date du journal invalide : attendu AAAA-MM-JJ") from None
 
 
 def today() -> date:

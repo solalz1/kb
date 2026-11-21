@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Iterator
 
-from . import db, llm, search
+from . import db, journal, llm, search
 from .formatting import source_block, source_card
 from .search import ITEM_FIELDS
 from .taxonomy import CHARTER_CATEGORIES, scope_spaces
@@ -62,12 +62,17 @@ Mode Conseil. L'utilisateur te demande un conseil sur sa vie : une décision, un
 Tu l'aides à décider selon SES principes et SES valeurs, tels qu'il les a notés dans l'espace Perso de sa KB,
 et non selon des conseils génériques.
 
-Les sources marquées « (charte) » sont ses principes et ses valeurs, en texte intégral. Les autres sont ses notes
-personnelles (leçons, réflexions, objectifs, journal…) ou des éléments de sa veille qui peuvent éclairer la situation.
-Ignore celles qui ne concernent pas la situation.
+Les sources marquées « (charte) » sont ses principes et ses valeurs, en texte intégral. Celles marquées « Journal du … »
+sont son journal, chacune à sa date : les jours les plus récents disent ce qu'il vit en ce moment, les plus anciennes
+ce qu'il a déjà traversé. Les autres sont ses notes personnelles (leçons, réflexions, objectifs…) ou des éléments de
+sa veille qui peuvent éclairer la situation. Ignore celles qui ne concernent pas la situation.
 
 Structure ta réponse ainsi (en sautant une section vide) :
 - Une phrase qui reformule l'enjeu tel que tu le comprends.
+## Ce que dit ton journal
+Seulement s'il y a des sources de journal. Ce que ses derniers jours, ou une page plus ancienne, disent de la
+situation : ce qu'il traverse, ce qu'il a déjà ressenti ou essayé, avec la date et la référence [n]. Relie, ne recopie
+pas. Si son journal ne dit rien d'utile sur cette situation, dis-le en une phrase au lieu de forcer un lien.
 ## Ce que disent tes principes
 Les principes, valeurs et leçons qui s'appliquent vraiment ici, avec leur référence [n] et en quoi ils s'appliquent.
 Reprends ses propres mots quand c'est parlant.
@@ -258,29 +263,43 @@ def charter_items(budget: int = CHARTER_BUDGET) -> list[dict]:
     return out
 
 
-def gather_for_advice(situation: str, query: str | None = None) -> tuple[list[dict], list[dict]]:
-    """Charte complète + notes perso et éléments de veille proches de la situation."""
+def gather_for_advice(situation: str, query: str | None = None) -> tuple[list[dict], list[dict], list[dict]]:
+    """Charte complète, journal des derniers jours en entier, puis les notes perso (dont les pages plus anciennes du
+    journal) et les éléments de veille proches de la situation."""
     query = query or situation
     charter = charter_items()
-    seen = {c["id"] for c in charter}
+    recent = journal.recent(journal.today())
+    seen = {c["id"] for c in charter + recent}
     with ThreadPoolExecutor(max_workers=2) as pool:
-        perso = pool.submit(search.search_items, query, limit=12, spaces=["perso"], chunks_per_item=2)
+        perso = pool.submit(search.search_items, query, limit=16, spaces=["perso"], chunks_per_item=2)
         main = pool.submit(search.search_items, query, limit=4, spaces=["main"], chunks_per_item=2)
-        related = [it for it in perso.result() if it["id"] not in seen][:8] + main.result()
-    return charter, related
+        found = [it for it in perso.result() if it["id"] not in seen]
+        older = [it for it in found if it.get("category") == "journal"][:4]
+        notes = [it for it in found if it.get("category") != "journal"][:8]
+        related = older + notes + main.result()
+    return charter, recent, related
+
+
+def _span(first: int, last: int) -> str:
+    return f"La source {first} est" if first == last else f"Les sources {first} à {last} sont"
 
 
 def advise(messages: list[dict], model: str | None = None, lang: str | None = None) -> Iterator[dict]:
     history = _clean_history(messages[:-1])
     question = str(messages[-1]["content"]).strip()
     query = llm.rewrite_query(history, question) if history else question
-    yield {"type": "status", "text": "Je relis tes principes et tes notes…"}
-    charter, related = gather_for_advice(question, query)
-    sources, context = build_sources(charter + related, max_excerpt=6000)
+    yield {"type": "status", "text": "Je relis tes principes, ton journal et tes notes…"}
+    charter, recent, related = gather_for_advice(question, query)
+    sources, context = build_sources(charter + recent + related, max_excerpt=6000)
     yield {"type": "sources", "query": query, "sources": sources}
 
-    intro = (f"Les sources 1 à {len(charter)} sont sa charte (principes et valeurs)." if charter
+    intro = (f"{_span(1, len(charter))} sa charte (principes et valeurs)." if charter
              else "Il n'a encore noté aucun principe ni aucune valeur (catégories Principe et Valeur de l'espace Perso).")
+    if recent:
+        intro += (f" {_span(len(charter) + 1, len(charter) + len(recent))} son journal des {journal.RECENT_DAYS} "
+                  "derniers jours, du plus récent au plus ancien.")
+    else:
+        intro += f" Il n'a rien écrit dans son journal ces {journal.RECENT_DAYS} derniers jours."
     user_turn = f"{intro}\n\n<sources>\n{context or '(aucune note pertinente)'}\n</sources>\n\nSituation : {question}"
     msgs = history + [{"role": "user", "content": user_turn}]
     if len(msgs) > 1 and msgs[-2]["role"] == "user":

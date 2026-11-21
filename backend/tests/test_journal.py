@@ -105,3 +105,160 @@ def test_filed_in_the_journal_on_a_chosen_day(client):
     assert db.fetchone("select entry_date from items where id = %s", (note,))["entry_date"] == date(2026, 9, 1)
     for bad in ("9999-12", "0000-01", "2026-1"):
         assert client.get(f"/api/journal?month={bad}", headers=AUTH).status_code == 400, bad
+
+
+def _days_ago(n: int) -> str:
+    from app import pipeline
+
+    return (pipeline.today() - timedelta(days=n)).isoformat()
+
+
+def _sse(r) -> list[dict]:
+    import json
+
+    return [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")]
+
+
+def test_shared_into_the_journal_on_a_chosen_day(client):
+    """The « + » in Journal mode: a link, a file or a text lands on the day chosen (today by default)."""
+    from app import db, pipeline
+
+    def row(r):
+        assert r.status_code == 200, r.text
+        return db.fetchone("select space, category, entry_date, kind from items where id = %s", (r.json()["id"],))
+
+    link = row(client.post("/api/ingest", json={"url": "https://blog.ex.com/marche", "space": "perso",
+                                                 "category": "journal", "entry_date": "2026-09-03"}, headers=AUTH))
+    assert link == {"space": "perso", "category": "journal", "entry_date": date(2026, 9, 3), "kind": "article"}
+    text = row(client.post("/api/ingest", json={"text": "Une pensée du soir", "space": "perso", "category": "journal",
+                                                 "entry_date": "2026-09-04"}, headers=AUTH))
+    assert text["entry_date"] == date(2026, 9, 4) and text["kind"] == "note"
+    upload = row(client.post("/api/ingest", data={"space": "perso", "category": "journal", "entry_date": "2026-09-05"},
+                             files={"file": ("photo.png", b"\x89PNG fake", "image/png")}, headers=AUTH))
+    assert upload["entry_date"] == date(2026, 9, 5) and upload["category"] == "journal"
+    # no day given: today; another category: no day at all
+    assert row(client.post("/api/ingest", json={"text": "Maintenant", "space": "perso", "category": "journal"},
+                           headers=AUTH))["entry_date"] == pipeline.today()
+    assert row(client.post("/api/ingest", json={"text": "Une leçon", "space": "perso", "category": "lecon",
+                                                 "entry_date": "2026-09-05"}, headers=AUTH))["entry_date"] is None
+    bad = client.post("/api/ingest", json={"text": "?", "space": "perso", "category": "journal", "entry_date": "hier"},
+                      headers=AUTH)
+    assert bad.status_code == 400 and "AAAA-MM-JJ" in bad.json()["detail"]
+    # a link already in Veille, shared again into the journal: it moves there, on the day chosen
+    saved = client.post("/api/ingest", json={"url": "https://blog.ex.com/deja"}, headers=AUTH).json()["id"]
+    again = client.post("/api/ingest", json={"url": "https://blog.ex.com/deja", "space": "perso", "category": "journal",
+                                              "entry_date": "2026-09-06"}, headers=AUTH)
+    assert again.json()["id"] == saved
+    assert row(again) == {"space": "perso", "category": "journal", "entry_date": date(2026, 9, 6), "kind": "article"}
+    assert [e["kind"] for e in client.get("/api/journal/2026-09-05", headers=AUTH).json()["entries"]] == [None]
+
+
+def test_recent_journal_newest_first_within_a_budget(client):
+    from app import journal, pipeline
+
+    _write(client, "Il y a vingt jours.", _days_ago(20))
+    _write(client, "Il y a treize jours.", _days_ago(13))
+    _write(client, "Avant-hier : " + "long " * 400, _days_ago(2))
+    _write(client, "Ce matin.")
+    _write(client, "Plus tard ce jour-là.")
+    _write(client, "Demain, je prévois.", _days_ago(-1))         # a plan for tomorrow isn't what happened
+    drain()
+    rows = journal.recent(pipeline.today(), budget=1_000)
+    assert [r["excerpts"][0][:13] if r["excerpts"] else None for r in rows] == [
+        "Plus tard ce ", "Ce matin.", None, "Il y a treize"]          # past the budget: the summary alone
+    assert rows[0]["entry_date"] == pipeline.today() and rows[-1]["entry_date"].isoformat() == _days_ago(13)
+    assert journal.label(date(2026, 11, 19)) == "Journal du jeudi 19 novembre 2026"
+
+
+def test_advice_reads_the_recent_journal(client, fake_llm):
+    from app import journal, pipeline
+
+    client.post("/api/notes", json={"content": "Je dors avant de décider.", "category": "principe"}, headers=AUTH)
+    _write(client, "Journée lourde : la proposition de Lyon me travaille encore.")
+    _write(client, "Dîner avec Paul, il trouve que je m'épuise.", _days_ago(4))
+    _write(client, "J'ai déjà refusé une mutation à Lyon et je l'ai regretté.", _days_ago(200))
+    client.post("/api/notes", json={"content": "Une leçon sur le travail.", "category": "lecon"}, headers=AUTH)
+    drain()
+
+    r = client.post("/api/chat", json={"mode": "advice", "messages": [
+        {"role": "user", "content": "Dois-je accepter la mutation à Lyon ?"}]}, headers=AUTH)
+    events = _sse(r)
+    assert events[0] == {"type": "status", "text": "Je relis tes principes, ton journal et tes notes…"}
+    sources = next(e for e in events if e["type"] == "sources")["sources"]
+    days = [s["entry_date"] for s in sources]
+    assert days[:3] == [None, pipeline.today().isoformat(), _days_ago(4)]     # the charter, then the last days
+    assert _days_ago(200) in days                                             # an older page found by the search
+    assert all(d is None for s, d in zip(sources, days) if s["category"] != "journal")
+
+    prompt = fake_llm["stream"][-1]["messages"][-1]["content"]
+    assert "La source 1 est sa charte" in prompt
+    assert "Les sources 2 à 3 sont son journal des 14 derniers jours, du plus récent au plus ancien." in prompt
+    assert f"Infos : Perso · {journal.label(pipeline.today())}" in prompt
+    assert "« Journée lourde : la proposition de Lyon me travaille encore. »" in prompt     # in full
+    assert prompt.index("Journée lourde") < prompt.index("Dîner avec Paul") < prompt.index("déjà refusé")
+    system = fake_llm["stream"][-1]["system"]
+    assert "## Ce que dit ton journal" in system and "ne dit rien d'utile" in system
+
+
+def test_advice_without_a_recent_journal(client, fake_llm):
+    client.post("/api/notes", json={"content": "Je dors avant de décider.", "category": "principe"}, headers=AUTH)
+    _write(client, "Un vieux souvenir.", _days_ago(30))
+    drain()
+    client.post("/api/chat", json={"mode": "advice", "messages": [{"role": "user", "content": "Que faire ?"}]},
+                headers=AUTH)
+    prompt = fake_llm["stream"][-1]["messages"][-1]["content"]
+    assert "Il n'a rien écrit dans son journal ces 14 derniers jours." in prompt
+    assert "Un vieux souvenir" in prompt                       # still found by the search, with its date
+
+
+def _tool(client, name, **arguments):
+    from .test_e2e import _mcp
+
+    r = _mcp(client, "/mcp/mcp-secret", "tools/call", {"name": name, "arguments": arguments})
+    assert r.status_code == 200, r.text
+    return r.json()["result"]["content"][0]["text"]
+
+
+def test_the_connector_reads_the_journal(client):
+    from app import journal, pipeline
+    from .test_e2e import _mcp
+
+    today = pipeline.today()
+    _write(client, "Ce matin, envie de changer de rythme.")
+    _write(client, "Hier soir, appel avec maman.", _days_ago(1))
+    _write(client, "Une semaine plus tôt.", _days_ago(10))
+    _write(client, "Au printemps.", "2026-04-02")
+    client.post("/api/notes", json={"content": "Je dors avant de décider.", "category": "principe"}, headers=AUTH)
+    drain()
+
+    init = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}
+    instructions = _mcp(client, "/mcp/mcp-secret", "initialize", init).json()["result"]["instructions"]
+    assert "get_journal" in instructions and "14 derniers jours" in instructions
+    tools = _mcp(client, "/mcp/mcp-secret", "tools/list", rid=2).json()["result"]["tools"]
+    assert "get_journal" in {t["name"] for t in tools}
+
+    week = _tool(client, "get_journal")
+    assert week.startswith(f"Aujourd'hui : {today.isoformat()}.")
+    assert "Ce matin, envie de changer de rythme." in week and "Hier soir, appel avec maman." in week
+    assert "Une semaine plus tôt" not in week
+    assert week.index(f"## {journal.label(today - timedelta(days=1))}") < week.index(f"## {journal.label(today)}")
+
+    day = _tool(client, "get_journal", day="2026-04-02")
+    assert "## Journal du jeudi 2 avril 2026 (2026-04-02)" in day and "Au printemps." in day
+    assert "Rien d'écrit" in _tool(client, "get_journal", day="2026-04-03")
+    period = _tool(client, "get_journal", start=_days_ago(12), end=_days_ago(1))
+    assert "Une semaine plus tôt." in period and "Ce matin" not in period
+    capped = _tool(client, "get_journal", start="2026-01-01", end=today.isoformat())
+    assert "ramenée aux 90 derniers jours" in capped and "Au printemps" not in capped
+    assert "invalide" in _tool(client, "get_journal", day="le 3 novembre")
+
+    advice = _tool(client, "get_principles")
+    assert advice.index("## Charte") < advice.index("## Journal récent (14 derniers jours")
+    assert "Contenu complet :\nCe matin, envie de changer de rythme." in advice
+    assert "Une semaine plus tôt." in advice and "Au printemps" not in advice
+    assert "## Journal récent" in _tool(client, "get_principles", situation="Changer de rythme de travail ?")
+
+    listed = _tool(client, "browse_kb", space="perso", category="journal")
+    assert "(Journal du jeudi 2 avril 2026" in listed
+    found = _tool(client, "search_kb", query="printemps", space="perso")
+    assert "Perso · Journal du jeudi 2 avril 2026" in found
