@@ -24,4 +24,13 @@ export default {
   "Ce qui s'est passé, ce que tu as ressenti, ce que tu retiens…": "What happened, how you felt, what you take from it…",
   "Ajouter au journal": "Add to the journal",
   "⌘ + Entrée pour enregistrer": "⌘ + Return to save",
+  // the journal box at the top of Perso
+  "Voir le calendrier": "See the calendar",
+  "Rien d'écrit aujourd'hui.": "Nothing written today.",
+  "Ajouté. {n} notes aujourd'hui.": "Added. {n} notes today.",
+  "Ajouté. 1 note aujourd'hui.": "Added. 1 note today.",
+  "{n} notes aujourd'hui.": "{n} notes today.",
+  "1 note aujourd'hui.": "1 note today.",
+  "Écrire dans le journal d'aujourd'hui": "Write in today's journal",
+  "Écrire": "Write",
 } as Record<string, string>;

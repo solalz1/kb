@@ -525,7 +525,8 @@ export const api = {
     request<{ month: string; today: string; days: Record<string, number> }>(`/api/journal${qs({ month })}`),
   journalDay: (day: string) => request<{ date: string; entries: JournalEntry[] }>(`/api/journal/${day}`),
   reprocess: (id: string) => request<{ ok: boolean }>(`/api/items/${id}/reprocess`, { method: "POST" }),
-  ingest: (body: { url?: string; text?: string; note?: string; space?: Space; category?: string; folder?: string }) =>
+  ingest: (body: { url?: string; text?: string; note?: string; space?: Space; category?: string; folder?: string;
+                   entry_date?: string }) =>
     request<IngestResult>("/api/ingest", { method: "POST", body: JSON.stringify(body) }),
   uploadFiles: upload,
   tags: (space?: Space) => request<{ tag: string; count: number }[]>(`/api/tags${qs({ space })}`),

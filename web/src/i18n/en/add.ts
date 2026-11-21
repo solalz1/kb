@@ -26,4 +26,13 @@ export default {
   "Sur iPhone et Mac, le plus rapide reste le bouton Partager : installe les Raccourcis (voir":
     "On iPhone and Mac, the Share button is still the fastest: install the Shortcuts (see",
   "Voir": "View",
+  // the « + » in Journal mode
+  "Ajouté à ton journal ✓": "Added to your journal ✓",
+  "Ta journée, tes pensées": "Your day, your thoughts",
+  "Jour du journal": "Journal day",
+  "Aujourd'hui · {day}": "Today · {day}",
+  "aujourd'hui": "today",
+  "Chaque jour a sa page : ": "Each day has its page: ",
+  "ouvre le calendrier du journal": "open the journal's calendar",
+  "Voir le jour": "See the day",
 } as Record<string, string>;

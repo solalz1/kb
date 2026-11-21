@@ -80,7 +80,7 @@ const MODES: { id: Mode; label: string; short: string; tag: string; title: strin
     intro: t("Décris le projet en quelques phrases. Je cherche sous plusieurs angles dans ta KB et je te rends un dossier : ce qui sert, qui suivre, et ce qui manque."),
     placeholder: t("Décris ton nouveau projet…") },
   { id: "advice", label: t("Conseil"), short: t("Conseil"), tag: t("Conseil"), title: t("Un conseil fidèle à tes principes"), label2: t("Ta situation"),
-    intro: t("Décris la situation ou la décision. Je relis tes principes et tes valeurs, puis tes leçons et tes notes perso, et je te réponds à partir de ce qui compte pour toi, en citant chaque note."),
+    intro: t("Décris la situation ou la décision. Je relis tes principes et tes valeurs, ton journal des deux dernières semaines, puis tes leçons et tes notes perso, et je te réponds à partir de ce qui compte pour toi, en citant chaque note."),
     placeholder: t("Décris la situation ou la décision…") },
 ];
 

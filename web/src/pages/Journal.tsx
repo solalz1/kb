@@ -3,26 +3,14 @@ import { useParams } from "react-router-dom";
 import { api, type JournalEntry } from "../api";
 import { useQuery } from "../cache";
 import { Lines } from "../components/Skeleton";
-import { lang, locale, t } from "../i18n";
+import { capitalize, dayLabel, isDayKey, journalHref, keyOf, parseKey } from "../days";
+import { locale, t } from "../i18n";
 import { IconBack, IconEdit, IconNext, IconPrev, IconSpinner, IconTrash } from "../icons";
 import { useDesktop } from "../layout";
 import { Link, useNavigate } from "../nav";
 import { forgetItem, keys } from "../queries";
 
-/** "2026-10-07" for a local date (never toISOString: that would be the UTC day). */
-const keyOf = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const parseKey = (key: string) => {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d);
-};
-/** A real calendar day ("2026-02-30" is not one: Date would roll it over to March). */
-const isDayKey = (s: string | undefined): s is string => Boolean(s && /^\d{4}-\d{2}-\d{2}$/.test(s) && keyOf(parseKey(s)) === s);
-
-const capitalize = (s: string) => (lang === "fr" ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const monthLabel = (d: Date) => capitalize(d.toLocaleDateString(locale, { month: "long", year: "numeric" }));
-const dayLabel = (d: Date, year = true) =>
-  capitalize(d.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", ...(year ? { year: "numeric" } : {}) }));
 const timeLabel = (iso: string) => new Date(iso).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 
 /** Monday-first weekday initials in the interface language. */
@@ -76,7 +64,7 @@ export default function Journal() {
     if (at < 0) return weeks;
     return weeks.slice(Math.max(0, at - 1), Math.max(0, at - 1) + 2);
   }, [weeks, desktop, wholeMonth, selected]);
-  const pick = (key: string) => navigate(key === todayKey ? "/journal" : `/journal/${key}`, { viewTransition: false });
+  const pick = (key: string) => navigate(journalHref(key, todayKey), { viewTransition: false });
   const shiftMonth = (delta: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + delta, 1));
   const goToday = () => { setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); pick(todayKey); };
 
