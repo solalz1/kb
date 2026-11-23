@@ -141,26 +141,42 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     if (!edgeSwipe()) return;
-    let g: { x: number; y: number; t: number; dragging: boolean; lastX: number; lastT: number; v: number } | null = null;
+    // samples: where the finger was over the last moments, for the speed it lets go at
+    let g: { x: number; y: number; dragging: boolean; lastX: number; samples: { x: number; t: number }[] } | null = null;
 
     const index = () => (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    const showBelow = () => {
+    // The copy of the page below is made as soon as a finger lands on the edge, before it moves: copying and laying out
+    // a long page takes a moment, which on the first move would hold the page still for a frame or two. It waits
+    // unseen until the drag starts.
+    const prepareBelow = () => {
       const box = under.current;
       const copy = pageBelow(index() - 1);
       if (!box || !copy) return;
       const node = copy.node.cloneNode(true) as HTMLElement;
       node.style.transform = `translateY(${-copy.scrollY}px)`;
       box.replaceChildren(node);
+      box.style.transition = "none";
+      box.style.transform = `translateX(${-0.3 * window.innerWidth}px)`;
+      box.style.visibility = "hidden";
       box.hidden = false;
     };
-    const set = (dx: number, animate: boolean) => {
+    const revealBelow = () => { if (under.current && !under.current.hidden) under.current.style.visibility = ""; };
+    /** How fast the finger was going when it let go (px/ms, to the right), over its last 100 ms. */
+    const speed = (samples: { x: number; t: number }[]) => {
+      const last = samples[samples.length - 1];
+      const first = samples.find((s) => last.t - s.t <= 100) ?? last;
+      return last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
+    };
+    const set = (dx: number, ms = 0) => {
       const main = mainEl();
       if (!main) return;
-      const ease = "0.32s cubic-bezier(0.32, 0.72, 0, 1)";
+      const animate = ms > 0;
+      const ease = `${ms}ms cubic-bezier(0.32, 0.72, 0, 1)`;
       const w = window.innerWidth;
       main.style.transition = animate ? `transform ${ease}` : "none";
       main.style.transform = dx ? `translateX(${dx}px)` : "";
-      main.classList.toggle("swiping", dx > 0);
+      // on its way back in place, the page keeps its edge shadow until it is there (the shadow would pop off at once)
+      main.classList.toggle("swiping", dx > 0 || animate);
       if (shade.current) {
         shade.current.style.transition = animate ? `opacity ${ease}` : "none";
         shade.current.style.opacity = String(Math.max(0, 1 - dx / w) * (dx > 0 ? 1 : 0));
@@ -183,45 +199,61 @@ export function EdgeSwipeBack({ onBack }: { onBack: () => void }) {
       const touch = e.touches[0];
       // one swipe at a time: a second one while the first is still taking the page back would go back twice
       g = !leaving && e.touches.length === 1 && touch.clientX <= EDGE && swipeBackAllowed()
-        ? { x: touch.clientX, y: touch.clientY, t: e.timeStamp, dragging: false, lastX: touch.clientX, lastT: e.timeStamp, v: 0 }
+        ? { x: touch.clientX, y: touch.clientY, dragging: false, lastX: touch.clientX, samples: [] }
         : null;
-      if (g) stop = track(onMove, onEnd);
+      if (g) { prepareBelow(); stop = track(onMove, onEnd); }
     };
     const onMove = (e: TouchEvent) => {
       if (!g) return;
       const touch = e.touches[0];
-      const dx = touch.clientX - g.x;
-      const dy = touch.clientY - g.y;
       if (!g.dragging) {
-        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }
+        const dx = touch.clientX - g.x;
+        const dy = touch.clientY - g.y;
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { g = null; hideBelow(); return; }
         if (dx < 8) return;
         g.dragging = true;
-        showBelow();
+        g.x = touch.clientX;          // the page starts moving from here: no jump of the 8 px it took to tell a drag
+        revealBelow();
       }
       if (e.cancelable) e.preventDefault();
-      const dt = e.timeStamp - g.lastT;
-      if (dt > 0) g.v = (touch.clientX - g.lastX) / dt;
       g.lastX = touch.clientX;
-      g.lastT = e.timeStamp;
-      set(Math.max(0, dx), false);
+      g.samples.push({ x: touch.clientX, t: e.timeStamp });
+      if (g.samples.length > 12) g.samples.shift();
+      set(Math.max(0, touch.clientX - g.x));
     };
     const onEnd = (cancelled: boolean) => {
-      if (!g?.dragging) { g = null; return; }
-      const dx = g.lastX - g.x;
+      if (!g?.dragging) { g = null; hideBelow(); return; }
+      const dx = Math.max(0, g.lastX - g.x);
+      const v = speed(g.samples);
       const w = window.innerWidth;
-      const go = !cancelled && swipeBackAllowed() && (dx > w * 0.35 || (dx > 40 && g.v > 0.35));
+      // far enough, or thrown; a finger flicked back toward the edge keeps the page
+      const go = !cancelled && swipeBackAllowed() && v > -0.2 && (dx > w * 0.35 || (dx > 40 && v > 0.35));
       g = null;
-      const back = () => { set(0, true); window.setTimeout(hideBelow, 340); };
-      if (!go) { back(); return; }
+      // The page carries on at the finger's speed: this curve starts at about 2.2 times its average speed, so the
+      // time is the distance left over that speed, kept between a quick snap and an unhurried glide.
+      const glide = (distance: number) => (reducedMotion() ? 0
+        : Math.round(Math.min(380, Math.max(160, (2.2 * distance) / Math.max(Math.abs(v), 0.6)))));
+      const back = (from: number) => {
+        const ms = glide(from);
+        set(0, ms);
+        window.setTimeout(() => {
+          const main = mainEl();
+          if (main && !main.style.transform) main.classList.remove("swiping");    // not if a new drag has started
+          hideBelow();
+        }, ms + 40);
+      };
+      if (!go) { back(dx); return; }
       const mine = ++swipes;
       leaving = mine;
-      set(w, !reducedMotion());
+      const ms = glide(w - dx);
+      set(w, ms);
+      // the page leaves all the way before the one below takes its place: nothing is swapped in the middle of the motion
       window.setTimeout(() => {
         skipNextAnimation();
         onBack();
         // the history had nothing to go back to after all: this page comes back instead of staying off screen
-        window.setTimeout(() => { if (leaving === mine) { leaving = 0; back(); } }, 600);
-      }, reducedMotion() ? 0 : 230);
+        window.setTimeout(() => { if (leaving === mine) { leaving = 0; back(w); } }, 600);
+      }, ms);
     };
     window.addEventListener("touchstart", onStart, { passive: true });
     return () => { window.removeEventListener("touchstart", onStart); stop(); };
@@ -243,6 +275,7 @@ function hideBelow() {
   box.hidden = true;
   box.replaceChildren();
   box.style.transform = "";
+  box.style.visibility = "";
 }
 
 /** After a swipe back, the page that comes in sits in place (called once the new page is on screen). */

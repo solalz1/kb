@@ -51,7 +51,7 @@ export function haptic() {
  *  start of a scroll, as on an iPhone; a quick tap still shows it. A mouse uses :active (styles.css). */
 const PRESSABLE = ".btn, .chip, .pill, .icon-link, .icon-btn, .seg button, .drop, .suggestions button, .cal-day, .composer .send, " +
   ".menu button, .item-tools button, .settings-nav a, .fiche, .folder-card, .resurface-card, .resurface-note, .related, .source, " +
-  ".check-card, a.group-row, label.group-row, .back, .linkish, .tabbar a, .wiki-card, .compact-title, .compact-back";
+  ".check-card, a.group-row, label.group-row, .back, .linkish, .tabbar a, .wiki-card, .compact-title, .compact-back, .entry-open";
 export function pressFeedback() {
   let el: Element | null = null;
   let timer = 0;

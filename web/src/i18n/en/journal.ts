@@ -15,6 +15,7 @@ export default {
   "Voir la fiche": "Open the card",
   "Modifier": "Edit",
   "Modifier la note": "Edit the note",
+  "Jour": "Day",
   "Résumé, tags et liens": "Summary, tags and links",
   "Supprimer cette note du journal ?": "Delete this journal note?",
   "Rien pour ce jour. Tu peux déjà y noter ce que tu prévois.": "Nothing for this day yet. You can already note what you're planning.",

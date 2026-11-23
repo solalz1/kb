@@ -227,9 +227,15 @@ def test_journal_write_edit_delete(site):
     page.reload()
     expect(page.locator(".entry")).to_have_count(1)
 
-    page.get_by_role("button", name="Modifier").click()
+    # the note itself is what you touch to change it
+    page.locator(".entry-open").click()
     page.get_by_label("Modifier la note").fill("Course le matin, puis bibliothèque.")
     page.get_by_role("button", name="Enregistrer").click()
+    expect(page.locator(".entry-text")).to_have_text("Course le matin, puis bibliothèque.")
+    # Escape leaves it as it was
+    page.locator(".entry-open").click()
+    page.get_by_label("Modifier la note").fill("Pas gardé.")
+    page.keyboard.press("Escape")
     expect(page.locator(".entry-text")).to_have_text("Course le matin, puis bibliothèque.")
 
     page.get_by_label("Ajouter une note à ce jour").fill("Le soir : appel avec ma sœur.")
@@ -238,9 +244,47 @@ def test_journal_write_edit_delete(site):
     expect(page.get_by_text("2 notes ce mois-ci")).to_be_visible()
 
     page.once("dialog", lambda d: d.accept())
-    page.locator(".entry").first.get_by_role("button", name="Supprimer").click()
+    page.locator(".entry-open").first.click()
+    page.locator(".entry-edit").get_by_role("button", name="Supprimer").click()
     expect(page.locator(".entry")).to_have_count(1)
     expect(page.locator(".entry-text")).to_have_text("Le soir : appel avec ma sœur.")
+
+
+def test_move_a_journal_note_to_another_day(site):
+    """A journal note goes to another day from the calendar (its day changes where its text does) or from « Modifier la
+    note »: it joins that day's other notes, in the order they were written, and the page follows it there."""
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()       # the browser's day, not the test runner's (UTC)
+    yesterday = (today - timedelta(days=1)).isoformat()
+    earlier = (today - timedelta(days=4)).isoformat()
+    page = site("/journal")
+    first = _api(page, "POST", "/api/notes", content="Hier soir : dîner avec Léa.", category="journal",
+                 entry_date=yesterday)["body"]["id"]
+    _api(page, "POST", "/api/notes", content="Écrit ce matin, mais c'était hier.", category="journal")
+    page.reload()
+    page.locator(".entry-open").click()
+    page.get_by_label("Jour", exact=True).fill(yesterday)
+    page.get_by_role("button", name="Enregistrer").click()
+    expect(page).to_have_url(re.compile(rf"/journal/{yesterday}$"))
+    expect(page.locator(".entry-text")).to_have_text(["Hier soir : dîner avec Léa.", "Écrit ce matin, mais c'était hier."])
+    expect(page.locator(".entry.landed")).to_contain_text("Écrit ce matin")
+    assert _api(page, "GET", f"/api/journal/{today.isoformat()}")["body"]["entries"] == []
+
+    # « Modifier la note » shows the day too
+    page.goto(f"/note/{first}/edit")
+    expect(page.get_by_label("Jour du journal")).to_have_value(yesterday)
+    page.get_by_label("Jour du journal").fill(earlier)
+    page.get_by_role("button", name="Enregistrer").click()
+    expect(page).to_have_url(re.compile(rf"/item/{first}$"))
+    assert [e["id"] for e in _api(page, "GET", f"/api/journal/{earlier}")["body"]["entries"]] == [first]
+
+    # a new note written as « Journal » in the editor goes on the day picked there
+    page.goto("/note/new?category=journal")
+    page.get_by_label("Jour du journal").fill(earlier)
+    page.get_by_label("Texte").fill("Ajouté après coup.")
+    page.get_by_role("button", name="Enregistrer").click()
+    expect(page).to_have_url(re.compile(r"/item/"))
+    texts = [e["text"] for e in _api(page, "GET", f"/api/journal/{earlier}")["body"]["entries"]]
+    assert texts == ["Hier soir : dîner avec Léa.", "Ajouté après coup."]
 
 
 def test_journal_other_days(site):
@@ -1056,6 +1100,38 @@ def test_swipe_back_after_a_link_and_twice_in_a_row(site):
     expect(page.get_by_role("heading", name="Qu'est-ce que tu gardes ?")).to_be_visible()
     page.get_by_role("button", name="Annuler").click()
     expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+
+
+def test_swipe_back_from_a_journal_day(site):
+    """Days picked in the journal's calendar don't pile up in the history: from any of them, a finger from the left edge
+    takes the journal back to Perso, which shows under the page the whole way (not an empty page, then another day)."""
+    page = site("/perso", touch=True)
+    page.context.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true });")
+    page.reload()
+    page.locator(".journal-today").get_by_role("link", name="Voir le calendrier").click()
+    expect(page).to_have_url(re.compile(r"/journal$"))
+    _settled(page)
+    start = page.evaluate("history.state.idx")
+    expect(page.locator(".cal-day[aria-current='date']")).to_be_visible()
+    first, second = page.locator(".cal-day:not(.empty)").evaluate_all("els => els.slice(0, 2).map(e => e.dataset.day)")
+    for day in (first, second):
+        page.locator(f".cal-day[data-day='{day}']").click()
+        expect(page.locator(f".cal-day[data-day='{day}']")).to_have_attribute("aria-pressed", "true")
+    assert page.evaluate("history.state.idx") == start
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": 6, "y": 420}]})
+    under = page.locator(".swipe-under")
+    expect(under).to_be_hidden()                         # copied already, unseen until the finger moves
+    for i in range(1, 8):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 6 + i * 15, "y": 420}]})
+    expect(under).to_be_visible()
+    expect(under.locator(".main-copy .journal-today")).to_have_count(1)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 300, "y": 420}]})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    expect(page.get_by_role("heading", name="Perso", exact=True)).to_be_visible()
+    expect(page).to_have_url(re.compile(r"/perso$"))
+    expect(under).to_be_hidden()
+    page.wait_for_function("() => document.querySelector('.main').style.transform === ''")
 
 
 def test_a_new_conversation_while_an_answer_streams(site, monkeypatch):
