@@ -17,5 +17,5 @@ pillow>=10
 pillow-heif>=0.18
 markitdown[docx,pptx,xlsx]>=0.1.2
 feedparser>=6.0
-sentry-sdk>=2.0         # optional error reports, see SETUP step 16
+sentry-sdk>=2.0,<3      # optional error reports, see SETUP step 16; 3.0 refuses include_local_variables (app/monitoring.py)
 tzdata>=2024.1
