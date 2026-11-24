@@ -211,7 +211,9 @@ img { max-width: 100%; display: block; }
 
 /* the page's own layer: a finger can drag it away (Gestures.tsx), uncovering the shade and the pull-to-reload badge */
 .main { flex: 1; min-width: 0; position: relative; z-index: 1; background: var(--desk); }
-.main.swiping { box-shadow: var(--edge-shadow); }
+/* swiped from the left edge: its own layer while it moves, so a long page slides without being painted again */
+.main.swiping { box-shadow: var(--edge-shadow); will-change: transform; }
+.swipe-under:not([hidden]) { will-change: transform; }
 .swipe-shade { position: fixed; inset: 0; z-index: 0; background: rgba(43, 34, 25, 0.12); opacity: 0; pointer-events: none; }
 /* under a page swiped away from the left edge: the page it goes back to (a still copy, Gestures.tsx) */
 .swipe-under { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--desk); pointer-events: none; }
@@ -1112,14 +1114,28 @@ label.group-row { cursor: pointer; }
 .day-head h2 { margin: 0; font-family: var(--serif); font-size: 22px; font-weight: 500; letter-spacing: -0.01em; }
 .day-head .today { font-size: 12px; font-weight: 600; color: var(--accent-ink); }
 .entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-.entry { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 14px; background: var(--tint); }
-.entry-head { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-3); }
-.entry-head .time { font-weight: 600; }
-.entry-actions { margin-left: auto; display: flex; gap: 2px; }
-.entry-actions .icon-btn { width: 32px; height: 32px; }
-.entry-text { margin: 0; white-space: pre-wrap; font-family: var(--serif); font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
-.entry-link { font-size: 13px; align-self: flex-start; }
-.entry-edit { display: flex; flex-direction: column; gap: 8px; }
+/* a note of the day is one surface: touched, it opens for changes (its words, its day) */
+.entry { display: flex; flex-direction: column; border-radius: 14px; background: var(--tint); transition: transform 0.32s var(--spring); }
+.entry-open {
+  display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 14px 16px; border: 0; border-radius: inherit;
+  background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.entry-open:disabled { cursor: default; }
+.entry-head { display: flex; align-items: center; gap: 10px; min-height: 18px; font-size: 12px; color: var(--ink-3); }
+.entry-head .time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.entry-pen { margin-left: auto; color: var(--ink-3); transition: color 0.15s; }
+@media (hover: hover) { .entry-open:hover .entry-pen { color: var(--accent-ink); } }
+.entry:has(> .entry-open.is-pressed) { transform: scale(0.98); }
+@media (pointer: fine) { .entry:has(> .entry-open:active:not(:disabled)) { transform: scale(0.98); } }
+.entry-text { display: block; margin: 0; white-space: pre-wrap; font-family: var(--serif); font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
+.entry-link { font-size: 13px; align-self: flex-start; margin: -6px 16px 14px; }
+.entry-edit { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
+.entry-edit .journal-day .field { height: 44px; border-radius: 12px; background: var(--surface); }
+.entry-edit .btn-row { gap: 8px 12px; }
+.entry-delete { margin-left: auto; color: var(--accent-ink); }
+/* moved here from another day: a ring that fades, so the eye finds it among the others */
+.entry.landed { animation: entry-landed 1.6s var(--ease-ios) both; }
+@keyframes entry-landed { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
 .composer-journal { display: flex; flex-direction: column; gap: 8px; }
 .composer-journal .actions { display: flex; align-items: center; gap: 12px; }
 .composer-journal .btn { flex: 1; }
@@ -1164,7 +1180,10 @@ label.group-row { cursor: pointer; }
   .day-head { gap: 10px; padding-top: 0; }
   .day-head h2 { font-size: 28px; }
   .day-head .today { font-size: 13px; }
-  .entry { padding: 18px 22px; gap: 8px; border-radius: 16px; }
+  .entry { border-radius: 16px; }
+  .entry-open, .entry-edit { padding: 18px 22px; gap: 8px; }
+  .entry-edit { gap: 12px; }
+  .entry-link { margin: -8px 22px 18px; }
   .entry-head { font-size: 13px; }
   .entry-text { font-size: 18px; line-height: 1.45; }
   .composer-journal .btn { flex: none; height: 44px; padding: 0 18px; }

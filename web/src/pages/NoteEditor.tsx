@@ -9,10 +9,12 @@ import { useNavigate } from "../nav";
 import { CATEGORIES, categoryOf, isEditableNote, spaceHome } from "../perso";
 import { keys } from "../queries";
 import { canGoBack } from "../motion";
+import { dayLabel, isDayKey, keyOf, parseKey } from "../days";
 
 const DRAFT_KEY = "kb_note_draft";
 
-interface Draft { title: string; content: string; space: Space; category: string; tags: string }
+/** `day`: the journal day a journal note belongs to (YYYY-MM-DD; today if not set). */
+interface Draft { title: string; content: string; space: Space; category: string; tags: string; day?: string }
 
 function readDraft(): Draft | null {
   try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; }
@@ -30,10 +32,14 @@ export default function NoteEditor() {
 
   const draft = editing ? null : readDraft();
   const hasDraft = Boolean(draft && draft.content.trim());
+  // computed once: a page left open past midnight keeps the day it showed
+  const [todayKey] = useState(() => keyOf(new Date()));
   const fresh = (): Draft => {
     const cat = params.get("category");
     const space = (params.get("space") === "main" ? "main" : "perso") as Space;
-    return { title: "", content: "", space: cat ? "perso" : space, category: cat && categoryOf(cat) ? cat : "", tags: "" };
+    const day = params.get("day");
+    return { title: "", content: "", space: cat ? "perso" : space, category: cat && categoryOf(cat) ? cat : "", tags: "",
+             day: isDayKey(day) ? day : undefined };
   };
   const [form, setForm] = useState<Draft>(() => (hasDraft ? draft! : fresh()));
   const [restored, setRestored] = useState(hasDraft);
@@ -49,7 +55,9 @@ export default function NoteEditor() {
     (cached ? Promise.resolve(cached) : api.item(id, false)).then((it) => {
       if (!isEditableNote(it)) { setError(t("Seules les notes écrites se modifient ici. Pour un lien ou un fichier, change le titre, la note ou les tags depuis sa fiche.")); return; }
       setOriginal(it);
-      setForm({ title: it.title ?? "", content: it.content ?? it.input_text ?? "", space: it.space, category: it.category ?? "", tags: "" });
+      setForm({ title: it.title ?? "", content: it.content ?? it.input_text ?? "", space: it.space, category: it.category ?? "", tags: "",
+                // a note filed in the journal now belongs to the day it was written, unless another is picked
+                day: it.entry_date ?? keyOf(new Date(it.created_at)) });
     }).catch((e) => setError(e.message));
   }, [id]);
 
@@ -64,6 +72,8 @@ export default function NoteEditor() {
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => { setForm((f) => ({ ...f, [key]: value })); setError(""); };
   const cat = categoryOf(form.category);
   const perso = form.space === "perso";
+  const journal = perso && form.category === "journal";
+  const day = form.day ?? todayKey;
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,12 +86,15 @@ export default function NoteEditor() {
         if (form.content.trim() !== (original.content ?? original.input_text ?? "").trim()) body.content = form.content.trim();
         if (form.space !== original.space) body.space = form.space;
         if ((form.category || null) !== (original.category || null)) body.category = form.category || null;
+        // a journal note moved to another day (or just filed in the journal: the day picked, if one was)
+        if (journal && form.day && form.day !== (original.entry_date ?? undefined)) body.entry_date = form.day;
         if (Object.keys(body).length) await api.patch(original.id, body);
         nav(`/item/${original.id}`, { replace: true });
       } else {
         const tags = form.tags.split(",").map((x) => x.trim()).filter(Boolean);
         const res = await api.createNote({ content: form.content.trim(), title: form.title.trim() || undefined,
-                                           space: form.space, category: perso ? form.category || null : null, tags });
+                                           space: form.space, category: perso ? form.category || null : null, tags,
+                                           ...(journal ? { entry_date: day } : {}) });
         writeDraft(null);
         nav(`/item/${res.id}`, { replace: true });
       }
@@ -132,6 +145,17 @@ export default function NoteEditor() {
                 <button type="button" key={c.id} className="chip sm" aria-pressed={form.category === c.id}
                         onClick={() => set("category", form.category === c.id ? "" : c.id)}>{c.label}</button>
               ))}
+            </div>
+          )}
+
+          {journal && (
+            <div className="journal-day">
+              <label className="label" htmlFor="note-day">{t("Jour du journal")}</label>
+              <input id="note-day" className="field" type="date" value={day} required
+                     onChange={(e) => { if (isDayKey(e.target.value)) set("day", e.target.value); }} />
+              <span className="hint">
+                {day === todayKey ? t("Aujourd'hui · {day}", { day: dayLabel(parseKey(day), false) }) : dayLabel(parseKey(day))}
+              </span>
             </div>
           )}
 
